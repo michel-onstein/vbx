@@ -163,9 +163,7 @@ struct LabelHealthCard: View {
             }
 
             Button {
-                store.query.labels = [health.label]
-                store.query.filter = .all
-                store.surface = .list
+                store.showLabelInList(health.label)
             } label: {
                 Text("Show in list").font(.caption)
             }
