@@ -21,6 +21,10 @@ struct ToolbarControlsTests {
     private static let ordered: Set<ViewSurface> = [.list, .board, .graph, .tree]
 
     /// Ignores the query, but keeps the controls pending a decision of its own.
+    ///
+    /// Tracked as vbx-ec6. When that is answered this set should be empty —
+    /// either History gains a filter and sort that mean something in its own
+    /// terms, or it joins the seven below.
     private static let deferred: Set<ViewSurface> = [.history]
 
     @Test("Only the views that order beads offer the controls")

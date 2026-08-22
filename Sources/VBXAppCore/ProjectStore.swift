@@ -81,7 +81,7 @@ public enum ViewSurface: String, CaseIterable, Identifiable, Sendable {
     /// is still being decided. ``history`` is the one such case today — it
     /// ignores the query like the rest, but how it should relate to the
     /// revision scrubber is a separate question, so it keeps the controls until
-    /// that is answered.
+    /// that is answered. Tracked as vbx-ec6.
     public var showsFilterAndSort: Bool {
         switch self {
         case .list, .board, .graph, .tree: true
