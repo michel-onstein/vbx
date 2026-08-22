@@ -152,7 +152,7 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 
 | `bv` view | `vbx` surface | Mechanism | Phase |
 |---|---|---|---|
-| List view with virtualization | SwiftUI `Table`, lazy, multi-select, sortable columns | Native | 0 |
+| List view with virtualization | `NSTableView` via `NSViewRepresentable`, multi-select, sortable columns, per-cell editing | Native | 0 |
 | Sort modes (default, created ↑/↓, priority, updated) | Column-header sorting + a Sort menu preserving `bv`'s exact orderings | Engine + Native | 0 |
 | Filters: open / ready / closed / all | Sidebar filter section + toolbar segmented control | Engine + Native | 0 |
 | Fuzzy search | `.searchable` field | Engine + Native | 0 |

@@ -122,14 +122,21 @@ view snapshots for inspection.
   `Sources/vbx/Intents.swift` compile and execute correctly but are only *listed*
   in Shortcuts when the app is built through Xcode, or when that step is added
   to `scripts/build-app.sh`.
-- **A gesture on `Table` cell content is not a reliable row action.** Priority
-  editing shipped as `onTapGesture(count: 2)` on a cell and did nothing in the
-  running app. Use `contextMenu(forSelectionType:)` or `primaryAction:`.
-  The widget itself is not the limit: a `TextField` in a cell is a real editable
-  `NSTextField`, one per row.
-- **Synthetic clicks do not reach `Table` content headlessly.** Measured: a
-  synthetic click presses a plain SwiftUI `Button`, but inside a `Table` it
-  neither focuses an editable `TextField` nor fires `primaryAction`. Any
+- **The bead list is `NSTableView`** (`Sources/VBXUI/BeadTable.swift`), because
+  per-cell editing needs to know which cell was hit and SwiftUI's `Table` cannot
+  say. Cell *appearance* is still SwiftUI, hosted in the cell. See ADR-014.
+- **Columns are declared once, in `IssueListView.specs`.** A sortable column's
+  identifier must equal its `SortColumn` raw value — the sort descriptor's key
+  is the raw value while the chevron is drawn on the matching identifier.
+- **The stored layout key is `issueListLayout`**, holding a `BeadTableLayout` as
+  JSON. The old `issueListColumnCustomization` held a SwiftUI type and is dead;
+  a layout saved before the move is ignored and the columns reset once.
+- **Hidden columns stay in the table with `isHidden`**, never removed —
+  `HiddenColumnMarkers` finds where a column *was* by walking the table's
+  columns, and a column that is gone has no position.
+- **Synthetic clicks do not reach table content headlessly.** Measured: a
+  synthetic click presses a plain SwiftUI `Button`, but inside a table it
+  neither focuses an editable `NSTextField` nor fires a double-click action. Any
   headless test concluding "the click did nothing" is testing the harness.
 - **The demo fixture's dependency rows need `created_at`.** `br`'s preflight
   requires it and refuses the entire workspace without it — `br update` on the

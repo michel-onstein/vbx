@@ -663,7 +663,7 @@ Native affordances that replace TUI mechanics:
 
 | `bv` view | `vbx` surface | Native technology | Notes |
 |---|---|---|---|
-| **List** | `Table` with sortable columns | SwiftUI `Table` (NSTableView-backed) | Columns: ID, title, status, priority, type, assignee, labels, PageRank, unblocks, updated. Column visibility persisted. Multi-select. |
+| **List** | `Table` with sortable columns | `NSTableView` via `NSViewRepresentable` (`BeadTable`); cell appearance is SwiftUI | Columns: ID, title, status, priority, type, labels, PageRank, blocks, blocked-by, created, updated. Column visibility, order and width persisted. Multi-select. Double-click edits the cell that was clicked — see ADR-014. |
 | **Kanban board** | Column-per-status board | `LazyHStack` + `LazyVStack`, drag-and-drop | Four-line rich cards, per-column stats header, inline expansion via disclosure, swimlane grouping (label / assignee / type / epic) as a segmented control |
 | **Graph** | Pan/zoom canvas | `BeadsGraphKit`: layered layout + `Canvas`/Metal | See [§11](#11-graph-rendering) |
 | **Tree** | Parent–child outline | `OutlineGroup` in a source-list `Table` | Expand/collapse all, keyboard `←/→`, reveal-in-graph |

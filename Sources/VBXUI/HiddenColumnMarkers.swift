@@ -27,7 +27,11 @@ struct HiddenColumnMarkers: NSViewRepresentable {
 
     /// Changes to this trigger `updateNSView`, which is what keeps the markers
     /// in step with hiding and showing.
-    let customization: TableColumnCustomization<IssueRow>
+    ///
+    /// Only its identity matters — the markers themselves are measured off the
+    /// real `NSTableView`, which is the only thing that knows where the columns
+    /// actually are.
+    let layout: BeadTableLayout
 
     /// Called with the header titles of the run the user double-clicked.
     let unhide: ([String]) -> Void

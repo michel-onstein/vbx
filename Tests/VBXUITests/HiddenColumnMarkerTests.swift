@@ -20,21 +20,19 @@ private final class FlippedContainer: NSView {
 @Suite("Hidden column markers", .serialized)
 struct HiddenColumnMarkerTests {
 
-    private static let storageKey = "issueListColumnCustomization"
+    private static let storageKey = "issueListLayout"
 
     /// Hosts the real list with `hidden` put away, and hands back the backing
     /// table alongside the overlay the markers are measured against.
     private func hostedTable(
         hiding hidden: [SortColumn]
     ) async throws -> (table: NSTableView, overlay: NSView, store: ProjectStore) {
-        var customization = TableColumnCustomization<IssueRow>()
-        for column in hidden {
-            customization[visibility: column.rawValue] = .hidden
-        }
-        // @AppStorage persists this as JSON Data; seeding the same shape is
-        // what puts a layout in front of the view before it is built.
-        UserDefaults.standard.set(
-            try JSONEncoder().encode(customization), forKey: Self.storageKey)
+        var layout = BeadTableLayout()
+        layout.hidden = Set(hidden.map(\.rawValue))
+        // `@AppStorage` persists a `RawRepresentable` as its raw value — a
+        // String here, not Data. Seeding the same shape is what puts a layout
+        // in front of the view before it is built.
+        UserDefaults.standard.set(layout.rawValue, forKey: Self.storageKey)
 
         let store = await Fixture.loadedStore()
         let host = NSHostingView(
@@ -71,15 +69,35 @@ struct HiddenColumnMarkerTests {
         await store.close()
     }
 
-    @Test("SwiftUI's Table is still backed by an NSTableView")
+    @Test("The list is an NSTableView carrying every declared column")
     func backingTableIsReachable() async throws {
-        // This is the assumption the whole feature rests on, and it is an
-        // implementation detail rather than a contract. If a future macOS backs
-        // Table with something else, this fails loudly here instead of the
-        // markers quietly never appearing.
+        // This used to be a bet on an implementation detail — the markers read
+        // an `NSTableView` that SwiftUI's `Table` happened to be built on, and
+        // a future macOS could have backed it with something else. `BeadTable`
+        // owns the table now, so this is a contract rather than a hope.
+        //
+        // Still worth asserting: the markers measure column positions off this
+        // table, so a column that never reaches it is a marker that never
+        // appears.
         let (table, _, store) = try await hostedTable(hiding: [])
-        #expect(table.tableColumns.count == 11)
+        #expect(table.tableColumns.count == IssueListView.specs.count)
+        #expect(
+            table.tableColumns.map(\.identifier.rawValue) == IssueListView.specs.map(\.id),
+            "the table's columns are not the declared ones, in order")
         #expect(table.tableColumns.allSatisfy { !$0.isHidden })
+        await cleanUp(store)
+    }
+
+    @Test("A hidden column stays in the table, marked hidden")
+    func hiddenColumnsRemain() async throws {
+        // Not removed: the markers draw the rule showing *where* a column was
+        // put away, and they find that position by walking the table's columns
+        // and reading `isHidden`. A column that is gone has no position.
+        let (table, _, store) = try await hostedTable(hiding: [.status])
+        #expect(table.tableColumns.count == IssueListView.specs.count)
+        let status = try #require(
+            table.tableColumns.first { $0.identifier.rawValue == SortColumn.status.rawValue })
+        #expect(status.isHidden)
         await cleanUp(store)
     }
 
@@ -159,10 +177,13 @@ struct HiddenColumnMarkerTests {
         await cleanUp(store)
     }
 
-    @Test("Every column title maps to a customization ID")
+    @Test("Every column title resolves back to a column")
     func titlesCoverEveryColumn() async throws {
-        // The double-click restores columns by header title, so a title missing
-        // from the map is a column that can be hidden and never brought back.
+        // The double-click restores columns by header title, so a title that
+        // does not resolve is a column that can be hidden and never brought
+        // back. There used to be a hand-maintained title→id map to keep in
+        // step; the specs are the single declaration now, and this checks the
+        // lookup `unhide(titled:)` performs against the real table's headers.
         let (table, _, store) = try await hostedTable(hiding: [])
         for column in table.tableColumns {
             let title = column.headerCell.stringValue
@@ -170,10 +191,18 @@ struct HiddenColumnMarkerTests {
             // entry.
             guard !title.isEmpty else { continue }
             #expect(
-                IssueListView.columnIDsByTitle[title] != nil,
-                "\(title) has no customization ID, so it could not be unhidden")
+                IssueListView.specs.contains { $0.title == title },
+                "\(title) resolves to no column, so it could not be unhidden")
         }
         await cleanUp(store)
+    }
+
+    @Test("No two columns share a title")
+    func titlesAreUnique() {
+        // `unhide(titled:)` looks a column up by its header title, so two
+        // columns sharing one would make the marker bring back the wrong one.
+        let titles = IssueListView.specs.map(\.title).filter { !$0.isEmpty }
+        #expect(titles.count == Set(titles).count, "duplicate column titles: \(titles)")
     }
 
     @Test("The overlay only intercepts clicks on a rule")

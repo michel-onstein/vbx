@@ -5,6 +5,36 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-22 — The bead list moved to NSTableView, and titles are editable
+
+Asked whether we were using the wrong widget, given that double-click-to-edit is
+ordinary macOS behaviour. The honest answer was no — SwiftUI's `Table` renders
+editable cells fine — but it cannot say *which cell* was double-clicked, and
+that is the thing more editing needs. So the list is `NSTableView` behind an
+`NSViewRepresentable` now, with `clickedRow` and `clickedColumn` doing the work.
+
+Cell appearance stayed SwiftUI, hosted in the cell. That kept the whole visual
+layer — chips, pills, badges, metric placeholders — unchanged, and is why the
+diff is much smaller than replacing a table usually is.
+
+Title editing is the first thing it buys: double-click a title, the field editor
+opens in place, Return commits through `br update --title`. A title full of
+quotes, `$` and backticks survives, because the argument vector goes to
+`Process` and never through a shell — asserted, since that is the kind of thing
+that is fine until someone adds a shell.
+
+Two things fell out of the move. A column is declared once now, so the tests
+that used to *parse `IssueListView.swift` as text* to pin column order and
+identifiers became ordinary assertions — those parsers had silently matched
+nothing the moment the table changed shape, which is how they were noticed. And
+`PriorityCell` is deleted; its popover was the mechanism that never worked.
+
+Also fixed on the way: a `Codable` + `RawRepresentable` layout type that
+recursed into itself and took the whole test runner down with SIGSEGV. See
+BUGS.md — `--no-parallel` is what found it. ADR-014 has the decision.
+
+---
+
 ## 2026-08-22 — Two bugs found by running the app, and a third underneath
 
 Both reported from a real build: priority editing missing, and the About window

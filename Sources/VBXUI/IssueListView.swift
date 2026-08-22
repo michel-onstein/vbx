@@ -1,123 +1,81 @@
+import AppKit
 import VBXAppCore
 import VBXCore
 import SwiftUI
 
-/// Native sortable table. Metric columns render a placeholder rather than a
-/// zero until Phase 2 lands.
+/// Native sortable table, over `NSTableView`. Metric columns render a
+/// placeholder rather than a zero until Phase 2 lands.
 ///
 /// Sorting is driven from ``ProjectStore/query``'s single `sort` value rather
 /// than from table-local state. The toolbar menu, bv's `s` cycle and a header
 /// click all write that one value, so the header chevron and the cycle can
 /// never disagree about the current order.
+///
+/// The table itself is ``BeadTable`` — see there for why this is not SwiftUI's
+/// `Table`. What stayed SwiftUI is every cell's appearance: the column content
+/// below is the same set of views as before.
 struct IssueListView: View {
     @EnvironmentObject var store: ProjectStore
 
     /// Which columns are on screen, in what order, at what width.
     ///
-    /// `TableColumnCustomization` gives the header its own right-click menu for
-    /// showing and hiding columns, which is the affordance a macOS table is
-    /// expected to have — there is nothing to hand-roll. Through `@AppStorage`
-    /// it is also what remembers the choice between launches.
-    ///
     /// The key is a persistence contract: it holds users' saved layouts, so it
-    /// must not be renamed casually. The same is true of every
-    /// `customizationID` below, which is why they are taken from
-    /// ``SortColumn`` rather than written out twice.
-    @AppStorage("issueListColumnCustomization")
-    private var columnCustomization: TableColumnCustomization<IssueRow>
+    /// must not be renamed casually. It is a *new* key — the previous one held
+    /// a `TableColumnCustomization`, a SwiftUI type that cannot describe this
+    /// table — so a layout saved before this change is ignored and the columns
+    /// come back at their defaults, once.
+    @AppStorage("issueListLayout")
+    private var layout = BeadTableLayout()
 
-    /// Columns that must stay on screen whatever the stored layout says.
+    /// Every column, declared once.
     ///
-    /// The identifier, because every context menu, bead link and URL is keyed
-    /// by it; the type glyph, because it is 22pt of context rather than a
-    /// column to manage.
-    static let protectedColumnIDs = [SortColumn.id.rawValue, "type"]
+    /// Previously a column was declared three times — the `TableColumn`, its
+    /// `customizationID`, and a title→id map the hidden-column markers read —
+    /// with a test whose whole job was catching those drift apart. One value
+    /// each now, and that test is unnecessary.
+    static let specs: [BeadColumnSpec] = [
+        BeadColumnSpec(
+            id: SortColumn.id.rawValue, title: "ID", sort: .id,
+            width: 96, minWidth: 70, maxWidth: 160, isProtected: true),
+        BeadColumnSpec(
+            id: SortColumn.priority.rawValue, title: "P", sort: .priority,
+            width: 30, minWidth: 30, maxWidth: 44, editing: .priority),
+        BeadColumnSpec(
+            id: "type", title: "", width: 22, minWidth: 22, maxWidth: 22, isProtected: true),
+        BeadColumnSpec(
+            id: SortColumn.title.rawValue, title: "Title", sort: .title,
+            width: 360, minWidth: 200, maxWidth: 4000, editing: .text),
+        BeadColumnSpec(
+            id: SortColumn.status.rawValue, title: "Status", sort: .status,
+            width: 110, minWidth: 90, maxWidth: 140),
+        BeadColumnSpec(
+            id: SortColumn.blocks.rawValue, title: "Blocks", sort: .blocks,
+            width: 52, minWidth: 52, maxWidth: 80),
+        BeadColumnSpec(
+            id: SortColumn.blockedBy.rawValue, title: "Blocked by", sort: .blockedBy,
+            width: 74, minWidth: 74, maxWidth: 110),
+        BeadColumnSpec(
+            id: SortColumn.pageRank.rawValue, title: "PageRank", sort: .pageRank,
+            width: 86, minWidth: 76, maxWidth: 120),
+        BeadColumnSpec(
+            id: SortColumn.labels.rawValue, title: "Labels", sort: .labels,
+            width: 140, minWidth: 80, maxWidth: 4000),
+        BeadColumnSpec(
+            id: SortColumn.created.rawValue, title: "Created", sort: .created,
+            width: 100, minWidth: 80, maxWidth: 140),
+        BeadColumnSpec(
+            id: SortColumn.updated.rawValue, title: "Updated", sort: .updated,
+            width: 100, minWidth: 80, maxWidth: 140),
+    ]
 
-    /// The stored layout with the protected columns forced visible.
-    ///
-    /// `disabledCustomizationBehavior(.all)` removes those columns from the
-    /// header menu, but it does **not** enforce anything: a stored layout that
-    /// marks them hidden still hides them, which was measurable before this
-    /// existed. Sanitising on the way in and out is what actually keeps them
-    /// on screen — the menu entry and the enforcement are separate problems.
-    private var sanitizedCustomization: Binding<TableColumnCustomization<IssueRow>> {
-        Binding(
-            get: {
-                var customization = columnCustomization
-                for id in Self.protectedColumnIDs {
-                    customization[visibility: id] = .visible
-                }
-                return customization
-            },
-            set: { updated in
-                var customization = updated
-                for id in Self.protectedColumnIDs {
-                    customization[visibility: id] = .visible
-                }
-                columnCustomization = customization
-            }
-        )
-    }
+    /// bv's range. Beyond P4 is backlog, and `br` rejects it.
+    static let priorities = 0...4
 
     /// The columns the user has put away.
     private var hiddenColumns: Set<SortColumn> {
-        Set(
-            SortColumn.allCases.filter {
-                columnCustomization[visibility: $0.rawValue] == .hidden
-            })
-    }
-
-    /// Header title to customization ID.
-    ///
-    /// The backing `NSTableColumn` identifiers are UUIDs SwiftUI assigns, not
-    /// the customization IDs, so the header title is the one stable thing the
-    /// two sides share. `ColumnCustomizationTests` asserts this covers every
-    /// declared column, so a new column cannot quietly fall out of it.
-    static let columnIDsByTitle: [String: String] = [
-        "ID": SortColumn.id.rawValue,
-        "P": SortColumn.priority.rawValue,
-        "Title": SortColumn.title.rawValue,
-        "Status": SortColumn.status.rawValue,
-        "Blocks": SortColumn.blocks.rawValue,
-        "Blocked by": SortColumn.blockedBy.rawValue,
-        "PageRank": SortColumn.pageRank.rawValue,
-        "Labels": SortColumn.labels.rawValue,
-        "Created": SortColumn.created.rawValue,
-        "Updated": SortColumn.updated.rawValue,
-    ]
-
-    /// Brings back the run of columns behind one marker.
-    private func unhide(titled titles: [String]) {
-        for title in titles {
-            guard let id = Self.columnIDsByTitle[title] else { continue }
-            columnCustomization[visibility: id] = .visible
-        }
-    }
-
-    /// Bridges SwiftUI's comparator-array sort binding to the store's ordering.
-    ///
-    /// Read: the store's mode becomes the comparator the header chevron draws.
-    /// Written: the clicked column becomes a mode — unless it is a metric
-    /// column whose values have not been computed, which is refused so the
-    /// header cannot appear to sort by nothing.
-    private var sortOrder: Binding<[KeyPathComparator<IssueRow>]> {
-        Binding(
-            get: {
-                guard let column = store.query.sort.column,
-                    let comparator = IssueRow.comparator(
-                        for: column, ascending: store.query.sort.ascending)
-                else { return [] }
-                return [comparator]
-            },
-            set: { comparators in
-                guard let first = comparators.first,
-                    let column = IssueRow.column(of: first)
-                else { return }
-                let ascending = first.order == .forward
-                guard !(column.requiresPhase2 && !store.metrics.hasPhase2Values) else { return }
-                store.query.sort = .ordering(by: column, ascending: ascending)
-            }
-        )
+        Set(Self.specs.compactMap { spec in
+            layout.isHidden(spec.id) ? spec.sort : nil
+        })
     }
 
     private var rows: [IssueRow] {
@@ -125,203 +83,38 @@ struct IssueListView: View {
         return store.visibleIssues.map { IssueRow(issue: $0, metrics: metrics) }
     }
 
-    // The columns are split across three builder properties rather than
-    // written as one block: `@TableColumnBuilder` accepts at most ten
-    // columns, and the single expression had also grown past what the
-    // type-checker will solve in reasonable time.
-
-    /// Who the bead is: identifier, priority and type.
-    @TableColumnBuilder<IssueRow, KeyPathComparator<IssueRow>>
-    private var identityColumns:
-        some TableColumnContent<
-            IssueRow, KeyPathComparator<IssueRow>
-        >
-    {
-        TableColumn("ID", value: \.id) { row in
-            Text(row.issue.id).monospaced().font(.callout)
-        }
-        .width(min: 70, ideal: 96, max: 160)
-        .customizationID(SortColumn.id.rawValue)
-        // Every context menu, bead link and URL is keyed by the id, so a
-        // row without one is hard to act on. `.all` rather than
-        // `.visibility`: disabling visibility alone still listed ID in the
-        // header's menu, and a control that is present but does nothing is
-        // worse than no control — the reader has to try it to learn it is
-        // inert.
-        .disabledCustomizationBehavior(.all)
-
-        TableColumn("P", value: \.priority) { row in
-            PriorityCell(store: store, issue: row.issue)
-        }
-        .width(30)
-        .customizationID(SortColumn.priority.rawValue)
-
-        // The type glyph has no header to click and no useful ordering of
-        // its own, so it stays an unsorted column.
-        TableColumn("") { row in
-            Image(systemName: row.issue.type.symbolName)
-                .foregroundStyle(.secondary)
-                .help(row.issue.type.displayName)
-        }
-        .width(22)
-        .customizationID("type")
-        // Headerless, so it would list as a blank row. `.all` for the same
-        // reason as ID above: the glyph is 22pt of context, not a column
-        // to manage, and an unnamed menu entry explains nothing.
-        .disabledCustomizationBehavior(.all)
-
-    }
-
-    /// What the bead says, and where it sits in the graph.
-    @TableColumnBuilder<IssueRow, KeyPathComparator<IssueRow>>
-    private var substanceColumns:
-        some TableColumnContent<
-            IssueRow, KeyPathComparator<IssueRow>
-        >
-    {
-        TableColumn("Title", value: \.titleKey) { row in
-            HStack(spacing: 6) {
-                // The badge leads the title while time travelling: it is
-                // the reason the row is interesting.
-                if let badge = store.badge(for: row.id) {
-                    DiffBadgeView(badge: badge)
-                }
-                if let repo = store.repo(of: row.id) {
-                    RepoBadge(repo: repo, isCrossRepo: store.isCrossRepo(row.id))
-                }
-                Text(row.issue.title).lineLimit(1)
-                if store.actionable.contains(row.id) {
-                    Image(systemName: "bolt.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.yellow)
-                        .help("Actionable now")
-                }
-            }
-        }
-        .width(min: 200, ideal: 360)
-        .customizationID(SortColumn.title.rawValue)
-
-        TableColumn("Status", value: \.statusKey) { row in
-            StatusChip(status: row.issue.status)
-        }
-        .width(min: 90, ideal: 110, max: 140)
-        .customizationID(SortColumn.status.rawValue)
-
-        // Grouped because `@TableColumnBuilder` accepts at most ten
-        // columns, and Created is the eleventh. `Group` nests the content
-        // so the limit applies inside each group rather than to the table.
-        TableColumn("Blocks", value: \.blocks) { row in
-            Text(row.blocks == 0 ? "—" : "\(row.blocks)")
-                .monospacedDigit()
-                .foregroundStyle(row.blocks > 0 ? .primary : .tertiary)
-                .help("Issues that depend on this one")
-        }
-        .width(52)
-        .customizationID(SortColumn.blocks.rawValue)
-
-        TableColumn("Blocked by", value: \.blockedBy) { row in
-            Text(row.blockedBy == 0 ? "—" : "\(row.blockedBy)")
-                .monospacedDigit()
-                .foregroundStyle(row.blockedBy > 0 ? .primary : .tertiary)
-        }
-        .width(74)
-        .customizationID(SortColumn.blockedBy.rawValue)
-
-        // Sortable in the same way as the rest, but the binding refuses
-        // the write until Phase 2 has values — see `sortOrder` above.
-    }
-
-    /// Computed and recorded values: the metric, labels and dates.
-    @TableColumnBuilder<IssueRow, KeyPathComparator<IssueRow>>
-    private var metadataColumns:
-        some TableColumnContent<
-            IssueRow, KeyPathComparator<IssueRow>
-        >
-    {
-        TableColumn("PageRank", value: \.pageRankKey) { row in
-            MetricCell(
-                value: row.pageRank,
-                status: store.metrics.status?.pageRank,
-                format: { String(format: "%.4f", $0) }
-            )
-        }
-        .width(min: 76, ideal: 86, max: 120)
-        .customizationID(SortColumn.pageRank.rawValue)
-
-        TableColumn("Labels", value: \.labelsKey) { row in
-            // Identity is the position, not the label: a bead carrying the
-            // same label twice is bad data, but it must not collide here
-            // and drop one of the pills.
-            HStack(spacing: 4) {
-                ForEach(Array(row.issue.labels.enumerated()), id: \.offset) { _, label in
-                    LabelPill(label: label, isFiltered: store.query.labels.contains(label))
-                        // Double-click filters by the label, or stops filtering
-                        // by it. The row owns single clicks for selection, so
-                        // this deliberately takes only the double.
-                        .onTapGesture(count: 2) { store.toggleLabelFilter(label) }
-                }
-            }
-            .help(row.issue.labels.joined(separator: ", "))
-        }
-        .width(min: 80, ideal: 140)
-        .customizationID(SortColumn.labels.rawValue)
-
-        // Formatted exactly like Updated below: two adjacent date columns
-        // disagreeing about how to write a date reads as a bug.
-        TableColumn("Created", value: \.createdKey) { row in
-            Text(
-                row.issue.createdAt.map {
-                    Self.relative.localizedString(for: $0, relativeTo: .now)
-                } ?? "—"
-            )
-            .foregroundStyle(.secondary)
-        }
-        .width(min: 80, ideal: 100, max: 140)
-        .customizationID(SortColumn.created.rawValue)
-
-        TableColumn("Updated", value: \.updatedKey) { row in
-            Text(
-                row.issue.updatedAt.map {
-                    Self.relative.localizedString(for: $0, relativeTo: .now)
-                } ?? "—"
-            )
-            .foregroundStyle(.secondary)
-        }
-        .width(min: 80, ideal: 100, max: 140)
-        .customizationID(SortColumn.updated.rawValue)
-    }
-
     var body: some View {
-        Table(
-            rows, selection: $store.selection, sortOrder: sortOrder,
-            columnCustomization: sanitizedCustomization
-        ) {
-            identityColumns
-            substanceColumns
-            metadataColumns
-        }
-        // `forSelectionType:` is what makes "the selected beads, or the one
-        // right-clicked when it is not selected" fall out of the framework:
-        // SwiftUI passes the current selection when the clicked row is part of
-        // it, and just that row otherwise. Reconstructing that from mouse
-        // position would be a second, worse implementation of a rule AppKit
-        // already applies consistently across the system.
-        .contextMenu(forSelectionType: Issue.ID.self) { ids in
-            rowMenu(for: ids)
-        }
-        .tableStyle(.inset(alternatesRowBackgrounds: true))
+        BeadTable(
+            rows: rows,
+            specs: Self.specs,
+            selection: $store.selection,
+            sort: $store.query.sort,
+            layout: $layout,
+            // Refused rather than applied, so a metric with no values cannot
+            // become an order with nothing on screen to explain it.
+            canSort: { column in
+                !(column.requiresPhase2 && !store.metrics.hasPhase2Values)
+            },
+            content: { spec, row in cellContent(spec, row) },
+            editableText: { _, row in row.issue.title },
+            commitText: { _, id, text in
+                Task { await store.setTitle(text, for: id) }
+            },
+            valueMenu: { spec, ids in priorityMenu(spec, ids) },
+            rowMenu: { ids in rowMenu(for: ids) }
+        )
         // Shows where columns were hidden, and brings them back on a
-        // double-click. Drawn over the table because SwiftUI cannot style a
-        // divider — see HiddenColumnMarkers for what that costs.
+        // double-click. Drawn over the table because a styled divider is not
+        // something a table gives you — see HiddenColumnMarkers.
         .overlay {
-            HiddenColumnMarkers(customization: columnCustomization) { titles in
+            HiddenColumnMarkers(layout: layout) { titles in
                 unhide(titled: titles)
             }
         }
         // Hiding the column being sorted by would otherwise leave the list in
         // an order with nothing on screen to explain it: the header carrying
         // the chevron is the thing that just disappeared.
-        .onChange(of: columnCustomization) {
+        .onChange(of: layout) {
             store.query.sort = store.query.sort.whenColumnsHidden(hiddenColumns)
         }
         .overlay {
@@ -337,89 +130,193 @@ struct IssueListView: View {
         }
     }
 
+    /// Brings back the run of columns behind one marker.
+    private func unhide(titled titles: [String]) {
+        var updated = layout
+        for title in titles {
+            guard let spec = Self.specs.first(where: { $0.title == title }) else { continue }
+            updated.hidden.remove(spec.id)
+        }
+        layout = updated
+    }
+
+    // MARK: - Cell content
+    //
+    // Unchanged from the SwiftUI table: these are the same views, hosted in
+    // the column's cell. The store is captured here rather than read from the
+    // environment — a cell's subgraph does not inherit one, which is what
+    // crashed the list on scroll before `PriorityCell` was handed its store.
+
+    @ViewBuilder
+    private func cell(_ spec: BeadColumnSpec, _ row: IssueRow) -> some View {
+        switch spec.id {
+        case SortColumn.id.rawValue:
+            Text(row.issue.id).monospaced().font(.callout)
+
+        case SortColumn.priority.rawValue:
+            Text(row.issue.priorityLabel)
+                .monospacedDigit()
+                .foregroundStyle(row.issue.priority <= 1 ? .primary : .secondary)
+                .help(
+                    store.editingUnavailableReason
+                        ?? "Double-click to change the priority")
+
+        case "type":
+            Image(systemName: row.issue.type.symbolName)
+                .foregroundStyle(.secondary)
+                .help(row.issue.type.displayName)
+
+        case SortColumn.status.rawValue:
+            StatusChip(status: row.issue.status)
+
+        case SortColumn.blocks.rawValue:
+            Text(row.blocks == 0 ? "—" : "\(row.blocks)")
+                .monospacedDigit()
+                .foregroundStyle(row.blocks > 0 ? .primary : .tertiary)
+                .help("Issues that depend on this one")
+
+        case SortColumn.blockedBy.rawValue:
+            Text(row.blockedBy == 0 ? "—" : "\(row.blockedBy)")
+                .monospacedDigit()
+                .foregroundStyle(row.blockedBy > 0 ? .primary : .tertiary)
+
+        case SortColumn.pageRank.rawValue:
+            MetricCell(
+                value: row.pageRank,
+                status: store.metrics.status?.pageRank,
+                format: { String(format: "%.4f", $0) })
+
+        case SortColumn.labels.rawValue:
+            // Identity is the position, not the label: a bead carrying the
+            // same label twice is bad data, but it must not collide here and
+            // drop one of the pills.
+            HStack(spacing: 4) {
+                ForEach(Array(row.issue.labels.enumerated()), id: \.offset) { _, label in
+                    LabelPill(label: label, isFiltered: store.query.labels.contains(label))
+                        .onTapGesture(count: 2) { store.toggleLabelFilter(label) }
+                }
+            }
+            .help(row.issue.labels.joined(separator: ", "))
+
+        case SortColumn.created.rawValue:
+            Text(
+                row.issue.createdAt.map {
+                    Self.relative.localizedString(for: $0, relativeTo: .now)
+                } ?? "—"
+            )
+            .foregroundStyle(.secondary)
+
+        case SortColumn.updated.rawValue:
+            Text(
+                row.issue.updatedAt.map {
+                    Self.relative.localizedString(for: $0, relativeTo: .now)
+                } ?? "—"
+            )
+            .foregroundStyle(.secondary)
+
+        default:
+            EmptyView()
+        }
+    }
+
+    /// The Title cell's *display* form. The column is edited natively, so this
+    /// is only what is drawn when no editor is open — but the badges are the
+    /// reason the row is interesting while time travelling, so they stay.
+    @ViewBuilder
+    private func titleCell(_ row: IssueRow) -> some View {
+        HStack(spacing: 6) {
+            if let badge = store.badge(for: row.id) {
+                DiffBadgeView(badge: badge)
+            }
+            if let repo = store.repo(of: row.id) {
+                RepoBadge(repo: repo, isCrossRepo: store.isCrossRepo(row.id))
+            }
+            Text(row.issue.title).lineLimit(1)
+            if store.actionable.contains(row.id) {
+                Image(systemName: "bolt.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.yellow)
+                    .help("Actionable now")
+            }
+        }
+    }
+
+    private func cellContent(_ spec: BeadColumnSpec, _ row: IssueRow) -> AnyView {
+        if spec.id == SortColumn.title.rawValue {
+            return AnyView(titleCell(row))
+        }
+        return AnyView(cell(spec, row))
+    }
+
+    // MARK: - Menus
+
+    /// The priority editor: a menu at the cell, for a closed set of values.
+    private func priorityMenu(_ spec: BeadColumnSpec, _ ids: Set<Issue.ID>) -> NSMenu? {
+        guard !ids.isEmpty else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        if let reason = store.editingUnavailableReason {
+            // A disabled menu with no explanation is the state this app
+            // deliberately avoids elsewhere; say why rather than just refuse.
+            let item = NSMenuItem(title: reason, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            return menu
+        }
+        // A checkmark only when every selected bead already agrees; a mixed
+        // selection has no single current value to tick.
+        let current = Set(store.issues.filter { ids.contains($0.id) }.map(\.priority))
+        for value in Self.priorities {
+            let item = NSMenuItem(
+                title: "P\(value)", action: #selector(MenuAction.fire(_:)), keyEquivalent: "")
+            item.state = current == [value] ? .on : .off
+            item.target = MenuAction.shared
+            item.representedObject = MenuAction.Payload {
+                Task { await store.setPriority(value, for: ids) }
+            }
+            menu.addItem(item)
+        }
+        return menu
+    }
+
     /// The row context menu.
     ///
     /// Structured around the three cases from the start — none, one, several —
     /// because items added later will differ between them, and retrofitting
     /// that distinction is how a menu ends up offering "Copy ID" for a
     /// right-click on empty space.
-    @ViewBuilder
-    private func rowMenu(for ids: Set<Issue.ID>) -> some View {
-        if ids.isEmpty {
-            // Right-clicking the background. macOS shows no menu here rather
-            // than a menu of actions with nothing to act on, and a Copy ID in
-            // this state would replace the clipboard with an empty string.
-            EmptyView()
-        } else {
-            Button {
+    private func rowMenu(for ids: Set<Issue.ID>) -> NSMenu? {
+        // Right-clicking the background. macOS shows no menu here rather than
+        // a menu of actions with nothing to act on, and a Copy ID in this
+        // state would replace the clipboard with an empty string.
+        guard !ids.isEmpty else { return nil }
+
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        menu.addItem(
+            MenuAction.item(ids.count == 1 ? "Copy ID" : "Copy \(ids.count) IDs") {
                 store.copyIDs(ids)
-            } label: {
-                Label(
-                    ids.count == 1 ? "Copy ID" : "Copy \(ids.count) IDs",
-                    systemImage: "doc.on.doc")
-            }
+            })
 
-            Divider()
+        menu.addItem(.separator())
 
-            // The working way to change a priority.
-            //
-            // `PriorityCell` also offers a double-click, and in the running app
-            // it does nothing — reported from a real build, with `br` present
-            // and `canEditBeads` true, so the write path was open and the
-            // gesture was what failed. The precise reason is *not* established:
-            // synthesised clicks cannot activate anything inside a `Table`
-            // headlessly, so no test here can adjudicate it.
-            //
-            // What this route does not depend on is that question.
-            // `contextMenu(forSelectionType:)` is `Table`'s own mechanism
-            // rather than a gesture layered over cell content, it is verified
-            // end to end, and it is where a macOS user looks for a row action —
-            // the double-click had no affordance at all, on a 30pt column.
-            Menu {
-                priorityItems(for: ids)
-            } label: {
-                Label(
-                    ids.count == 1 ? "Priority" : "Priority of \(ids.count) Beads",
-                    systemImage: "flag")
-            }
-            .disabled(!store.canEditBeads)
+        let priority = NSMenuItem(
+            title: ids.count == 1 ? "Priority" : "Priority of \(ids.count) Beads",
+            action: nil, keyEquivalent: "")
+        priority.submenu = priorityMenu(Self.specs[1], ids)
+        priority.isEnabled = store.canEditBeads
+        menu.addItem(priority)
 
-            if ids.count == 1, let id = ids.first {
-                Divider()
-                Button {
+        if ids.count == 1, let id = ids.first {
+            menu.addItem(.separator())
+            menu.addItem(
+                MenuAction.item("Show History") {
                     store.select(id: id)
                     store.surface = .history
-                } label: {
-                    Label("Show History", systemImage: "clock.arrow.circlepath")
-                }
-            }
+                })
         }
-    }
-
-    /// P0…P4 — bv's range; `br` rejects anything beyond it.
-    @ViewBuilder
-    private func priorityItems(for ids: Set<Issue.ID>) -> some View {
-        if let reason = store.editingUnavailableReason {
-            // A disabled menu with no explanation is the state this app
-            // deliberately avoids elsewhere; say why rather than just refuse.
-            Text(reason)
-        } else {
-            ForEach(0...4, id: \.self) { value in
-                Button {
-                    Task { await store.setPriority(value, for: ids) }
-                } label: {
-                    // A checkmark only when every selected bead already agrees;
-                    // a mixed selection has no single current value to tick.
-                    let current = Set(
-                        store.issues.filter { ids.contains($0.id) }.map(\.priority))
-                    if current == [value] {
-                        Label("P\(value)", systemImage: "checkmark")
-                    } else {
-                        Text("P\(value)")
-                    }
-                }
-            }
-        }
+        return menu
     }
 
     private static let relative: RelativeDateTimeFormatter = {
@@ -429,13 +326,32 @@ struct IssueListView: View {
     }()
 }
 
-/// One table row: a bead, plus the engine values its columns sort on.
+/// Runs a closure from an `NSMenuItem`.
 ///
-/// The wrapper exists because SwiftUI's sortable columns need a key path on
-/// the row value, and the metrics live in the store rather than on `Issue`.
-/// Nothing is computed here — every number is copied from the engine's
-/// metrics, and `pageRank` stays optional so an absent value renders as its
-/// status rather than as a zero.
+/// `NSMenu` predates closures and wants a target/action pair, so something has
+/// to hold the closure and stay alive while the menu is up. A single shared
+/// target keeps that lifetime question out of every menu that needs one.
+@MainActor
+final class MenuAction: NSObject {
+    static let shared = MenuAction()
+
+    final class Payload: NSObject {
+        let run: () -> Void
+        init(_ run: @escaping () -> Void) { self.run = run }
+    }
+
+    @objc func fire(_ sender: NSMenuItem) {
+        (sender.representedObject as? Payload)?.run()
+    }
+
+    /// A menu item that runs `action` when chosen.
+    static func item(_ title: String, action: @escaping () -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(fire(_:)), keyEquivalent: "")
+        item.target = shared
+        item.representedObject = Payload(action)
+        return item
+    }
+}
 struct IssueRow: Identifiable {
     let issue: Issue
     let blocks: Int

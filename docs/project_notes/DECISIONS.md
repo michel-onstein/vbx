@@ -524,3 +524,68 @@ relabelling cannot silently rewrite history.
 - **This is the repository's first GitHub Actions workflow.** It only tags and
   records; nothing is built, signed or published on a runner, because no runner
   here holds the signing identity.
+
+---
+
+## ADR-014 — The bead list is an NSTableView, not SwiftUI's Table
+
+**Date:** 2026-08-22 · **Status:** Accepted
+
+**Context.** Priority editing shipped as a double-click on the priority cell and
+did nothing in the running app. `br` was present and `canEditBeads` was true, so
+the write path was open; the gesture was what failed.
+
+Investigating produced a narrower answer than the first write-up claimed (see
+the correction in [BUGS.md](BUGS.md)). SwiftUI's `Table` is **not** unable to
+edit: a `TextField` in a cell is a real editable `NSTextField`, one per row. What
+it cannot express is **which cell was double-clicked**. Its only double-click
+hook is `contextMenu(forSelectionType:menu:primaryAction:)`, and `primaryAction`
+reports the selected rows, not the column. A gesture layered over cell content is
+the alternative, and that is what had just been shown not to work.
+
+The immediate need was one column. The stated direction is more: editing is
+going to spread across columns that each want their own editor.
+
+**Decision.** The list is an `NSTableView` behind an `NSViewRepresentable`
+(``BeadTable``). `clickedRow` and `clickedColumn` answer which cell was hit, so
+each column can declare its own editor — a field editor for text, a menu for a
+closed set of values.
+
+**Cell appearance stays SwiftUI.** Content is hosted in the cell, so
+`StatusChip`, `LabelPill`, `MetricCell`, the diff and repo badges and the rest
+are unchanged and there is one description of how a bead looks. Only columns
+that accept an edit are drawn natively, because an `NSTextField` is what a field
+editor edits.
+
+**What this bought beyond editing.** The header's show/hide menu,
+drag-reordering, live column resize and the field editor are AppKit behaviour
+that now works rather than being approximated. A column is also declared once —
+`IssueListView.specs` — where before it was declared three times (the
+`TableColumn`, its `customizationID`, and a title→id map the hidden-column
+markers read) with a test whose only job was catching those drift apart.
+
+**Consequences.**
+
+- **Stored layouts reset, once.** `issueListColumnCustomization` held a
+  `TableColumnCustomization`, a SwiftUI type that cannot describe this table.
+  The new key is `issueListLayout`. Per the repo's not-in-production rule this
+  is a clean break rather than a migration; it costs a user a few seconds.
+- **Hidden columns stay in the table**, marked `isHidden`, never removed.
+  `HiddenColumnMarkers` finds where a column *was* by walking the table's
+  columns, and a column that is gone has no position.
+- **A sortable column's identifier must equal its `SortColumn` raw value.** The
+  sort descriptor's key is the raw value; the chevron is drawn on the column
+  whose identifier matches the store's current column. If those disagreed, a
+  header click would reorder the list and put the chevron somewhere else.
+  Asserted, because it is invisible until it is wrong.
+- **The tests that read source text are gone.** Column order and identifiers
+  used to be checked by parsing `IssueListView.swift` for `TableColumn("…")`,
+  because the built table exposed no list. They silently matched nothing the
+  moment the table changed shape. `specs` is a value, so they are ordinary
+  assertions now.
+- **`PriorityCell` is deleted.** Its double-click popover was the mechanism that
+  did not work.
+- **Still not testable: the click itself.** Synthesised clicks do not reach
+  content inside a table headlessly, with `NSTableView` no more than with
+  `Table`. What is asserted is either side — which columns declare an editor,
+  and what each editor writes.

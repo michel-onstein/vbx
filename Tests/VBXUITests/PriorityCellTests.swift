@@ -6,20 +6,17 @@ import Testing
 
 @testable import VBXUI
 
-/// ``PriorityCell`` must get its store handed in, never from the environment.
+/// Editing a bead's priority, and the list surviving a scroll.
 ///
-/// `Table` builds a cell's subgraph when the row scrolls into view, and that
-/// subgraph does not carry the `environmentObject` injected around
-/// `ContentView`. An `@EnvironmentObject` in the cell therefore resolves for
-/// the rows on screen at first layout and traps on the first row created after
-/// it — which is why this only ever showed up on a workspace with more beads
-/// than fit in the window, and never on vbx's own.
-///
-/// Both tests below trap rather than fail if the dependency comes back. That is
-/// the nature of the bug: `EnvironmentObject.error()` is a `fatalError`, so the
-/// regression takes the process down instead of reporting an expectation.
+/// The scroll case is a regression guard with teeth: a cell that reads its
+/// store from the environment resolves for the rows on screen at first layout
+/// and *traps* on the first row created after it, because
+/// `EnvironmentObject.error()` is a `fatalError`. It only ever showed up on a
+/// workspace with more beads than fit in the window, never on vbx's own. The
+/// store is handed to cell content directly now, and the test takes the
+/// process down rather than failing if that ever changes.
 @MainActor
-@Suite("Priority cell")
+@Suite("Priority editing")
 struct PriorityCellTests {
 
     /// Every scroll view under `view`, depth first.
@@ -71,33 +68,17 @@ struct PriorityCellTests {
         }
     }
 
-    @Test("The cell renders with no environmentObject anywhere above it")
-    func rendersWithoutAnEnvironmentObjectAncestor() async throws {
-        let store = await Fixture.loadedStore()
-        let issue = try #require(store.visibleIssues.first)
-
-        // Deliberately no `.environmentObject(store)`: this is the invariant
-        // the fix establishes, stated directly.
-        let result = try Snapshot.render(
-            PriorityCell(store: store, issue: issue),
-            name: "priority-cell-no-environment",
-            size: CGSize(width: 60, height: 24))
-
-        #expect(result.inkCoverage() > 0, "the priority label drew nothing")
-    }
-
-    // MARK: - The edit path that actually works
+    // MARK: - The edit path
     //
     // Reported from a real build: "the editing of Priority is not in this
-    // build". It was in the build; it simply could not be reached. `br` was
-    // found and `canEditBeads` was true, so the gate was not the problem — the
-    // double-click was. macOS bridges `Table` to `NSTableView`, which consumes
-    // clicks for row selection, so a cell's `onTapGesture(count: 2)` never
-    // fires. With the only affordance being an unmarked 30pt column, the
-    // feature was invisible and inert at once.
+    // build". It was in the build and could not be reached — `br` was found and
+    // `canEditBeads` was true, so the write path was open and the double-click
+    // on the cell was what failed.
     //
-    // The context menu goes through `contextMenu(forSelectionType:)` — Table's
-    // own mechanism rather than a gesture layered over it.
+    // The list is an `NSTableView` now, which answers "which cell was hit" with
+    // `clickedRow` and `clickedColumn`, so the double-click reaches the column
+    // that was actually clicked. The context menu carries the same action for
+    // a selection of any size.
 
     @Test("Editing is available: br is found and nothing blocks a write")
     func editingIsAvailable() async {
@@ -109,23 +90,17 @@ struct PriorityCellTests {
         #expect(store.editingUnavailableReason == nil)
     }
 
-    // There is deliberately no test here asserting that the double-click
-    // fails.
+    // There is still no test asserting that a double-click *opens* the editor.
     //
-    // One was written and removed: it synthesised a double-click on the cell
-    // and asserted no popover appeared. It passed — and it would have passed
-    // whether or not the feature worked, because the harness cannot activate
-    // anything inside a `Table`. Measured: a synthetic click *does* press a
-    // plain SwiftUI `Button` in a hosting view, and a `TextField` in a Table
-    // cell *is* a real editable `NSTextField` — yet the same synthetic click
-    // neither focuses that field nor fires the table's `primaryAction`. So a
-    // negative result from this harness says nothing about the app; it says
-    // the events do not reach Table content in a headless process.
+    // One was written against the SwiftUI table and removed as vacuous: it
+    // synthesised a double-click, asserted no popover appeared, and would have
+    // passed either way, because synthesised clicks do not reach content inside
+    // a table headlessly. That has not changed with `NSTableView`, so the same
+    // test would be no better now.
     //
-    // What is actually known is above and below: `br` is available and
-    // `canEditBeads` is true, so the write path is open, and the context-menu
-    // route is verified end to end. That the double-click does not work comes
-    // from running the app, not from a test.
+    // What is testable is on both sides of the click, and is: the columns that
+    // declare an editor (`Table columns`), and the write each editor performs
+    // (below).
 
     @Test("Setting a priority on several beads writes each one")
     func setPriorityAcrossASelection() async throws {

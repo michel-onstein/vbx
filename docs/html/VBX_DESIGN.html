@@ -994,8 +994,8 @@ without re-analysing, so an incidental touch does not cost a re-render.</p>
 <tr>
 <td><strong>List</strong></td>
 <td><code>Table</code> with sortable columns</td>
-<td>SwiftUI <code>Table</code> (NSTableView-backed)</td>
-<td>Columns: ID, title, status, priority, type, assignee, labels, PageRank, unblocks, updated. Column visibility persisted. Multi-select.</td>
+<td><code>NSTableView</code> via <code>NSViewRepresentable</code> (<code>BeadTable</code>); cell appearance is SwiftUI</td>
+<td>Columns: ID, title, status, priority, type, labels, PageRank, blocks, blocked-by, created, updated. Column visibility, order and width persisted. Multi-select. Double-click edits the cell that was clicked — see ADR-014.</td>
 </tr>
 <tr>
 <td><strong>Kanban board</strong></td>
