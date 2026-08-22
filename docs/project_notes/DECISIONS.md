@@ -644,3 +644,61 @@ works in a sandbox where shelling out to `git` would not
   when that fails the state is `unknown`, which is honest but not complete.
 - **Committing from vbx is out of scope**, deliberately. This is about seeing
   the state. What message, which files, whose identity — all separate questions.
+
+## ADR-016 — `main` is protected, and the release bot pushes through a deploy key
+
+**Date:** 2026-08-22 · **Status:** Accepted
+
+**Context.** `main` had no protection of any kind: it could be force-pushed,
+rewritten or deleted outright, and nothing required a change to arrive through
+a pull request. Every change already *does* arrive that way by habit, but habit
+is not a control — a single mistyped `git push --force` from any of the several
+worktrees this repo runs in would have rewritten the branch every other one is
+based on.
+
+The obvious protection is a ruleset requiring a pull request. That collides
+with [ADR-013](#adr-013--the-version-bump-comes-from-a-pr-label-and-the-notes-from-the-tags):
+`release.yml` advances the version *on merge* and pushes the tag and the
+release-notes commit straight to `main`. A pull-request rule applies to
+`GITHUB_TOKEN` exactly as it does to a person, so turning it on without more
+would have left every merge protected and every release broken.
+
+The fix is a bypass actor, and the choice of actor is forced. GitHub will not
+let the **GitHub Actions app** bypass a ruleset on a user-owned repository —
+the API rejects it with *"Actor GitHub Actions integration must be part of the
+ruleset source or owner organization"*, an organisation-only feature. That
+leaves an admin PAT or a deploy key. A deploy key wins because it does not
+expire, is scoped to this one repository, and is not tied to a human account
+whose own access changing would silently break releases.
+
+**Decision.** A ruleset on the default branch blocks deletion and non-fast-forward
+pushes and requires a pull request, with a write **deploy key** as the only
+bypass actor. `release.yml` checks out with that key (`ssh-key:` on
+`actions/checkout`, which also rewrites `origin` to SSH) so its push to `main`
+is the one thing allowed past the rule.
+
+**Consequences.**
+
+- **Deletion and force-push protection are absolute.** No bypass actor is
+  granted for them in practice: the release push is an ordinary fast-forward,
+  so the deploy key never needs to rewrite or delete anything.
+- **The idempotence guard became load-bearing.** A push authenticated with
+  `GITHUB_TOKEN` never triggers another workflow — GitHub suppresses it to
+  break exactly this loop — so the re-run the workflow header describes did not
+  actually happen. A deploy key carries no such suppression, so pushing the
+  release-notes commit *does* start a second run now, and `version-bump.sh`
+  exiting on `--exact-match` is the only thing stopping a version per version.
+  The tag lands on the release-notes commit itself, which is what makes that
+  exact match hold.
+- **Required approvals are zero.** GitHub does not let anyone approve their own
+  pull request, and this repository has one human. Requiring an approval would
+  have meant nothing could ever merge. The rule still forces the pull request;
+  it just does not demand a second person who does not exist.
+- **The key is a credential to rotate, not configuration.** It lives as the
+  `RELEASE_SSH_KEY` secret with its public half registered as a write deploy
+  key. Losing it breaks releases and nothing else; replacing it is generating a
+  new pair and updating both halves.
+- **A workflow edit is now a privileged change.** Anything `release.yml` runs
+  can push to `main` past the rule. That is the residual hole, and it is the
+  reason the bypass is a deploy key scoped to this repository rather than a PAT
+  carrying a person's whole account.

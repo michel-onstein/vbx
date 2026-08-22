@@ -17,7 +17,7 @@ box, the README title.
 | [FEATURE_PARITY.md](docs/FEATURE_PARITY.md) | — | Every bv capability mapped to a vbx surface and delivery phase | Living |
 | [RELEASES.md](docs/RELEASES.md) | ADR-013 | User-facing changes per release — generated from the git tags, never edited | Generated |
 | [project_notes/BUGS.md](docs/project_notes/BUGS.md) | — | Bug log with the regression test locking each fix in | Living |
-| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…011 | Architectural decisions and their trade-offs | Living |
+| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…016 | Architectural decisions and their trade-offs | Living |
 | [project_notes/KEY_FACTS.md](docs/project_notes/KEY_FACTS.md) | — | Toolchain, commands, layout, gotchas | Living |
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
