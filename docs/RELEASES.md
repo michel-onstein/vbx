@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.0.10 — 2026-08-22
+
+### Fixes
+
+- History drops the filter and sort it never read ([#43](https://github.com/michel-onstein/vbx/pull/43))
+
 ## 0.0.9 — 2026-08-22
 
 ### Fixes
