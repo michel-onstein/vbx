@@ -4,6 +4,42 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — Every hosted cell was centred in its column
+
+**Symptom:** reported as "the label pills are not aligned to the left of the
+column". Looking at the rendered list, it was **every hosted column** — ID, P,
+the type glyph, Status, Blocks, Blocked by and PageRank all sat in the middle of
+their cells. Only Title was correct, and only because it is the one column drawn
+natively as an `NSTextField` rather than hosted.
+
+**Cause:** introduced the same day, by the move to `NSTableView`
+([ADR-014](DECISIONS.md)). `HostedCell` pins its `NSHostingView` to both the
+leading *and* trailing edges, so the SwiftUI content is handed the full column
+width — and a view given more width than it needs centres itself in it.
+SwiftUI's `Table` left-aligned cell content by default, which is why this was
+right before and wrong after.
+
+**Fix:** one line where the cell hosts the view —
+`.frame(maxWidth: .infinity, alignment: .leading)` — rather than ten changes at
+the columns. A new column cannot forget it.
+
+Numeric columns were left leading rather than right-aligned. macOS often
+right-aligns counts so digits line up, and that is arguably better, but it is a
+change to how the list has always looked rather than a restoration of it. Worth
+deciding separately; `BeadColumnSpec` is where a per-column alignment would go.
+
+**Prevention:** `CellAlignmentTests` measures the leftmost ink in a cell as a
+fraction of the cell's width, because ink coverage cannot see this — centred
+content and leading content produce identical coverage. Confirmed to fail before
+the fix, at 27% across the column.
+
+The suite also contains a test that the *measurement* separates centred from
+leading. Without it, a `firstInkFraction` that returned something small for
+everything would let the real assertions pass on a broken build — which is
+exactly how the vacuous double-click test got shipped a day earlier.
+
+---
+
 ## 2026-08-22 — A Codable + RawRepresentable layout killed the test runner
 
 **Symptom:** `swift test` exited with **signal 11**. No failing expectation, no

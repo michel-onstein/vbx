@@ -56,6 +56,12 @@ struct BeadTable: NSViewRepresentable {
     /// The row context menu, for the ids AppKit's selection rules produce.
     let rowMenu: (Set<Issue.ID>) -> NSMenu?
 
+    /// Why a row is marked as uncommitted, or nil when it is not.
+    ///
+    /// A reason rather than a Bool, because the tint alone says nothing: the
+    /// same string becomes the row's tooltip.
+    let uncommittedReason: (Issue.ID) -> String?
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -202,6 +208,25 @@ struct BeadTable: NSViewRepresentable {
         // MARK: Data
 
         func numberOfRows(in tableView: NSTableView) -> Int { parent.rows.count }
+
+        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            let identifier = NSUserInterfaceItemIdentifier("bead.row")
+            let view =
+                tableView.makeView(withIdentifier: identifier, owner: self) as? BeadRowView
+                ?? BeadRowView(identifier: identifier)
+            view.isUncommitted =
+                row < parent.rows.count && parent.uncommittedReason(parent.rows[row].id) != nil
+            return view
+        }
+
+        /// The tooltip for a cell, so the tint is never the only signal.
+        func tableView(
+            _ tableView: NSTableView, toolTipFor cell: NSCell?, rect: NSRectPointer,
+            tableColumn: NSTableColumn?, row: Int, mouseLocation: NSPoint
+        ) -> String {
+            guard row >= 0, row < parent.rows.count else { return "" }
+            return parent.uncommittedReason(parent.rows[row].id) ?? ""
+        }
 
         func tableView(
             _ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int
@@ -415,6 +440,38 @@ struct BeadTable: NSViewRepresentable {
 
 // MARK: - Cells
 
+/// A row that can mark itself as carrying uncommitted changes.
+///
+/// `NSTableRowView` rather than a background on the cells: a row is the thing
+/// that is uncommitted, and drawing it here composes with the alternating
+/// stripe and with selection instead of fighting them. Painting cells would
+/// leave the gaps between them untinted and would sit *over* the selection
+/// highlight.
+final class BeadRowView: NSTableRowView {
+    var isUncommitted = false {
+        didSet { if isUncommitted != oldValue { needsDisplay = true } }
+    }
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        guard isUncommitted, !isSelected else { return }
+        // Subtle on purpose: it has to survive the alternating stripe beneath
+        // it, read in both appearances, and not look like an error. A low-alpha
+        // accent is the usual answer, and `controlAccentColor` follows whatever
+        // the user has chosen rather than inventing a colour.
+        NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
+        dirtyRect.fill(using: .sourceOver)
+    }
+}
+
 /// A cell whose appearance is a SwiftUI view.
 ///
 /// Reused by `makeView(withIdentifier:)` like any AppKit cell; only the hosted
@@ -439,7 +496,19 @@ final class HostedCell: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     func host(_ view: AnyView) {
-        hosting.rootView = view
+        // Leading, explicitly.
+        //
+        // The hosting view is pinned to both edges, so content is handed the
+        // full column width — and a view given more width than it needs centres
+        // itself in it. That put every hosted column's content in the middle of
+        // its cell: ID, P, the glyph, Status, the counts, PageRank. Only Title
+        // escaped, being the one column drawn natively. SwiftUI's `Table`
+        // left-aligned cell content by default, so this restores what the list
+        // looked like before it moved to `NSTableView`.
+        //
+        // Applied here rather than in each column's content, so a new column
+        // cannot forget it.
+        hosting.rootView = AnyView(view.frame(maxWidth: .infinity, alignment: .leading))
     }
 }
 

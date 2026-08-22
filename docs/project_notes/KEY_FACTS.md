@@ -131,6 +131,11 @@ view snapshots for inspection.
 - **The stored layout key is `issueListLayout`**, holding a `BeadTableLayout` as
   JSON. The old `issueListColumnCustomization` held a SwiftUI type and is dead;
   a layout saved before the move is ignored and the columns reset once.
+- **`BeadDirtyState` says which beads are ahead of the last commit**, computed
+  by comparing the working bead set with `snapshot_at "HEAD"`. `unknown` — no
+  repository, or no commits — is deliberately not `clean`. `ProjectStore`
+  refreshes it on open, on every reload (so every write), and when `.git`
+  changes, because a commit moves `HEAD` without touching the export.
 - **Hidden columns stay in the table with `isHidden`**, never removed —
   `HiddenColumnMarkers` finds where a column *was* by walking the table's
   columns, and a column that is gone has no position.

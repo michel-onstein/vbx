@@ -54,6 +54,20 @@ struct IssueListView: View {
         BeadColumnSpec(
             id: SortColumn.blockedBy.rawValue, title: "Blocked by", sort: .blockedBy,
             width: 74, minWidth: 74, maxWidth: 110),
+        // Both counts in one column, for scanning. It sits beside the two it
+        // summarises rather than replacing them: someone who wants one dense
+        // column hides the other two from the header menu, and someone who
+        // wants to sort by each separately still can.
+        //
+        // Deliberately unsortable. A sortable column's identifier must equal
+        // its `SortColumn` raw value, so sorting here would need a new
+        // `SortColumn` case *and* a definition of what the order is — by
+        // blocks, by blocked-by, or by the two summed. None of those is
+        // obviously right, and the two single-value columns already carry
+        // sorting. Add a case if someone actually wants one.
+        BeadColumnSpec(
+            id: Self.blockedRatioID, title: "Blocked/by",
+            width: 78, minWidth: 66, maxWidth: 120),
         BeadColumnSpec(
             id: SortColumn.pageRank.rawValue, title: "PageRank", sort: .pageRank,
             width: 86, minWidth: 76, maxWidth: 120),
@@ -70,6 +84,12 @@ struct IssueListView: View {
 
     /// bv's range. Beyond P4 is backlog, and `br` rejects it.
     static let priorities = 0...4
+
+    /// The combined blocks / blocked-by column.
+    ///
+    /// Not a `SortColumn` raw value, because it does not sort — the only other
+    /// column in that position is the type glyph.
+    static let blockedRatioID = "blockedRatio"
 
     /// The columns the user has put away.
     private var hiddenColumns: Set<SortColumn> {
@@ -101,7 +121,8 @@ struct IssueListView: View {
                 Task { await store.setTitle(text, for: id) }
             },
             valueMenu: { spec, ids in priorityMenu(spec, ids) },
-            rowMenu: { ids in rowMenu(for: ids) }
+            rowMenu: { ids in rowMenu(for: ids) },
+            uncommittedReason: { id in store.dirtyBeads.reason(for: id) }
         )
         // Shows where columns were hidden, and brings them back on a
         // double-click. Drawn over the table because a styled divider is not
@@ -170,15 +191,30 @@ struct IssueListView: View {
             StatusChip(status: row.issue.status)
 
         case SortColumn.blocks.rawValue:
-            Text(row.blocks == 0 ? "—" : "\(row.blocks)")
+            Text(IssueRow.countLabel(row.blocks))
                 .monospacedDigit()
                 .foregroundStyle(row.blocks > 0 ? .primary : .tertiary)
                 .help("Issues that depend on this one")
 
         case SortColumn.blockedBy.rawValue:
-            Text(row.blockedBy == 0 ? "—" : "\(row.blockedBy)")
+            Text(IssueRow.countLabel(row.blockedBy))
                 .monospacedDigit()
                 .foregroundStyle(row.blockedBy > 0 ? .primary : .tertiary)
+
+        case Self.blockedRatioID:
+            // Three pieces rather than one string, so each side keeps the
+            // de-emphasis the single-value columns give a zero. The digits come
+            // from the same helper the tooltip and the tests read, so the two
+            // cannot drift.
+            HStack(spacing: 3) {
+                Text(IssueRow.countLabel(row.blocks))
+                    .foregroundStyle(row.blocks > 0 ? .primary : .tertiary)
+                Text("/").foregroundStyle(.quaternary)
+                Text(IssueRow.countLabel(row.blockedBy))
+                    .foregroundStyle(row.blockedBy > 0 ? .primary : .tertiary)
+            }
+            .monospacedDigit()
+            .help("Issues that depend on this one / issues it waits for")
 
         case SortColumn.pageRank.rawValue:
             MetricCell(
@@ -352,6 +388,31 @@ final class MenuAction: NSObject {
         return item
     }
 }
+extension IssueRow {
+    /// A count as the list writes it: an em dash for zero.
+    ///
+    /// Zero is a real value here, not an absent one — the dash is de-emphasis,
+    /// not the "absent, never zero" rule, which is about metrics that have not
+    /// been computed.
+    static func countLabel(_ value: Int) -> String { value == 0 ? "—" : "\(value)" }
+
+    /// The combined column's text, e.g. `7 / 1`.
+    ///
+    /// The cell draws the two sides separately so each can be de-emphasised on
+    /// its own; this is the same content as one string, for the tooltip and for
+    /// tests that should not have to read pixels.
+    var blockedSummary: String {
+        Self.blockedSummary(blocks: blocks, blockedBy: blockedBy)
+    }
+
+    /// Static so it can be asserted directly. `IssueRow` builds itself from a
+    /// `GraphMetrics`, so constructing one with chosen counts means standing up
+    /// a metrics value — which tests the wrong thing.
+    static func blockedSummary(blocks: Int, blockedBy: Int) -> String {
+        "\(countLabel(blocks)) / \(countLabel(blockedBy))"
+    }
+}
+
 struct IssueRow: Identifiable {
     let issue: Issue
     let blocks: Int

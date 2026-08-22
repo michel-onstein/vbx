@@ -589,3 +589,58 @@ markers read) with a test whose only job was catching those drift apart.
   content inside a table headlessly, with `NSTableView` no more than with
   `Table`. What is asserted is either side — which columns declare an editor,
   and what each editor writes.
+
+
+---
+
+## ADR-015 — "Uncommitted" is a fact about git, not state vbx keeps
+
+**Date:** 2026-08-22 · **Status:** Accepted
+
+**Context.** vbx writes through `br`, which updates the database and re-exports
+`.beads/issues.jsonl` immediately. Nothing commits it, so after a few edits
+there is no way to see what a commit would contain without reading a diff.
+
+The obvious implementation is to remember what the app changed. That state has
+to live somewhere, and it is wrong the moment anything happens outside the app —
+a `br` run in a terminal, a `git checkout`, a commit, a pull, another vbx
+window. Each of those needs its own invalidation, and a missed one leaves the
+app confidently marking rows that are already committed.
+
+**Decision.** A bead is dirty when **its record differs from the same record at
+`HEAD`**. Nothing is stored; the answer is recomputed from the checkout, and it
+is correct however the file got into its current state.
+
+The committed set comes from the engine's `snapshot_at`, which reads the git
+object store directly — the same path time travel uses, and the reason this
+works in a sandbox where shelling out to `git` would not
+([ADR-006](#adr-006--correlation-reads-the-git-object-store-directly-not-git)).
+
+**Consequences.**
+
+- **Three cases, not one.** Changed, added and removed are different, and only
+  the first two have a row to mark. A removed bead still counts towards what a
+  commit would carry, so the count includes it and the tint cannot.
+- **Absent is not clean.** A workspace with no repository, or one with no
+  commits, has nothing to compare against. That is `unknown`, and it renders as
+  nothing at all rather than as "nothing outstanding" — the same rule the
+  Phase-2 metrics follow.
+- **Records, not bytes.** The export is whole-file and `br` rewrites all of it,
+  so formatting and order move without any bead moving. A byte comparison would
+  light up every row after an unrelated write.
+- **`updated_at` counts.** `br` stamps it on every write, so a record differing
+  only there is still a record that was written and is not committed. Excluding
+  it would call a real pending change clean.
+- **`.git` is watched as well as the bead file.** A commit does not touch the
+  export: `HEAD` moves and every dirty bead becomes clean while the watched file
+  sits unchanged. Without the second watch the list would keep marking rows that
+  are no longer dirty.
+- **Colour is not the only signal.** The tint is deliberately subtle — it has to
+  survive the alternating stripe and read in both appearances — so each marked
+  row carries a tooltip saying why, and the status bar shows a count broken down
+  by kind. There is an accessibility audit bead open; colour alone would fail it.
+- **Multi-repo is not solved.** A workspace can span repositories with a `HEAD`
+  each. This compares against the one the engine resolves for the opened source;
+  when that fails the state is `unknown`, which is honest but not complete.
+- **Committing from vbx is out of scope**, deliberately. This is about seeing
+  the state. What message, which files, whose identity — all separate questions.

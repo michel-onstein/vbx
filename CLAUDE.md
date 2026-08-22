@@ -69,7 +69,19 @@ them.
 - **A column is declared once**, in `IssueListView.specs`. Its identifier is a
   storage contract — stored layouts are keyed by it — and for a sortable column
   it must equal its `SortColumn` raw value, or the header chevron and the order
-  come apart. Asserted in `Table columns`.
+  come apart. An *unsortable* column has no `SortColumn` to take one from and
+  supplies its own (`type`, `blockedRatio`). Asserted in `Table columns`.
+- **Hosted cell content is aligned leading by `HostedCell`, not by each
+  column.** The hosting view is pinned to both edges, so content handed the full
+  column width centres itself — which is what put every hosted column in the
+  middle of its cell after the move to `NSTableView`. A new column cannot forget
+  it, because it is applied once where the cell hosts the view.
+- **"Uncommitted" is defined against git, not tracked by vbx.** A bead is dirty
+  when its record differs from the same record at `HEAD`, read through the
+  engine's `snapshot_at` — the object store directly, as ADR-006 requires. No
+  side file to fall out of step with an external `br` run or a checkout. See
+  ADR-015. Note `HEAD` moving is invisible to the bead-file watch, so `.git` is
+  watched too.
 - **A synthetic click cannot activate anything inside a table.** It presses a
   plain SwiftUI `Button` in a hosting view, but inside a table it neither
   focuses a known-editable `NSTextField` nor fires a double-click action. So a
