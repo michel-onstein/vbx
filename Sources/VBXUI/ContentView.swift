@@ -243,6 +243,18 @@ struct StatusBar: View {
 
                 phase2Indicator
 
+                // Colour alone is not an affordance, and tinted rows can be
+                // scrolled off screen. The count says the same thing in one
+                // place, and says nothing at all when there is no repository to
+                // compare against — which is not the same as nothing pending.
+                if store.dirtyBeads.isKnown, store.dirtyBeads.total > 0 {
+                    Label(
+                        "\(store.dirtyBeads.total) uncommitted",
+                        systemImage: "pencil.circle"
+                    )
+                    .help(uncommittedSummary)
+                }
+
                 if store.isWatching {
                     Label("watching", systemImage: "dot.radiowaves.left.and.right")
                         .help("Live reload is on; changes to \(info.source) reload automatically")
@@ -267,6 +279,17 @@ struct StatusBar: View {
         .padding(.vertical, 6)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+    }
+
+    /// Spells out the three kinds, because "7 uncommitted" does not say whether
+    /// anything was deleted — and a deletion has no row to notice.
+    private var uncommittedSummary: String {
+        let state = store.dirtyBeads
+        var parts: [String] = []
+        if !state.changed.isEmpty { parts.append("\(state.changed.count) modified") }
+        if !state.added.isEmpty { parts.append("\(state.added.count) added") }
+        if !state.removed.isEmpty { parts.append("\(state.removed.count) removed") }
+        return parts.joined(separator: ", ") + " since the last commit"
     }
 
     @ViewBuilder

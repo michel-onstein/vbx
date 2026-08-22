@@ -5,6 +5,46 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-22 — The three list beads
+
+`vbx-00c`, `vbx-06t`, `vbx-bct`, filed from using the 0.0.5 build and
+implemented together because they all touch the same table.
+
+**Alignment** was the interesting one. Reported for the label pills; it was
+every hosted column, and a regression from the `NSTableView` move earlier the
+same day. One line at the cell rather than ten at the columns. The test measures
+leftmost ink, because ink coverage cannot distinguish centred from leading — and
+there is a second test asserting the measurement itself discriminates, which is
+the guard the vacuous double-click test taught us to write.
+
+**The combined `Blocked/by` column** ships unsortable. A sortable column's
+identifier must equal its `SortColumn` raw value, so sorting would have needed a
+new enum case *and* a definition of what the order is — by blocks, by
+blocked-by, or the sum. None is obviously right and the two single-value columns
+already sort, so nothing was invented. Zero renders as `—`, matching those
+columns, because "Blocks: —" beside "Blocked/by: 0 / 2" would read as two
+different facts about the same number.
+
+**Uncommitted beads** are defined against git rather than tracked by vbx: a
+record differing from the same record at `HEAD`, read through the engine's
+`snapshot_at`. Nothing stored, so nothing to invalidate when someone runs `br`
+in a terminal or checks out a branch. `.git` is watched alongside the bead file,
+because a commit moves `HEAD` without touching the export and the existing watch
+would never fire. ADR-015 has the rest.
+
+That one needed a fixture that is a real git repository with a commit —
+`Fixture.committedStore()` — since `writableStore()` has no history and would
+have made the state permanently "unknown". It was the largest single piece, as
+the bead predicted.
+
+An existing test earned its keep: it asserted that `type` was the only
+identifier not derived from `SortColumn`, and the new column broke it. Rewritten
+to state the actual rule — *sortable* columns take their identifier from their
+`SortColumn` — so the next unsortable column will not mean editing a test to
+keep it passing.
+
+---
+
 ## 2026-08-22 — The bead list moved to NSTableView, and titles are editable
 
 Asked whether we were using the wrong widget, given that double-click-to-edit is

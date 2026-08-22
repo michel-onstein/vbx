@@ -157,9 +157,24 @@ struct TableColumnOrderTests {
 
     @Test("Identifiers come from SortColumn rather than being written out twice")
     func idsAreDerivedFromSortColumn() {
-        // Only the type glyph has no ordering and so no SortColumn case.
-        let unmapped = specs.filter { SortColumn(rawValue: $0.id) == nil }.map(\.id)
-        #expect(unmapped == ["type"], "unexpected hand-written identifiers \(unmapped)")
+        // The rule is about *sortable* columns: a hand-written identifier on
+        // one of those would break the chevron, which is asserted separately.
+        // A column that does not sort has no `SortColumn` to take an identifier
+        // from and must supply its own — the type glyph and the combined
+        // Blocked/by column are both in that position.
+        //
+        // Stated this way rather than as a list of allowed names, so adding
+        // another unsortable column does not mean editing this test to keep it
+        // passing — which is how an assertion stops meaning anything.
+        for spec in specs where spec.sort != nil {
+            #expect(
+                SortColumn(rawValue: spec.id) != nil,
+                "\(spec.title) sorts but its identifier \(spec.id) is hand-written")
+        }
+        let unsortable = specs.filter { $0.sort == nil }.map(\.id)
+        #expect(
+            unsortable.sorted() == ["blockedRatio", "type"],
+            "unexpected unsortable columns \(unsortable)")
     }
 
     @Test("A sortable column's identifier is its SortColumn's raw value")

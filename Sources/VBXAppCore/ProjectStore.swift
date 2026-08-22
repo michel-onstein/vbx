@@ -263,6 +263,14 @@ public final class ProjectStore: ObservableObject {
 
     private let engine = BeadsEngine()
     private let watcher = FileWatchService()
+
+    /// Watches `.git` so a commit made outside vbx is noticed.
+    ///
+    /// The bead file does not change when someone commits — `HEAD` moves and
+    /// every dirty bead becomes clean while the export sits untouched. The
+    /// existing watch would never fire, and the list would keep marking rows
+    /// that are now committed.
+    private let gitWatcher = FileWatchService()
     private let notifier = AlertNotifier()
     private let spotlight = SpotlightIndexer()
     private var triageNeedsRefresh = false
@@ -613,6 +621,7 @@ public final class ProjectStore: ObservableObject {
             // always empty.
             await loadRecipes()
             startWatching()
+            await refreshDirtyState()
             if !skipPhase2 { await computePhase2() }
         } catch {
             stopWatching()
@@ -651,6 +660,9 @@ public final class ProjectStore: ObservableObject {
             // History view is actually open.
             historyLoaded = false
             lastReloadAt = Date()
+            // Every write reloads, so this is where an edit made in vbx becomes
+            // visible as uncommitted — and where an external `br` run does too.
+            await refreshDirtyState()
             return true
         } catch {
             loadError = error.localizedDescription
@@ -668,12 +680,36 @@ public final class ProjectStore: ObservableObject {
                 await self?.reload()
             }
         }
+        // A commit does not touch the export, so the watch above cannot see
+        // one. This does — and only the dirty state is recomputed, because
+        // nothing about the beads themselves has changed.
+        if let head = gitHeadPath {
+            gitWatcher.start(watching: head) { [weak self] in
+                Task { @MainActor in
+                    await self?.refreshDirtyState()
+                }
+            }
+        }
         isWatching = watcher.isWatching
     }
 
     public func stopWatching() {
         watcher.stop()
+        gitWatcher.stop()
         isWatching = false
+    }
+
+    /// `<workspace>/.git/HEAD`, when the workspace is in a git repository.
+    ///
+    /// Watching the file rather than the directory: `FileWatchService` watches
+    /// a path's *parent*, so this ends up watching `.git`, which is what also
+    /// catches the index moving.
+    public var gitHeadPath: String? {
+        guard let workspace = workspaceDirectory else { return nil }
+        let head = URL(fileURLWithPath: workspace)
+            .appendingPathComponent(".git")
+            .appendingPathComponent("HEAD")
+        return FileManager.default.fileExists(atPath: head.path) ? head.path : nil
     }
 
     private func refreshAll() async throws {
@@ -889,6 +925,43 @@ public final class ProjectStore: ObservableObject {
         }
         return nil
     }
+
+    // MARK: - Uncommitted beads
+
+    /// Which beads differ from the last commit.
+    ///
+    /// ``BeadDirtyState/unknown`` until it has been computed, and again
+    /// whenever there is nothing to compare against — a workspace with no git
+    /// repository, or one with no commits yet. That is not the same as clean,
+    /// and the UI must not render it as such.
+    @Published public private(set) var dirtyBeads: BeadDirtyState = .unknown
+
+    /// Recomputes the dirty state against `HEAD`.
+    ///
+    /// The committed bead set comes from the engine's `snapshot_at`, which
+    /// reads the git object store directly — the same path time travel uses,
+    /// and the reason this works in a sandbox where shelling out to `git` would
+    /// not (ADR-006).
+    ///
+    /// A failure means there is nothing to compare against rather than that
+    /// something went wrong: an unopened workspace, a directory that is not a
+    /// repository, a repository with no commits. None of those is an error
+    /// worth showing, and all of them are "unknown" rather than "clean".
+    public func refreshDirtyState() async {
+        guard isLoaded, !isTimeTravelling else {
+            dirtyBeads = .unknown
+            return
+        }
+        do {
+            let head = try await engine.snapshot(at: "HEAD")
+            dirtyBeads = BeadDirtyState.compare(working: issues, committed: head.issues)
+        } catch {
+            dirtyBeads = .unknown
+        }
+    }
+
+    /// Whether this bead has changes that are not committed.
+    public func isDirty(_ id: Issue.ID) -> Bool { dirtyBeads.isDirty(id) }
 
     /// Sets a bead's priority, through `br`.
     ///
