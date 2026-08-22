@@ -5,6 +5,28 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-22 — History loses the filter and sort it never read
+
+`vbx-ec6`, the decision left open when the other seven engine-payload surfaces
+had the controls hidden. History was held back because it sits beside the
+revision scrubber, and there was a real question about whether it should gain a
+filter and sort meaning something in its own terms — narrowing the commit walk,
+ordering the correlated beads.
+
+Answered by looking at what it reads: `store.history`, and neither `query` nor
+`visibleIssues`. Both controls were as inert there as on Attention or Plan.
+
+Dropped rather than given a meaning. Inventing a feature to justify a control
+already on screen is the wrong way round, and nobody has asked what filtering a
+history should do. If that need appears it arrives as its own request, with its
+own idea of the answer.
+
+`ToolbarControlsTests`' `deferred` set is now empty and stays as a named empty
+set, so the next deferral has somewhere to go rather than hiding as a quiet
+`true` in the switch.
+
+---
+
 ## 2026-08-22 — The three list beads
 
 `vbx-00c`, `vbx-06t`, `vbx-bct`, filed from using the 0.0.5 build and

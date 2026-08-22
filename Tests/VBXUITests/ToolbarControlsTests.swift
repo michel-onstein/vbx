@@ -20,12 +20,13 @@ struct ToolbarControlsTests {
     /// same switch it is checking would agree with any mistake in it.
     private static let ordered: Set<ViewSurface> = [.list, .board, .graph, .tree]
 
-    /// Ignores the query, but keeps the controls pending a decision of its own.
+    /// Surfaces still awaiting a decision about the controls.
     ///
-    /// Tracked as vbx-ec6. When that is answered this set should be empty —
-    /// either History gains a filter and sort that mean something in its own
-    /// terms, or it joins the seven below.
-    private static let deferred: Set<ViewSurface> = [.history]
+    /// Empty, and it should stay that way. It held `.history` while vbx-ec6 was
+    /// open; the answer was that History joins the eight below rather than
+    /// gaining a filter and sort of its own. Kept as a named, empty set so the
+    /// next deferral has somewhere to go and cannot hide as a quiet `true`.
+    private static let deferred: Set<ViewSurface> = []
 
     @Test("Only the views that order beads offer the controls")
     func controlsFollowTheOrderedSurfaces() {
@@ -37,12 +38,14 @@ struct ToolbarControlsTests {
         }
     }
 
-    @Test("The seven engine-payload views hide both controls")
+    @Test("The eight views that read no query hide both controls")
     func payloadViewsHideTheControls() {
         // Named one by one, because this list *is* the bug being fixed: each of
         // these showed a Filter picker and a Sort menu that did nothing.
+        // History joined them when vbx-ec6 was answered — it reads
+        // `store.history` and consults the query no more than the other seven.
         let hidden: [ViewSurface] = [
-            .attention, .sprint, .alerts, .flow, .labels, .plan, .insights,
+            .attention, .sprint, .alerts, .flow, .labels, .plan, .insights, .history,
         ]
 
         for surface in hidden {
@@ -60,7 +63,7 @@ struct ToolbarControlsTests {
         // case rather than silently passing it.
         let classified = Self.ordered
             .union(Self.deferred)
-            .union([.attention, .sprint, .alerts, .flow, .labels, .plan, .insights])
+            .union([.attention, .sprint, .alerts, .flow, .labels, .plan, .insights, .history])
 
         #expect(
             classified == Set(ViewSurface.allCases),
