@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.0.13 — 2026-08-22
+
+### Fixes
+
+- Push the release bump through a deploy key, so main can require a PR ([#46](https://github.com/michel-onstein/vbx/pull/46))
+
 ## 0.0.12 — 2026-08-22
 
 ### Fixes
