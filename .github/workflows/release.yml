@@ -11,6 +11,13 @@
 #     workflow, and the second run finds HEAD already tagged and exits without
 #     doing anything. That is the loop that would otherwise cut a version per
 #     version.
+#
+#     This became load-bearing when the push moved to the deploy key. A push
+#     authenticated with GITHUB_TOKEN never triggers another workflow — GitHub
+#     suppresses it precisely to break loops like this one — so the re-run
+#     described above did not actually happen. A deploy key carries no such
+#     suppression, so the second run is real now, and `version-bump.sh` exiting
+#     on `--exact-match` is the only thing stopping it.
 #   - It only ever adds a tag and one commit recording it. Nothing is built,
 #     signed or published here — scripts/release.sh does that, deliberately from
 #     a machine that holds the signing identity, which no CI runner here does.
@@ -40,6 +47,19 @@ jobs:
         with:
           # Tags, and the full history the notes are generated from.
           fetch-depth: 0
+          # Push as the release deploy key rather than as GITHUB_TOKEN.
+          #
+          # `main` requires a pull request, and that rule applies to
+          # GITHUB_TOKEN exactly as it does to a person — the bump below pushes
+          # straight to `main`, so as GITHUB_TOKEN it is simply rejected. A
+          # deploy key is the only bypass actor a user-owned repository can
+          # name: bypassing via the GitHub Actions app is an organisation-only
+          # feature, which GitHub rejects here with "must be part of the
+          # ruleset source or owner organization".
+          #
+          # This also rewrites `origin` to SSH, which is what carries the key
+          # through to the push step below.
+          ssh-key: ${{ secrets.RELEASE_SSH_KEY }}
 
       - name: Identify the committer
         run: |
