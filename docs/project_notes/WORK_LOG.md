@@ -5,6 +5,30 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-22 — Two preflights that asserted more than they checked
+
+Rehearsing the release rather than trusting the fix found a second bug of
+exactly the first one's shape, one layer down. The notarytool probe was fixed,
+`--check` said `--dmg ready`, and the build then ran to completion and was
+refused by Apple: the app was signed with an **Apple Development** certificate.
+
+`assert_identity` had been taking the certificate's kind as an argument and
+using it only in the error text; the check itself asked whether the string was
+in the keychain. So `"Developer ID Application"` appeared in a message beside a
+test that never looked for one. Both bugs are the same failure — a check whose
+message is a claim the code does not make — and both were invisible because the
+path had never run end to end.
+
+The rehearsal is the lesson worth keeping. A release that has never been cut has
+had none of its steps executed, and fixing the first blocker only reveals the
+next one; running the whole path deliberately, before it matters, is what turned
+a second silent failure into a caught one.
+
+Still blocked on a certificate no script can create: the account has no Developer
+ID Application certificate. `--check` now says so in zero seconds.
+
+---
+
 ## 2026-08-22 — The first published release, and the bug that had prevented one
 
 Asked for the locally built binary to be uploaded to GitHub as a versioned

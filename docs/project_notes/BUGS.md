@@ -4,6 +4,65 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — A development certificate signed a release, and every check said fine
+
+**Symptom:** found by rehearsing the first release the moment the preflight bug
+above stopped blocking it. The build ran clean — universal, signed, verified,
+disk image built, submitted — and came back from Apple six minutes later:
+
+```
+  status: Invalid
+  "The binary is not signed with a valid Developer ID certificate."
+      vbx.app/Contents/MacOS/vbx-cli   x86_64
+      vbx.app/Contents/MacOS/vbx-cli   arm64
+      vbx.app/Contents/MacOS/vbx       x86_64
+      vbx.app/Contents/MacOS/vbx       arm64
+```
+
+then `stapler` failed with error 65, because there was no ticket to staple.
+
+**Cause:** `VBX_DEVELOPER_ID_APP` was set to an **Apple Development**
+certificate. `codesign` signed with it happily, `codesign --verify --deep
+--strict` passed, and the machine has no Developer ID Application certificate at
+all — only two Apple Development and one Apple Distribution.
+
+Nothing caught it because `assert_identity` took a label —
+`assert_identity "$DEVELOPER_ID_APP" "Developer ID Application"` — and used it
+**only in the error message**. The check underneath asked whether the configured
+string appeared in `security find-identity` at all. So the label asserted a kind
+of certificate that the code never checked, and `--check` reported
+
+```
+  Developer ID cert      in the keychain
+```
+
+which was true, and useless. The same shape as the notarytool bug above: a
+preflight whose message claims more than its check verifies. Apple's own
+verification is the first thing in the chain that actually looks.
+
+**Fix:** `identity_is` compares the identity against the canonical common-name
+prefix Apple issues — `Developer ID Application: Name (TEAMID)` — and the label
+is now load-bearing at all three call sites (Developer ID, Apple Distribution,
+3rd Party Mac Developer Installer). It runs **before** the keychain lookup and
+**before** the dry-run return, so the wrong kind of certificate is refused
+without building anything, and `--check` reports the kind rather than mere
+presence.
+
+**Not fixed by this, because it cannot be:** there is no Developer ID
+Application certificate to use. That is created in the Apple Developer account
+by the Account Holder. Until one exists, `--dmg` cannot produce anything
+notarizable — the difference is that this now takes zero seconds to learn
+instead of a full universal build and a round trip to Apple.
+
+**Prevention:** `test_a_certificate_of_the_wrong_kind_is_refused` in
+`scripts/test-packaging.py` configures an `Apple Development` name and asserts
+`--check` reports it as not a Developer ID Application certificate, that `--dmg`
+is not ready, that `--dmg --dry-run` fails *before* building, that the refusal
+names the kind needed without leaking the certificate's name — and that a
+correctly named identity is still accepted, so the check is not a wall.
+
+---
+
 ## 2026-08-22 — A flag notarytool does not have blocked every release
 
 **Symptom:** six versions were tagged and pushed, `0.0.1` through `0.0.6`, and
