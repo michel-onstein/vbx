@@ -481,6 +481,104 @@ def test_check_reports_per_channel() -> None:
           "set" in result.stdout)
 
 
+def test_notary_probe_uses_flags_this_notarytool_has() -> None:
+    """A flag notarytool does not have fails the probe, not the flag.
+
+    `notarytool history --limit 1` kept the preflight round trip small, and
+    notarytool 1.1.2 has no `--limit`: it exits 64 on the unknown option. So a
+    profile that worked was reported unusable, `--check` exited non-zero, and
+    release.sh — which runs it unwrapped in preflight — aborted before building
+    anything. No release was ever cut. The probe discarded stderr, so "unknown
+    flag" and "no such credential" printed the same sentence, and the sentence
+    said to store credentials that were already stored.
+
+    So: every flag handed to notarytool must exist in *this* notarytool, and a
+    failing probe must say what actually went wrong.
+    """
+    print("\nNotary probe")
+    if not shutil.which("xcrun"):
+        print("  skip  notarytool flags (xcrun is not on the PATH)")
+        return
+
+    # Continuations joined first, so a flag on the next line still belongs to
+    # the invocation that opened it.
+    joined = PACKAGE.read_text().replace("\\\n", " ")
+    invocations = re.findall(r"xcrun notarytool ([a-z][a-z-]*)([^\n]*)", joined)
+    check("the notarytool invocations are found", len(invocations) >= 2,
+          f"found {len(invocations)}")
+
+    for sub, rest in invocations:
+        usage = subprocess.run(["xcrun", "notarytool", sub, "--help"],
+                               capture_output=True, text=True)
+        if usage.returncode != 0:
+            check(f"notarytool {sub} --help succeeds", False,
+                  (usage.stdout + usage.stderr).strip()[:200])
+            continue
+        supported = set(re.findall(r"--[a-z][a-z-]*", usage.stdout + usage.stderr))
+        for flag in sorted(set(re.findall(r"--[a-z][a-z-]*", rest))):
+            check(f"notarytool {sub} accepts {flag}", flag in supported,
+                  "this notarytool has no such option")
+
+    # And the diagnosis, which is the half that made the flag bug unreadable.
+    result = run_package("--check", env_extra={"VBX_DEVELOPER_ID_APP": "-"})
+    combined = result.stdout + result.stderr
+    check("an unusable notary profile is reported as such",
+          "notary profile" in combined and "not usable" in combined,
+          combined.strip()[-200:])
+    check("a failed probe reports why it failed",
+          FAKE["VBX_NOTARY_PROFILE"] in combined,
+          "the probe's own error was swallowed")
+
+
+def test_a_certificate_of_the_wrong_kind_is_refused() -> None:
+    """`assert_identity`'s label has to mean something.
+
+    It took a label — "Developer ID Application" — put it in the error message,
+    and then checked only whether the configured string appeared in
+    `security find-identity` at all. So an "Apple Development" certificate
+    configured as VBX_DEVELOPER_ID_APP passed `--check` ("Developer ID cert in
+    the keychain": true, and useless), passed the assertion, signed the app,
+    built the disk image, and was refused by Apple six minutes later — "The
+    binary is not signed with a valid Developer ID certificate", every binary,
+    every architecture.
+
+    Apple names these certificates canonically, so the prefix is the check.
+    """
+    print("\nCertificate kind")
+    wrong = "Apple Development: Nemo Nobody (ZZ9PLURAL9)"
+
+    result = run_package("--check", env_extra={"VBX_DEVELOPER_ID_APP": wrong})
+    combined = result.stdout + result.stderr
+    check("a development certificate is not accepted as a Developer ID one",
+          "NOT a Developer ID Application certificate" in combined,
+          combined.strip()[-200:])
+    check("...and --dmg is reported not ready", "--dmg          not ready" in combined)
+    check("...and it says where to get the right one",
+          "developer.apple.com" in combined)
+
+    # Before the build, not after it: the assertion runs ahead of the dry-run
+    # return precisely so a plan that cannot work says so without building.
+    result = run_package("--dmg", "--dry-run", env_extra={"VBX_DEVELOPER_ID_APP": wrong})
+    combined = result.stdout + result.stderr
+    check("signing with it is refused before anything is built",
+          result.returncode != 0, combined.strip()[-200:])
+    check("the refusal names the kind of certificate needed",
+          "Developer ID Application" in combined)
+    check("the refusal does not leak the certificate's name",
+          "Nemo Nobody" not in combined)
+
+    # The right shape still passes, or the check above would be a wall.
+    result = run_package("--dmg", "--dry-run")
+    check("a Developer ID Application name is accepted", result.returncode == 0,
+          (result.stdout + result.stderr).strip()[-200:])
+
+    # The App Store channel takes its own kind, and the same reasoning.
+    result = run_package("--app-store", "--dry-run",
+                         env_extra={"VBX_APP_STORE_APP": wrong})
+    check("an App Store build refuses a development certificate too",
+          result.returncode != 0)
+
+
 def test_help_and_bad_flags() -> None:
     print("\nInterface")
     result = run_package("--help")
@@ -981,6 +1079,8 @@ def main() -> int:
     test_ad_hoc_cannot_be_notarized()
     test_real_app_store_run()
     test_check_reports_per_channel()
+    test_notary_probe_uses_flags_this_notarytool_has()
+    test_a_certificate_of_the_wrong_kind_is_refused()
     test_help_and_bad_flags()
     test_build_app_forwards()
     test_universal_is_implied_and_verified()

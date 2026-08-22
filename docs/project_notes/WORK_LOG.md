@@ -5,6 +5,47 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-22 — Two preflights that asserted more than they checked
+
+Rehearsing the release rather than trusting the fix found a second bug of
+exactly the first one's shape, one layer down. The notarytool probe was fixed,
+`--check` said `--dmg ready`, and the build then ran to completion and was
+refused by Apple: the app was signed with an **Apple Development** certificate.
+
+`assert_identity` had been taking the certificate's kind as an argument and
+using it only in the error text; the check itself asked whether the string was
+in the keychain. So `"Developer ID Application"` appeared in a message beside a
+test that never looked for one. Both bugs are the same failure — a check whose
+message is a claim the code does not make — and both were invisible because the
+path had never run end to end.
+
+The rehearsal is the lesson worth keeping. A release that has never been cut has
+had none of its steps executed, and fixing the first blocker only reveals the
+next one; running the whole path deliberately, before it matters, is what turned
+a second silent failure into a caught one.
+
+Still blocked on a certificate no script can create: the account has no Developer
+ID Application certificate. `--check` now says so in zero seconds.
+
+---
+
+## 2026-08-22 — The first published release, and the bug that had prevented one
+
+Asked for the locally built binary to be uploaded to GitHub as a versioned
+release. `release.sh --publish` has done exactly that since it was written, and
+it had never once run: its preflight calls `package-app.sh --check`, and the
+check reported the notary profile unusable on a machine where notarization
+worked. One unsupported flag — `--limit 1`, which notarytool 1.1.2 does not have
+— failed the probe, and a silent probe made it look like missing credentials.
+Six tags, no releases. See BUGS.md.
+
+The fix is a flag removed and an error printed. The test that locks it in
+validates every notarytool flag the script uses against that subcommand's
+`--help`, rather than pinning `--limit` specifically: the bug is "a flag this
+notarytool does not have", and next time it will be a different flag.
+
+---
+
 ## 2026-08-22 — The bead list moved to NSTableView, and titles are editable
 
 Asked whether we were using the wrong widget, given that double-click-to-edit is

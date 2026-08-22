@@ -4,6 +4,111 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — A development certificate signed a release, and every check said fine
+
+**Symptom:** found by rehearsing the first release the moment the preflight bug
+above stopped blocking it. The build ran clean — universal, signed, verified,
+disk image built, submitted — and came back from Apple six minutes later:
+
+```
+  status: Invalid
+  "The binary is not signed with a valid Developer ID certificate."
+      vbx.app/Contents/MacOS/vbx-cli   x86_64
+      vbx.app/Contents/MacOS/vbx-cli   arm64
+      vbx.app/Contents/MacOS/vbx       x86_64
+      vbx.app/Contents/MacOS/vbx       arm64
+```
+
+then `stapler` failed with error 65, because there was no ticket to staple.
+
+**Cause:** `VBX_DEVELOPER_ID_APP` was set to an **Apple Development**
+certificate. `codesign` signed with it happily, `codesign --verify --deep
+--strict` passed, and the machine has no Developer ID Application certificate at
+all — only two Apple Development and one Apple Distribution.
+
+Nothing caught it because `assert_identity` took a label —
+`assert_identity "$DEVELOPER_ID_APP" "Developer ID Application"` — and used it
+**only in the error message**. The check underneath asked whether the configured
+string appeared in `security find-identity` at all. So the label asserted a kind
+of certificate that the code never checked, and `--check` reported
+
+```
+  Developer ID cert      in the keychain
+```
+
+which was true, and useless. The same shape as the notarytool bug above: a
+preflight whose message claims more than its check verifies. Apple's own
+verification is the first thing in the chain that actually looks.
+
+**Fix:** `identity_is` compares the identity against the canonical common-name
+prefix Apple issues — `Developer ID Application: Name (TEAMID)` — and the label
+is now load-bearing at all three call sites (Developer ID, Apple Distribution,
+3rd Party Mac Developer Installer). It runs **before** the keychain lookup and
+**before** the dry-run return, so the wrong kind of certificate is refused
+without building anything, and `--check` reports the kind rather than mere
+presence.
+
+**Not fixed by this, because it cannot be:** there is no Developer ID
+Application certificate to use. That is created in the Apple Developer account
+by the Account Holder. Until one exists, `--dmg` cannot produce anything
+notarizable — the difference is that this now takes zero seconds to learn
+instead of a full universal build and a round trip to Apple.
+
+**Prevention:** `test_a_certificate_of_the_wrong_kind_is_refused` in
+`scripts/test-packaging.py` configures an `Apple Development` name and asserts
+`--check` reports it as not a Developer ID Application certificate, that `--dmg`
+is not ready, that `--dmg --dry-run` fails *before* building, that the refusal
+names the kind needed without leaking the certificate's name — and that a
+correctly named identity is still accepted, so the check is not a wall.
+
+---
+
+## 2026-08-22 — A flag notarytool does not have blocked every release
+
+**Symptom:** six versions were tagged and pushed, `0.0.1` through `0.0.6`, and
+**not one GitHub release existed**. Nothing had ever been uploaded. Asked to
+publish, `./scripts/package-app.sh --check` reported
+
+```
+  notary profile         not usable — run xcrun notarytool store-credentials
+  --dmg          not ready (needs VBX_DEVELOPER_ID_APP and a usable VBX_NOTARY_PROFILE)
+error: no distribution channel is configured.
+```
+
+on a machine where the credentials were stored and working.
+
+**Cause:** the probe was `xcrun notarytool history --keychain-profile "$P"
+--limit 1`. **notarytool 1.1.2 has no `--limit`** — it exits 64 with
+`Error: Unknown option '--limit'`. The probe discarded stdout and stderr, so a
+usage error and a missing credential were the same non-zero exit and printed the
+same sentence. `--check` then exits non-zero, and `release.sh` runs it unwrapped
+under `set -e` in preflight, so every release attempt aborted before it built
+anything. The advice printed — run `store-credentials` — was the one action that
+could not help, because it had already been done.
+
+**Finding it:** running the probe by hand without the flag succeeded
+(`No submission history.`); with the flag it exited 64. That is the whole
+diagnosis, and it was two commands away the entire time — but only once the
+probe's output was looked at rather than the probe's verdict.
+
+Same shape as *The signing config had been dead since the rename*: a preflight
+that fails closed on itself reads exactly like the thing it is checking being
+absent, and it will be believed, because that is what a check is for.
+
+**Fix:** the probe passes no flag but `--keychain-profile`, and **prints its own
+first line of error when it fails**. A failed probe now says
+`Error: No Keychain password item found for profile: …` — which names the real
+cause and cannot be confused with a broken probe.
+
+**Prevention:** `test_notary_probe_uses_flags_this_notarytool_has` in
+`scripts/test-packaging.py` extracts every flag the script hands to
+`xcrun notarytool` and asserts each one appears in that subcommand's own
+`--help`, so a flag *this* notarytool lacks fails a test instead of a release.
+It also drives `--check` with an unusable profile and asserts the output names
+why — the half that made the flag bug unreadable.
+
+---
+
 ## 2026-08-22 — A Codable + RawRepresentable layout killed the test runner
 
 **Symptom:** `swift test` exited with **signal 11**. No failing expectation, no
