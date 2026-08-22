@@ -135,35 +135,42 @@ public struct ContentView: View {
             .background { SegmentTooltips(tooltips: Self.surfaceTooltips) }
         }
 
+        // Both of these drive `query`, which only `visibleIssues` reads, so on
+        // a surface that renders its own engine payload they are a control
+        // wired to nothing. See ``ViewSurface/showsFilterAndSort``.
         ToolbarItem {
-            Picker("Filter", selection: $store.query.filter) {
-                ForEach(IssueFilter.allCases) { filter in
-                    Text(filter.displayName).tag(filter)
+            if store.surface.showsFilterAndSort {
+                Picker("Filter", selection: $store.query.filter) {
+                    ForEach(IssueFilter.allCases) { filter in
+                        Text(filter.displayName).tag(filter)
+                    }
                 }
+                .pickerStyle(.menu)
+                .help("Filter beads")
             }
-            .pickerStyle(.menu)
-            .help("Filter beads")
         }
 
         ToolbarItem {
-            Menu {
-                // The named orderings only. Every column ordering is reachable
-                // from its header, and listing all of them here would bury
-                // these.
-                Picker("Sort", selection: $store.query.sort) {
-                    ForEach(SortMode.cycleCases) { mode in
-                        Text(mode.displayName)
-                            // Sorting by a metric that has not been computed
-                            // would silently order by zeros, so it stays
-                            // disabled until Phase 2 lands.
-                            .disabled(mode.requiresPhase2 && !store.metrics.hasPhase2Values)
-                            .tag(mode)
+            if store.surface.showsFilterAndSort {
+                Menu {
+                    // The named orderings only. Every column ordering is
+                    // reachable from its header, and listing all of them here
+                    // would bury these.
+                    Picker("Sort", selection: $store.query.sort) {
+                        ForEach(SortMode.cycleCases) { mode in
+                            Text(mode.displayName)
+                                // Sorting by a metric that has not been
+                                // computed would silently order by zeros, so it
+                                // stays disabled until Phase 2 lands.
+                                .disabled(mode.requiresPhase2 && !store.metrics.hasPhase2Values)
+                                .tag(mode)
+                        }
                     }
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
                 }
-            } label: {
-                Label("Sort", systemImage: "arrow.up.arrow.down")
+                .help("Sort order")
             }
-            .help("Sort order")
         }
 
         ToolbarItem {
