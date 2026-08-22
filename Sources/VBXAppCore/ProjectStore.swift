@@ -77,16 +77,21 @@ public enum ViewSurface: String, CaseIterable, Identifiable, Sendable {
     ///
     /// This is a question about the toolbar, not a claim about the data: it is
     /// deliberately not derived from whether the view reads `visibleIssues`, so
-    /// that a surface can be left showing the controls while what it should do
-    /// is still being decided. ``history`` is the one such case today — it
-    /// ignores the query like the rest, but how it should relate to the
-    /// revision scrubber is a separate question, so it keeps the controls until
-    /// that is answered. Tracked as vbx-ec6.
+    /// a surface can be left showing the controls while what it should do is
+    /// still being decided.
+    ///
+    /// ``history`` was the one such case, and the answer was to drop them. It
+    /// reads `store.history` and consults neither `query` nor `visibleIssues`,
+    /// so both controls were as inert there as on the seven below. Giving it a
+    /// filter and sort meaning something in its own terms — narrowing the
+    /// commit walk, ordering the correlated beads — would be a feature nobody
+    /// has asked for, and inventing one to justify a control already on screen
+    /// is the wrong way round. If a real need appears it arrives as its own
+    /// request, with its own idea of what filtering a history means.
     public var showsFilterAndSort: Bool {
         switch self {
         case .list, .board, .graph, .tree: true
-        case .history: true
-        case .insights, .plan, .labels, .flow, .attention, .alerts, .sprint: false
+        case .insights, .plan, .labels, .flow, .attention, .alerts, .sprint, .history: false
         }
     }
 
