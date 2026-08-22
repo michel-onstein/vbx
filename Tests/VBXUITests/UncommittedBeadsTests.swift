@@ -18,7 +18,15 @@ struct UncommittedBeadsTests {
     @Test("A freshly committed workspace is clean, and knows it")
     func committedWorkspaceIsClean() async throws {
         let (store, directory) = try await Fixture.committedStore()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer {
+            // Before the directory goes: the store is still watching it, and
+            // now watches `.git` as well. FSEvents delivering a change for a
+            // path that has just been deleted, into a store whose engine
+            // session is still open, is a crash the parallel suite hit about
+            // one run in eight — no failing expectation, just a dead runner.
+            store.stopWatching()
+            try? FileManager.default.removeItem(at: directory)
+        }
 
         await store.refreshDirtyState()
         // Both halves: known, and empty. "Unknown" would also report zero, and
@@ -31,7 +39,15 @@ struct UncommittedBeadsTests {
     @Test("A bead written through br becomes uncommitted; its neighbours do not")
     func writingMakesOneBeadDirty() async throws {
         let (store, directory) = try await Fixture.committedStore()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer {
+            // Before the directory goes: the store is still watching it, and
+            // now watches `.git` as well. FSEvents delivering a change for a
+            // path that has just been deleted, into a store whose engine
+            // session is still open, is a crash the parallel suite hit about
+            // one run in eight — no failing expectation, just a dead runner.
+            store.stopWatching()
+            try? FileManager.default.removeItem(at: directory)
+        }
 
         let target = try #require(store.visibleIssues.first)
         let untouched = try #require(store.visibleIssues.dropFirst().first)
@@ -53,7 +69,15 @@ struct UncommittedBeadsTests {
         // `writableStore` copies the fixture without any git history, which is
         // exactly the case: nothing to compare against.
         let (store, directory) = try await Fixture.writableStore()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer {
+            // Before the directory goes: the store is still watching it, and
+            // now watches `.git` as well. FSEvents delivering a change for a
+            // path that has just been deleted, into a store whose engine
+            // session is still open, is a crash the parallel suite hit about
+            // one run in eight — no failing expectation, just a dead runner.
+            store.stopWatching()
+            try? FileManager.default.removeItem(at: directory)
+        }
 
         await store.refreshDirtyState()
         #expect(!store.dirtyBeads.isKnown)
@@ -67,7 +91,15 @@ struct UncommittedBeadsTests {
         // bead becomes clean. The existing watch would never fire, so this
         // asserts the second watch has something to watch.
         let (store, directory) = try await Fixture.committedStore()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        defer {
+            // Before the directory goes: the store is still watching it, and
+            // now watches `.git` as well. FSEvents delivering a change for a
+            // path that has just been deleted, into a store whose engine
+            // session is still open, is a crash the parallel suite hit about
+            // one run in eight — no failing expectation, just a dead runner.
+            store.stopWatching()
+            try? FileManager.default.removeItem(at: directory)
+        }
 
         let head = try #require(store.gitHeadPath, "no .git/HEAD found to watch")
         #expect(head.hasSuffix(".git/HEAD"))
