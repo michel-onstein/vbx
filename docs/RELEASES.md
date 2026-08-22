@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.0.5 — 2026-08-22
+
+### Fixes
+
+- Put the bead list on NSTableView, and make titles editable in place ([#37](https://github.com/michel-onstein/vbx/pull/37))
+
 ## 0.0.4 — 2026-08-22
 
 ### Fixes
