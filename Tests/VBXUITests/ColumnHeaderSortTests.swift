@@ -111,136 +111,103 @@ struct ColumnHeaderSortTests {
     }
 }
 
-/// The order the table declares its columns in.
+/// The columns the table is built from.
 ///
-/// SwiftUI's `Table` builds its columns from a result builder, and the built
-/// value exposes no list of headers to inspect, so there is nothing to assert
-/// against at runtime. Reading the source is the only way to pin the order —
-/// and the order is exactly the kind of thing an unrelated edit reshuffles
-/// without anyone noticing.
-@Suite("Table column order")
+/// These used to be read out of `IssueListView.swift` as text, because SwiftUI's
+/// `Table` built its columns from a result builder and exposed no list to
+/// inspect. Parsing source for `TableColumn("…")` was the only way to pin the
+/// order, and it silently matched nothing the moment the table changed shape —
+/// which is exactly what happened when the list moved to `NSTableView`.
+///
+/// `IssueListView.specs` is that list, as a value. Every assertion below is now
+/// about the thing the app actually uses.
+@MainActor
+@Suite("Table columns")
 struct TableColumnOrderTests {
 
-    /// Headers in declaration order, read from `IssueListView.swift`.
-    private static func declaredColumns() throws -> [String] {
-        let source = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/VBXUI/IssueListView.swift")
-        let text = try String(contentsOf: source, encoding: .utf8)
-
-        var headers: [String] = []
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("TableColumn(\"") else { continue }
-            let afterQuote = trimmed.dropFirst("TableColumn(\"".count)
-            guard let close = afterQuote.firstIndex(of: "\"") else { continue }
-            headers.append(String(afterQuote[afterQuote.startIndex..<close]))
-        }
-        return headers
-    }
+    private var specs: [BeadColumnSpec] { IssueListView.specs }
 
     @Test("Priority is the column immediately after ID")
     func priorityFollowsID() throws {
-        let headers = try Self.declaredColumns()
-        let id = try #require(headers.firstIndex(of: "ID"), "no ID column found")
-        let priority = try #require(headers.firstIndex(of: "P"), "no priority column found")
-        #expect(
-            priority == id + 1,
-            "priority must follow ID directly; got \(headers)")
+        let ids = specs.map(\.id)
+        let id = try #require(ids.firstIndex(of: SortColumn.id.rawValue), "no ID column")
+        let priority = try #require(
+            ids.firstIndex(of: SortColumn.priority.rawValue), "no priority column")
+        #expect(priority == id + 1, "priority must follow ID directly; got \(ids)")
     }
 
     @Test("The columns the view is built from are all present")
-    func columnsPresent() throws {
-        let headers = try Self.declaredColumns()
-        // Guards the parser itself: if it silently matched nothing, the order
-        // assertion above would have nothing to fail on.
-        #expect(headers.count >= 9, "parsed too few columns: \(headers)")
+    func columnsPresent() {
+        let titles = specs.map(\.title)
         for expected in ["ID", "P", "Title", "Status", "Labels", "Updated"] {
-            #expect(headers.contains(expected), "\(expected) column missing from \(headers)")
+            #expect(titles.contains(expected), "\(expected) column missing from \(titles)")
         }
-    }
-}
-
-/// The identifiers that persist a user's column layout.
-///
-/// Read from source for the same reason as the order above: SwiftUI's `Table`
-/// exposes no list of its columns to inspect at runtime. These identifiers are
-/// a storage contract — they are already in users' preferences once shipped —
-/// so a duplicate or a rename is a silent data problem, not a compile error.
-@Suite("Column customization IDs")
-struct ColumnCustomizationTests {
-
-    private static func source() throws -> String {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/VBXUI/IssueListView.swift")
-        return try String(contentsOf: url, encoding: .utf8)
+        #expect(specs.count >= 10, "too few columns: \(titles)")
     }
 
-    /// Every `.customizationID(...)` argument, in declaration order.
-    private static func customizationIDs() throws -> [String] {
-        try source()
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { $0.hasPrefix(".customizationID(") }
-            .map { line in
-                let inner = line.dropFirst(".customizationID(".count).dropLast()
-                return String(inner)
-            }
-    }
-
-    @Test("Every column carries a customization ID")
-    func everyColumnHasAnID() throws {
-        let columns = try Self.source()
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("TableColumn(\"") }
-        let ids = try Self.customizationIDs()
-
-        // A column without one cannot be hidden, reordered, or remembered —
-        // it silently opts out of the whole feature.
-        #expect(
-            ids.count == columns.count,
-            "\(columns.count) columns but \(ids.count) customization IDs")
-    }
-
-    @Test("No two columns share a customization ID")
-    func idsAreUnique() throws {
-        let ids = try Self.customizationIDs()
-        let duplicates = Dictionary(grouping: ids, by: { $0 }).filter { $0.value.count > 1 }
-
+    @Test("No two columns share an identifier")
+    func idsAreUnique() {
         // The bug this caught in review: PageRank was given the `blocks`
         // identifier, so hiding one would have acted on the other and both
         // would have shared a saved width.
-        #expect(duplicates.isEmpty, "duplicated customization IDs: \(duplicates.keys.sorted())")
+        let ids = specs.map(\.id)
+        let duplicates = Dictionary(grouping: ids, by: { $0 }).filter { $0.value.count > 1 }
+        #expect(duplicates.isEmpty, "duplicated identifiers: \(duplicates.keys.sorted())")
     }
 
-    @Test("IDs come from SortColumn rather than being written out twice")
-    func idsAreDerivedFromSortColumn() throws {
-        let ids = try Self.customizationIDs()
+    @Test("Identifiers come from SortColumn rather than being written out twice")
+    func idsAreDerivedFromSortColumn() {
         // Only the type glyph has no ordering and so no SortColumn case.
-        let literals = ids.filter { !$0.hasPrefix("SortColumn.") }
-        #expect(
-            literals == ["\"type\""],
-            "unexpected hand-written IDs \(literals); derive them from SortColumn")
+        let unmapped = specs.filter { SortColumn(rawValue: $0.id) == nil }.map(\.id)
+        #expect(unmapped == ["type"], "unexpected hand-written identifiers \(unmapped)")
+    }
+
+    @Test("A sortable column's identifier is its SortColumn's raw value")
+    func sortableIDsMatchTheirColumn() {
+        // Load-bearing, and easy to break by hand. The sort descriptor's key is
+        // the `SortColumn` raw value, while the indicator is drawn on the
+        // `NSTableColumn` whose *identifier* matches the store's current
+        // column. If the two ever disagreed, clicking a header would reorder
+        // the list and put the chevron somewhere else — or nowhere.
+        for spec in specs {
+            guard let sort = spec.sort else { continue }
+            #expect(
+                spec.id == sort.rawValue,
+                "\(spec.title): identifier \(spec.id) but sorts by \(sort.rawValue)")
+        }
     }
 
     @Test("The identifier and the type glyph cannot be hidden")
-    func essentialColumnsAreNotHideable() throws {
-        let text = try Self.source()
+    func essentialColumnsAreNotHideable() {
         // Every bead link, context menu and URL is keyed by the id; the glyph
         // column is headerless and would list as a blank menu row. Both are
         // deliberately exempt, and a later tidy-up must not quietly re-enable
         // them.
-        // `.all`, not `.visibility`. Disabling visibility alone still listed
-        // both columns in the header's customization menu, and a control that
-        // is present but does nothing is worse than no control — the reader
-        // has to try it to find out it is inert.
-        let exemptions = text.components(separatedBy: ".disabledCustomizationBehavior(.all)")
-            .count - 1
-        #expect(exemptions == 2, "expected exactly 2 non-customizable columns, found \(exemptions)")
+        let protected = specs.filter(\.isProtected).map(\.id)
+        #expect(
+            protected.sorted() == [SortColumn.id.rawValue, "type"].sorted(),
+            "expected exactly ID and the type glyph to be protected, got \(protected)")
+    }
+
+    @Test("Only columns that can be edited declare an editor")
+    func editorsAreDeclaredWhereExpected() {
+        // The point of the NSTableView move: a double-click has to reach a
+        // particular cell. Both editors are asserted so that removing one is a
+        // deliberate act rather than a quiet regression.
+        let editable = specs.compactMap { spec -> String? in
+            spec.editing == nil ? nil : spec.id
+        }
+        #expect(
+            editable.sorted() == [SortColumn.priority.rawValue, SortColumn.title.rawValue].sorted(),
+            "unexpected editable columns: \(editable)")
+    }
+
+    @Test("Every column has a usable width range")
+    func widthsAreSane() {
+        for spec in specs {
+            #expect(spec.minWidth <= spec.width, "\(spec.id): width below its minimum")
+            #expect(spec.width <= spec.maxWidth, "\(spec.id): width above its maximum")
+            #expect(spec.minWidth > 0, "\(spec.id): zero minimum width")
+        }
     }
 }

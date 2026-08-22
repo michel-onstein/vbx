@@ -941,6 +941,28 @@ public final class ProjectStore: ObservableObject {
         return failed
     }
 
+    /// Renames a bead, through `br`.
+    ///
+    /// An unchanged or empty title is refused rather than written. Empty
+    /// because a bead with no title is unusable in every list that shows one,
+    /// and unchanged because committing a field editor the user only clicked
+    /// into should not produce a write, a reload and a history entry.
+    @discardableResult
+    public func setTitle(_ title: String, for id: Issue.ID) async -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canEditBeads, let workspace = workspaceDirectory else { return false }
+        guard !trimmed.isEmpty else { return false }
+        guard trimmed != issues.first(where: { $0.id == id })?.title else { return false }
+        do {
+            try await writer.setTitle(trimmed, for: id, in: workspace)
+            await reload(force: true)
+            return true
+        } catch {
+            loadError = error.localizedDescription
+            return false
+        }
+    }
+
     /// The directory `br` should run in — the workspace, not the data file.
     var workspaceDirectory: String? {
         guard let source = info?.source else { return nil }

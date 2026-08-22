@@ -4,6 +4,43 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — A Codable + RawRepresentable layout killed the test runner
+
+**Symptom:** `swift test` exited with **signal 11**. No failing expectation, no
+message, no stack — the runner simply died, and because Swift Testing runs in
+parallel the output showed two hundred tests "started" and nothing finished, so
+the crash appeared to be everywhere and nowhere.
+
+**Cause:** `BeadTableLayout` conformed to both `Codable` and `RawRepresentable`,
+the second so `@AppStorage` could hold it. The standard library supplies default
+`Codable` implementations for *every* `RawRepresentable` whose raw value is
+itself `Codable`, and those implementations encode the **raw value**. So:
+
+```
+rawValue → JSONEncoder().encode(self) → encode(to:) → rawValue → …
+```
+
+until the stack ran out. The type looked entirely ordinary; the recursion is
+between two conformances neither of which is visible at the call site.
+
+**Finding it:** `--no-parallel` was what made it tractable. Serially, the last
+line printed is the test that dies, and it named
+`hiddenColumnPersists` — the one test that round-trips the layout through
+`rawValue`, which is exactly the path that recursed.
+
+**Fix:** the type no longer conforms to `Codable` at all. `rawValue` encodes a
+private nested `Storage` struct instead, so there is no conformance for the
+`RawRepresentable` defaults to attach to. The encoding also sorts the hidden set,
+because a `Set`'s iteration order is not fixed and an unsorted encoding would
+rewrite preferences when nothing had changed.
+
+**Prevention:** `ColumnVisibilityTests` round-trips a layout through `rawValue`
+— the trip `@AppStorage` actually makes — with a hidden set, an explicit order
+and a stored width. That test is what crashed; it passes now, and it would crash
+again the moment someone adds `Codable` back.
+
+---
+
 ## 2026-08-22 — Priority editing was in the build and could not be reached
 
 **Symptom:** reported from a real build — "the editing of Priority is not in

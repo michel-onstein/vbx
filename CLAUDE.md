@@ -58,20 +58,29 @@ them.
   file-exists check. Use `NSHostingView`, and assert on ink coverage.
 - **`.task` and `.onAppear` do not run in a snapshot.** Prefer data the store
   already holds; that constraint is why the unblocks cache exists.
-- **Do not put a row action behind a gesture on `Table` cell content.**
-  Priority editing shipped as an `onTapGesture(count: 2)` on a cell and did
-  nothing in the running app, with `br` present and `canEditBeads` true. Use
-  `contextMenu(forSelectionType:)`, which is `Table`'s own mechanism, or
-  `primaryAction:` for a row-level double-click.
-  **`Table` does support interactive cell content** — a `TextField` in a cell is
-  a real editable `NSTextField`, one per row — so this is about gestures layered
-  over `Text`, not about the widget being unable to edit.
-- **A synthetic click cannot activate anything inside a `Table`.** It presses a
-  plain SwiftUI `Button` in a hosting view, but inside a `Table` it neither
-  focuses a known-editable `TextField` nor fires `primaryAction`. So a headless
-  "the click did nothing" result is a fact about the harness, not the app — a
-  test asserting it passes either way. One was written and deleted for exactly
-  that.
+- **The bead list is `NSTableView`, not SwiftUI's `Table`.** See ``BeadTable``
+  and ADR-014. The reason is per-cell editing: `Table`'s only double-click hook
+  is `primaryAction:`, which reports the selected rows and not the column, and a
+  gesture on cell content is not a route to rely on — priority editing shipped
+  that way and did nothing in a real build.
+  **Cell appearance is still SwiftUI**, hosted in the cell, so there is one
+  description of how a bead looks. Only columns that accept an edit are drawn
+  natively, because an `NSTextField` is what a field editor edits.
+- **A column is declared once**, in `IssueListView.specs`. Its identifier is a
+  storage contract — stored layouts are keyed by it — and for a sortable column
+  it must equal its `SortColumn` raw value, or the header chevron and the order
+  come apart. Asserted in `Table columns`.
+- **A synthetic click cannot activate anything inside a table.** It presses a
+  plain SwiftUI `Button` in a hosting view, but inside a table it neither
+  focuses a known-editable `NSTextField` nor fires a double-click action. So a
+  headless "the click did nothing" result is a fact about the harness, not the
+  app — a test asserting it passes either way. One was written and deleted for
+  exactly that; assert what sits either side of the click instead.
+- **Never conform a type to both `Codable` and `RawRepresentable`** when the raw
+  value is `Codable` and `rawValue` encodes `self`. The standard library's
+  `RawRepresentable` coding defaults encode the *raw value*, so `rawValue`
+  re-enters itself and the stack overflows — SIGSEGV, no message, dead test
+  runner. `BeadTableLayout` codes a private nested type for this reason.
 - **One `Text` holding a large string is seconds of layout.** SwiftUI lays a
   `Text` out in full before drawing any of it: the 227 KB acknowledgements took
   **7.1 s**, with a spinning cursor throughout. Split across a `LazyVStack` it

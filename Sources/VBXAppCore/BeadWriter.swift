@@ -71,6 +71,21 @@ public final class BeadWriter: ObservableObject {
         try await run(["update", id, "--priority", String(priority), "--json"], in: workspace)
     }
 
+    /// Sets a bead's title.
+    ///
+    /// `br` takes the title as one argument, so nothing here quotes or escapes
+    /// it: the argument vector goes to `Process` directly, never through a
+    /// shell, which is what makes a title containing quotes, `$` or a newline
+    /// safe rather than something to sanitise.
+    public func setTitle(_ title: String, for id: String, in workspace: String) async throws {
+        try await run(Self.titleArguments(title, for: id), in: workspace)
+    }
+
+    /// The argument vector for a title change, without running it.
+    public static func titleArguments(_ title: String, for id: String) -> [String] {
+        ["update", id, "--title", title, "--json"]
+    }
+
     /// The argument vector for a priority change, without running it.
     ///
     /// Exposed so a test can pin the command rather than a mock's idea of it —
