@@ -64,6 +64,32 @@ public enum ViewSurface: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Whether the toolbar's Filter picker and Sort menu belong on this
+    /// surface.
+    ///
+    /// Both controls write to ``ProjectStore/query``, which is read in exactly
+    /// one place — `visibleIssues`. A surface that renders an engine payload of
+    /// its own never consults it, so the controls sit there answering nothing:
+    /// changing either one produces no visible effect at all. They are hidden
+    /// rather than disabled, because a disabled control still claims the view
+    /// has an ordering that happens to be unavailable, and these views have no
+    /// bead ordering to begin with.
+    ///
+    /// This is a question about the toolbar, not a claim about the data: it is
+    /// deliberately not derived from whether the view reads `visibleIssues`, so
+    /// that a surface can be left showing the controls while what it should do
+    /// is still being decided. ``history`` is the one such case today — it
+    /// ignores the query like the rest, but how it should relate to the
+    /// revision scrubber is a separate question, so it keeps the controls until
+    /// that is answered. Tracked as vbx-ec6.
+    public var showsFilterAndSort: Bool {
+        switch self {
+        case .list, .board, .graph, .tree: true
+        case .history: true
+        case .insights, .plan, .labels, .flow, .attention, .alerts, .sprint: false
+        }
+    }
+
     /// bv's single-key shortcut for this surface.
     public var terminalKey: Character {
         switch self {
@@ -403,6 +429,23 @@ public final class ProjectStore: ObservableObject {
     ///
     /// The membership guard is what keeps a stale reference — in prose, or in
     /// a URL from outside the app — from clearing the current selection.
+    /// Open one label's beads in the list.
+    ///
+    /// Labels is one of the surfaces that no longer offers a filter control, so
+    /// it is worth being explicit that this is not that control: it narrows to
+    /// the label and clears the status filter to set up the view it is
+    /// navigating *to*. Hiding a picker on a surface does not make the query
+    /// read-only there.
+    ///
+    /// It lives here rather than in the button that calls it so the sequence
+    /// can be tested — a test that re-typed these three lines would agree with
+    /// itself no matter what the button did.
+    public func showLabelInList(_ label: String) {
+        query.labels = [label]
+        query.filter = .all
+        surface = .list
+    }
+
     @discardableResult
     public func select(id: String) -> Bool {
         guard issues.contains(where: { $0.id == id }) else { return false }
