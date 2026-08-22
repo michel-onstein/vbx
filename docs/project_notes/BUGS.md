@@ -4,6 +4,39 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — A test fixture deleted a directory the store was still watching
+
+**Symptom:** `swift test` exited non-zero roughly one run in eight, with **no
+failing expectation and no summary line** — the runner simply stopped. Every
+re-run passed, and `--no-parallel` always passed.
+
+**Cause:** `Fixture.committedStore()` hands back a store and a directory, and
+the tests removed the directory in a `defer` while the store was still open and
+still watching it. That had been survivable when only the bead file was watched;
+`vbx-bct` added a second watch on `.git`, which is *inside* the directory being
+deleted, and FSEvents delivering a change for a path that has just gone — into a
+store whose engine session is still open — is what took the process down.
+
+Parallel execution is why it was intermittent and why it looked like it had no
+location: the crash kills the whole runner, so the output shows a couple of
+hundred tests "started" and nothing finished, wherever the failure actually was.
+
+**Fix:** the tests stop watching before removing the directory. The store is
+told to let go of the path first, which is the ordering the helper should always
+have had.
+
+**Not claimed:** that the app is now safe against a workspace being deleted
+underneath it. That is a real question and this is not evidence about it — only
+the test-side ordering was proven wrong and corrected.
+
+**Prevention:** no new test, deliberately — a one-in-eight crash is not
+something an assertion catches, and a test that ran the suite repeatedly would
+be slow and still probabilistic. What was done instead is eight consecutive
+clean runs after the change, against two observed failures in roughly a dozen
+before it.
+
+---
+
 ## 2026-08-22 — Every hosted cell was centred in its column
 
 **Symptom:** reported as "the label pills are not aligned to the left of the
