@@ -5,6 +5,23 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-22 — The first published release, and the bug that had prevented one
+
+Asked for the locally built binary to be uploaded to GitHub as a versioned
+release. `release.sh --publish` has done exactly that since it was written, and
+it had never once run: its preflight calls `package-app.sh --check`, and the
+check reported the notary profile unusable on a machine where notarization
+worked. One unsupported flag — `--limit 1`, which notarytool 1.1.2 does not have
+— failed the probe, and a silent probe made it look like missing credentials.
+Six tags, no releases. See BUGS.md.
+
+The fix is a flag removed and an error printed. The test that locks it in
+validates every notarytool flag the script uses against that subcommand's
+`--help`, rather than pinning `--limit` specifically: the bug is "a flag this
+notarytool does not have", and next time it will be a different flag.
+
+---
+
 ## 2026-08-22 — The bead list moved to NSTableView, and titles are editable
 
 Asked whether we were using the wrong widget, given that double-click-to-edit is

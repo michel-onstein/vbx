@@ -481,6 +481,55 @@ def test_check_reports_per_channel() -> None:
           "set" in result.stdout)
 
 
+def test_notary_probe_uses_flags_this_notarytool_has() -> None:
+    """A flag notarytool does not have fails the probe, not the flag.
+
+    `notarytool history --limit 1` kept the preflight round trip small, and
+    notarytool 1.1.2 has no `--limit`: it exits 64 on the unknown option. So a
+    profile that worked was reported unusable, `--check` exited non-zero, and
+    release.sh — which runs it unwrapped in preflight — aborted before building
+    anything. No release was ever cut. The probe discarded stderr, so "unknown
+    flag" and "no such credential" printed the same sentence, and the sentence
+    said to store credentials that were already stored.
+
+    So: every flag handed to notarytool must exist in *this* notarytool, and a
+    failing probe must say what actually went wrong.
+    """
+    print("\nNotary probe")
+    if not shutil.which("xcrun"):
+        print("  skip  notarytool flags (xcrun is not on the PATH)")
+        return
+
+    # Continuations joined first, so a flag on the next line still belongs to
+    # the invocation that opened it.
+    joined = PACKAGE.read_text().replace("\\\n", " ")
+    invocations = re.findall(r"xcrun notarytool ([a-z][a-z-]*)([^\n]*)", joined)
+    check("the notarytool invocations are found", len(invocations) >= 2,
+          f"found {len(invocations)}")
+
+    for sub, rest in invocations:
+        usage = subprocess.run(["xcrun", "notarytool", sub, "--help"],
+                               capture_output=True, text=True)
+        if usage.returncode != 0:
+            check(f"notarytool {sub} --help succeeds", False,
+                  (usage.stdout + usage.stderr).strip()[:200])
+            continue
+        supported = set(re.findall(r"--[a-z][a-z-]*", usage.stdout + usage.stderr))
+        for flag in sorted(set(re.findall(r"--[a-z][a-z-]*", rest))):
+            check(f"notarytool {sub} accepts {flag}", flag in supported,
+                  "this notarytool has no such option")
+
+    # And the diagnosis, which is the half that made the flag bug unreadable.
+    result = run_package("--check", env_extra={"VBX_DEVELOPER_ID_APP": "-"})
+    combined = result.stdout + result.stderr
+    check("an unusable notary profile is reported as such",
+          "notary profile" in combined and "not usable" in combined,
+          combined.strip()[-200:])
+    check("a failed probe reports why it failed",
+          FAKE["VBX_NOTARY_PROFILE"] in combined,
+          "the probe's own error was swallowed")
+
+
 def test_help_and_bad_flags() -> None:
     print("\nInterface")
     result = run_package("--help")
@@ -981,6 +1030,7 @@ def main() -> int:
     test_ad_hoc_cannot_be_notarized()
     test_real_app_store_run()
     test_check_reports_per_channel()
+    test_notary_probe_uses_flags_this_notarytool_has()
     test_help_and_bad_flags()
     test_build_app_forwards()
     test_universal_is_implied_and_verified()

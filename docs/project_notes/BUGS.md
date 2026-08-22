@@ -4,6 +4,52 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — A flag notarytool does not have blocked every release
+
+**Symptom:** six versions were tagged and pushed, `0.0.1` through `0.0.6`, and
+**not one GitHub release existed**. Nothing had ever been uploaded. Asked to
+publish, `./scripts/package-app.sh --check` reported
+
+```
+  notary profile         not usable — run xcrun notarytool store-credentials
+  --dmg          not ready (needs VBX_DEVELOPER_ID_APP and a usable VBX_NOTARY_PROFILE)
+error: no distribution channel is configured.
+```
+
+on a machine where the credentials were stored and working.
+
+**Cause:** the probe was `xcrun notarytool history --keychain-profile "$P"
+--limit 1`. **notarytool 1.1.2 has no `--limit`** — it exits 64 with
+`Error: Unknown option '--limit'`. The probe discarded stdout and stderr, so a
+usage error and a missing credential were the same non-zero exit and printed the
+same sentence. `--check` then exits non-zero, and `release.sh` runs it unwrapped
+under `set -e` in preflight, so every release attempt aborted before it built
+anything. The advice printed — run `store-credentials` — was the one action that
+could not help, because it had already been done.
+
+**Finding it:** running the probe by hand without the flag succeeded
+(`No submission history.`); with the flag it exited 64. That is the whole
+diagnosis, and it was two commands away the entire time — but only once the
+probe's output was looked at rather than the probe's verdict.
+
+Same shape as *The signing config had been dead since the rename*: a preflight
+that fails closed on itself reads exactly like the thing it is checking being
+absent, and it will be believed, because that is what a check is for.
+
+**Fix:** the probe passes no flag but `--keychain-profile`, and **prints its own
+first line of error when it fails**. A failed probe now says
+`Error: No Keychain password item found for profile: …` — which names the real
+cause and cannot be confused with a broken probe.
+
+**Prevention:** `test_notary_probe_uses_flags_this_notarytool_has` in
+`scripts/test-packaging.py` extracts every flag the script hands to
+`xcrun notarytool` and asserts each one appears in that subcommand's own
+`--help`, so a flag *this* notarytool lacks fails a test instead of a release.
+It also drives `--check` with an unusable profile and asserts the output names
+why — the half that made the flag bug unreadable.
+
+---
+
 ## 2026-08-22 — A Codable + RawRepresentable layout killed the test runner
 
 **Symptom:** `swift test` exited with **signal 11**. No failing expectation, no

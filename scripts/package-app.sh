@@ -279,11 +279,21 @@ check_config() {
   # "--dmg ready" and "configuration is incomplete" in the same breath.
   NOTARY_OK=1
   if [[ -n "$NOTARY_PROFILE" ]] && command -v xcrun >/dev/null; then
-    if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" \
-        --limit 1 >/dev/null 2>&1; then
+    # No flag beyond the profile, and the probe's own error is reported when it
+    # fails. `--limit 1` was here to keep the round trip cheap, but notarytool
+    # 1.1.2 has no such option and exits 64 on it — so a profile that worked
+    # was reported unusable, and the advice printed was to store credentials
+    # that were already stored. Because `--check` then exits non-zero and
+    # release.sh runs it unwrapped in preflight, every release aborted before
+    # it built anything. A silent probe is what made that unreadable: an
+    # unknown flag and a missing credential looked identical.
+    local notary_probe
+    if notary_probe="$(xcrun notarytool history \
+        --keychain-profile "$NOTARY_PROFILE" 2>&1)"; then
       say "  notary profile         usable"
     else
       say "  notary profile         not usable — run xcrun notarytool store-credentials"
+      say "                         $(printf '%s\n' "$notary_probe" | grep -v '^$' | head -1)"
       NOTARY_OK=0
     fi
   fi
