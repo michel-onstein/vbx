@@ -7,12 +7,19 @@ import SwiftUI
 
 @main
 struct VBXApp: App {
+    /// The workspace window group's identifier.
+    ///
+    /// Needed to open a window with *no* workspace. `openWindow(value:)`
+    /// resolves a scene by the type of the value it is given, and there is no
+    /// scene for "absence" — see ``VBXCommands`` for what that cost.
+    static let workspaceWindowID = "workspace"
+
     var body: some Scene {
         // Keyed on the workspace path, which does three things at once: each
         // window gets its own identity for state restoration, `openWindow`
         // raises the window already showing a path instead of making a second
         // one, and a window remembers which workspace it had across launches.
-        WindowGroup(for: String.self) { $path in
+        WindowGroup(id: Self.workspaceWindowID, for: String.self) { $path in
             WorkspaceWindow(path: $path)
         }
         .windowToolbarStyle(.unified)
@@ -196,7 +203,18 @@ struct VBXCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             // A window with no workspace yet; it opens the panel itself.
-            Button("New Window") { openWindow(value: String?.none) }
+            //
+            // By **id**, not by value. This was `openWindow(value: String?.none)`
+            // and did nothing at all: `openWindow(value:)` is generic over any
+            // `Codable & Hashable`, so `String?` compiles happily — and then
+            // SwiftUI resolves the scene by the *type* of that value. The group
+            // is declared `for: String.self`; nothing declares `String?`, so no
+            // scene matched and no window opened. Silently, because a call that
+            // finds no scene is not an error.
+            //
+            // The recents menu below never had the problem: it passes a plain
+            // `String`, which is why one route worked and the other did not.
+            Button("New Window") { openWindow(id: VBXApp.workspaceWindowID) }
                 .keyboardShortcut("n", modifiers: .command)
             Button("Open Workspace…") { store?.presentOpenPanel() }
                 .keyboardShortcut("o", modifiers: .command)

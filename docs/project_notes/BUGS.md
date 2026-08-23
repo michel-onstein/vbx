@@ -4,6 +4,46 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — File ▸ New Window opened no window
+
+**Symptom:** ⌘N did nothing. No window, no error, no log line. Opening a
+workspace from Recent Workspaces worked, which made it look like a problem with
+the empty state rather than with the command.
+
+**Cause:** the command was `openWindow(value: String?.none)`.
+
+`openWindow(value:)` is generic over `D: Codable & Hashable`. `String?` satisfies
+that, so the call compiles — and SwiftUI then resolves which scene to present by
+the **type** of the value. The group is declared `WindowGroup(for: String.self)`;
+nothing declares `String?`. No scene matched, so nothing opened, and a call that
+matches no scene is not an error.
+
+The recents menu passes `entry.path`, a plain `String`, which is why one route
+into the same window group worked and the other did not.
+
+**Fix:** the group carries an identifier and the command opens by it —
+`openWindow(id:)` is the only way to present a value-based group with no value.
+The identifier is a shared constant so the two halves cannot drift.
+
+**Not verified at runtime.** Assistive access is denied to this session, so ⌘N
+could not be pressed and window counts could not be read
+(`osascript` returns `-25211`). The diagnosis is from the type system and from
+the SDK's own declaration of `callAsFunction<D>(value: D)`, both of which are
+conclusive about *why* nothing matched — but that the fix opens a window is
+unconfirmed here and should be checked in the running app.
+
+**Prevention:** `WindowCommandsTests` asserts no `openWindow(value:)` is handed
+an optional, that the new-window command opens by id, and that the group
+declares the identifier the command uses. Confirmed to fail on the old call.
+
+This reads source, which the column tests were just deleted for doing. The
+difference is what is being asserted: those parsed *structure* that legitimately
+changes shape, and silently matched nothing when it did. This asserts the
+absence of one known-bad call form, which is stable — and there is no value to
+inspect instead, because a SwiftUI scene graph exposes none.
+
+---
+
 ## 2026-08-22 — The cask, and the instructions for it, did not survive contact
 
 **Symptom:** following `release.sh`'s own printed instructions produced
