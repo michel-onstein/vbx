@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.0.15 — 2026-08-23
+
+### Fixes
+
+- Add the portal route, because the API cannot issue a Developer ID cert ([#48](https://github.com/michel-onstein/vbx/pull/48))
+
 ## 0.0.14 — 2026-08-23
 
 ### Fixes
