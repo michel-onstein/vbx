@@ -749,9 +749,17 @@ credential, both halves.
 - **The missing `.p8` is caught before building.** A path that does not exist
   otherwise fails inside `notarytool`, minutes into a release, after the
   universal build and the signing.
-- **Creating the certificate still needs the Account Holder role.** An Admin key
-  notarizes fine and cannot create a Developer ID certificate; Apple's error
-  does not say so, so `signing-setup.sh --check` says it instead.
+- **Creating the certificate through the API does not work for most accounts.**
+  Measured, not predicted: `asc certificates create` returns *"This request is
+  forbidden for security reasons: This operation can only be performed by the
+  Account Holder."* A **Team** key cannot hold that role — it is not among the
+  roles offered when generating one — so no configuration fixes it. An
+  *Individual* key created by the Account Holder carries that person's role and
+  may work; it is worth one attempt and nothing more.
+  `signing-setup.sh --csr` is therefore the route that always works: the request
+  is generated locally, the certificate is issued in the web portal signed in as
+  the Account Holder, and `--import` installs it. Notarization has no such
+  restriction — any Team key notarizes.
 - **Neither credential exists here yet**, so this does not make a signed release
   possible on its own — it removes one of the two blockers and makes the other
   a single credential rather than two.

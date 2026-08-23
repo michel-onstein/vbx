@@ -227,9 +227,16 @@ view snapshots for inspection.
   `_KEY_ID` / `_ISSUER`, in preference to a `notarytool` keychain profile. One
   credential covers the certificate and the notarization, and it is the only
   form that works in CI — a keychain profile cannot travel. See ADR-017.
-- **Creating a Developer ID certificate needs the Account Holder role.** An
-  Admin key can notarize and can list certificates, but cannot create one, and
-  Apple's error does not say so.
+- **A Developer ID certificate cannot be created with a Team API key.**
+  Apple: *"This operation can only be performed by the Account Holder."* Account
+  Holder is not a role a Team key can be given, so this is not a configuration
+  problem. Use `./scripts/signing-setup.sh --csr`, issue the certificate in the
+  web portal as the Account Holder, then `--import` it. An *Individual* key made
+  by the Account Holder inherits that role and may work through `asc`.
+  Notarization has no such restriction.
+- **Keep `~/.vbx-signing/developer-id.key`.** The certificate is useless without
+  the private key that produced its request — a `.cer` imported alone is not a
+  signing identity, and `security find-identity` will not list it.
 - **The packaging pipeline itself is proven.** An ad-hoc `--dmg --no-notarize`
   build produces a 50 MB universal disk image with both slices, signed and
   verified, so the certificate is the only missing piece rather than one of

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -1058,6 +1059,69 @@ def test_signing_setup_script() -> None:
           "DEVELOPER_ID_APPLICATION" in text)
 
 
+def test_signing_setup_portal_route() -> None:
+    """The API route cannot work for most accounts, so the portal route must.
+
+    Apple restricts Developer ID creation to the Account Holder, and a *Team*
+    API key cannot hold that role — no configuration fixes it. Measured, not
+    assumed: `asc certificates create` returned "This operation can only be
+    performed by the Account Holder."
+    """
+    print("\nSigning setup: portal route")
+    if not SIGNING_SETUP.exists():
+        print("  skip  signing-setup.sh is absent")
+        return
+
+    scratch = pathlib.Path(tempfile.mkdtemp())
+    try:
+        env = {**os.environ, "VBX_SIGNING_DIR": str(scratch / "fresh")}
+        result = subprocess.run([str(SIGNING_SETUP), "--csr"],
+                                capture_output=True, text=True, env=env)
+        check("--csr succeeds with no credentials", result.returncode == 0,
+              (result.stdout + result.stderr).strip()[-200:])
+
+        key = scratch / "fresh" / "developer-id.key"
+        csr = scratch / "fresh" / "developer-id.csr"
+        check("it writes a key and a request", key.exists() and csr.exists())
+        # Without this the certificate that comes back cannot sign, and the
+        # failure appears much later.
+        check("the key is private to the user",
+              oct(key.stat().st_mode)[-3:] == "600", oct(key.stat().st_mode))
+
+        valid = subprocess.run(["openssl", "req", "-in", str(csr), "-noout", "-subject"],
+                               capture_output=True, text=True)
+        check("the request is a real CSR", valid.returncode == 0, valid.stderr.strip())
+
+        # Re-running must not mint a second key: a new key would not match a
+        # certificate issued for the first request, and the mismatch only shows
+        # up at import.
+        before = key.read_bytes()
+        subprocess.run([str(SIGNING_SETUP), "--csr"],
+                       capture_output=True, text=True, env=env)
+        check("re-running reuses the same key", key.read_bytes() == before)
+
+        # A certificate with no matching key is not an identity. AppKit will
+        # import it happily and codesign cannot use it.
+        empty = {**os.environ, "VBX_SIGNING_DIR": str(scratch / "empty")}
+        result = subprocess.run([str(SIGNING_SETUP), "--import", str(csr)],
+                                capture_output=True, text=True, env=empty)
+        check("--import refuses without the private key", result.returncode == 1)
+        check("...and says why", "private key" in result.stderr, result.stderr.strip()[:160])
+
+        result = subprocess.run([str(SIGNING_SETUP), "--import", "/nowhere/missing.cer"],
+                                capture_output=True, text=True, env=env)
+        check("--import refuses a certificate that is not there", result.returncode == 1)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    # The guidance has to name the route that works, not only the one that failed.
+    guidance = subprocess.run([str(SIGNING_SETUP), "--check"],
+                              capture_output=True, text=True).stdout
+    check("--check points at the portal route",
+          "--csr" in guidance and "--import" in guidance, guidance.strip()[-200:])
+    check("--check names the Account Holder refusal", "Account Holder" in guidance)
+
+
 def main() -> int:
     print("Packaging and signing tests")
     check("package-app.sh is executable", os.access(PACKAGE, os.X_OK))
@@ -1091,6 +1155,7 @@ def main() -> int:
     test_built_bundle_carries_the_tag()
     test_notarization_accepts_an_api_key()
     test_signing_setup_script()
+    test_signing_setup_portal_route()
 
     print()
     if failures:
