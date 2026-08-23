@@ -18,8 +18,10 @@ cask "vbx" do
   version "@VERSION@"
   sha256 "@SHA256@"
 
-  url "@URL@",
-      verified: "github.com/@REPO@/"
+  # `#{version}` rather than the number: `brew audit` reads a URL with no
+  # interpolation as *unversioned* and then demands `sha256 :no_check`, which
+  # would switch the checksum off altogether.
+  url "https://github.com/@REPO@/releases/download/#{version}/vbx-#{version}.dmg"
   name "Visual Beads"
   # No platform in a cask description — `Cask/Desc` rejects "macOS" here, since
   # every cask is macOS.
@@ -31,7 +33,9 @@ cask "vbx" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :sonoma"
+  # The bare symbol already means "this version or newer"; `>= :sonoma` says the
+  # same thing and `brew style` rejects it.
+  depends_on macos: :sonoma
 
   # The bundle on disk is vbx.app — `vbx` is the short form that names the
   # executable, the bundle identifier and the URL scheme. Finder shows it as
