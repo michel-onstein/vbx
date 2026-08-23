@@ -75,6 +75,9 @@ if [[ -f "$CONFIG_FILE" ]]; then
   _env_bundle="${VBX_BUNDLE_ID:-}"
   _env_devid="${VBX_DEVELOPER_ID_APP:-}"
   _env_notary="${VBX_NOTARY_PROFILE:-}"
+  _env_key="${VBX_NOTARY_KEY:-}"
+  _env_key_id="${VBX_NOTARY_KEY_ID:-}"
+  _env_issuer="${VBX_NOTARY_ISSUER:-}"
   _env_as_app="${VBX_APP_STORE_APP:-}"
   _env_as_inst="${VBX_APP_STORE_INSTALLER:-}"
   _env_profile="${VBX_PROVISION_PROFILE:-}"
@@ -86,6 +89,9 @@ if [[ -f "$CONFIG_FILE" ]]; then
   [[ -n "$_env_bundle" ]]  && VBX_BUNDLE_ID="$_env_bundle"
   [[ -n "$_env_devid" ]]   && VBX_DEVELOPER_ID_APP="$_env_devid"
   [[ -n "$_env_notary" ]]  && VBX_NOTARY_PROFILE="$_env_notary"
+  [[ -n "$_env_key" ]]     && VBX_NOTARY_KEY="$_env_key"
+  [[ -n "$_env_key_id" ]]  && VBX_NOTARY_KEY_ID="$_env_key_id"
+  [[ -n "$_env_issuer" ]]  && VBX_NOTARY_ISSUER="$_env_issuer"
   [[ -n "$_env_as_app" ]]  && VBX_APP_STORE_APP="$_env_as_app"
   [[ -n "$_env_as_inst" ]] && VBX_APP_STORE_INSTALLER="$_env_as_inst"
   [[ -n "$_env_profile" ]] && VBX_PROVISION_PROFILE="$_env_profile"
@@ -107,6 +113,42 @@ TEAM_ID="${VBX_TEAM_ID:-}"
 BUNDLE_ID="${VBX_BUNDLE_ID:-com.qjam.vbx}"
 DEVELOPER_ID_APP="${VBX_DEVELOPER_ID_APP:-}"
 NOTARY_PROFILE="${VBX_NOTARY_PROFILE:-}"
+
+# App Store Connect API key, as an alternative to the keychain profile.
+#
+# `notarytool store-credentials` writes a profile into the login keychain from
+# an Apple ID and an app-specific password. That is fine on a developer's own
+# machine and impossible anywhere else: a keychain profile cannot be put in CI,
+# and an app-specific password is a second credential to create and rotate.
+#
+# An API key is one credential that already covers the rest of the account —
+# the same key creates the Developer ID certificate — and it is three files and
+# strings, so it travels. Either form works; the key is preferred when both are
+# set, because it is the one that behaves the same everywhere.
+NOTARY_KEY="${VBX_NOTARY_KEY:-}"
+NOTARY_KEY_ID="${VBX_NOTARY_KEY_ID:-}"
+NOTARY_ISSUER="${VBX_NOTARY_ISSUER:-}"
+
+# notary_auth resolves the credential arguments once, so `--check` and the real
+# submission can never disagree about which one is in play.
+#
+# Sets NOTARY_AUTH (the argv fragment) and NOTARY_AUTH_KIND (for humans). Empty
+# when nothing is configured.
+NOTARY_AUTH=()
+NOTARY_AUTH_KIND="none"
+notary_auth() {
+  if [[ -n "$NOTARY_KEY" && -n "$NOTARY_KEY_ID" && -n "$NOTARY_ISSUER" ]]; then
+    NOTARY_AUTH=(--key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
+    NOTARY_AUTH_KIND="App Store Connect API key"
+  elif [[ -n "$NOTARY_PROFILE" ]]; then
+    NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+    NOTARY_AUTH_KIND="keychain profile"
+  else
+    NOTARY_AUTH=()
+    NOTARY_AUTH_KIND="none"
+  fi
+}
+notary_auth
 APP_STORE_APP="${VBX_APP_STORE_APP:-}"
 APP_STORE_INSTALLER="${VBX_APP_STORE_INSTALLER:-}"
 PROVISION_PROFILE="${VBX_PROVISION_PROFILE:-}"
@@ -143,6 +185,13 @@ redact() {
   _mask "$APP_STORE_INSTALLER" "<APP_STORE_INSTALLER>"
   _mask "$PROVISION_PROFILE"   "<PROVISION_PROFILE>"
   _mask "$TEAM_ID"             "<TEAM_ID>"
+  # The API key's own identifiers. The .p8 path can carry a team or account
+  # name, and the issuer is an account-wide UUID — neither is a secret on its
+  # own, and both are exactly the kind of thing that ends up pasted into an
+  # issue alongside a build log.
+  _mask "$NOTARY_KEY"          "<NOTARY_KEY>"
+  _mask "$NOTARY_KEY_ID"       "<NOTARY_KEY_ID>"
+  _mask "$NOTARY_ISSUER"       "<NOTARY_ISSUER>"
 
   # Finally, anything shaped like a certificate name that this build never
   # configured. `security find-identity` lists every identity in the keychain,
@@ -236,6 +285,7 @@ check_config() {
 
   local setting
   for setting in TEAM_ID BUNDLE_ID DEVELOPER_ID_APP NOTARY_PROFILE \
+    NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER \
                  APP_STORE_APP APP_STORE_INSTALLER PROVISION_PROFILE; do
     if [[ -n "${!setting}" ]]; then
       printf '  %-22s set\n' "$setting"
@@ -278,12 +328,21 @@ check_config() {
   # channel that needs it, not as a global failure — otherwise `--check` says
   # "--dmg ready" and "configuration is incomplete" in the same breath.
   NOTARY_OK=1
-  if [[ -n "$NOTARY_PROFILE" ]] && command -v xcrun >/dev/null; then
-    if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" \
-        --limit 1 >/dev/null 2>&1; then
-      say "  notary profile         usable"
+  if [[ "$NOTARY_AUTH_KIND" == "none" ]]; then
+    say "  notarization           no credentials — an API key or a keychain profile"
+    NOTARY_OK=0
+  elif [[ -n "${NOTARY_KEY}" && ! -f "$NOTARY_KEY" ]]; then
+    # Named before it is used: a missing .p8 fails inside notarytool minutes
+    # into a release, after the build and the signing.
+    say "  notarization           API key file not found at the configured path"
+    NOTARY_OK=0
+  elif command -v xcrun >/dev/null; then
+    # Asked rather than assumed. Credentials that are *present* and credentials
+    # that *work* are different claims, and only the second one ships.
+    if xcrun notarytool history "${NOTARY_AUTH[@]}" --limit 1 >/dev/null 2>&1; then
+      say "  notarization           usable ($NOTARY_AUTH_KIND)"
     else
-      say "  notary profile         not usable — run xcrun notarytool store-credentials"
+      say "  notarization           $NOTARY_AUTH_KIND configured but not usable"
       NOTARY_OK=0
     fi
   fi
@@ -294,7 +353,7 @@ check_config() {
   local dmg_ready=1 store_ready=1
   [[ -n "$DEVELOPER_ID_APP" && ${DEVID_CERT_OK:-1} -eq 1 ]] || dmg_ready=0
   if [[ $NOTARIZE -eq 1 ]]; then
-    [[ -n "$NOTARY_PROFILE" && ${NOTARY_OK:-1} -eq 1 ]] || dmg_ready=0
+    [[ "$NOTARY_AUTH_KIND" != "none" && ${NOTARY_OK:-1} -eq 1 ]] || dmg_ready=0
   fi
   [[ -n "$TEAM_ID" && -n "$APP_STORE_APP" && -n "$APP_STORE_INSTALLER" \
      && -n "$PROVISION_PROFILE" && ${STORE_CERT_OK:-1} -eq 1 ]] || store_ready=0
@@ -303,7 +362,7 @@ check_config() {
   if [[ $dmg_ready -eq 1 ]]; then
     say "  --dmg          ready"
   else
-    say "  --dmg          not ready (needs VBX_DEVELOPER_ID_APP and a usable VBX_NOTARY_PROFILE)"
+    say "  --dmg          not ready (needs VBX_DEVELOPER_ID_APP, and either VBX_NOTARY_KEY/_KEY_ID/_ISSUER or VBX_NOTARY_PROFILE)"
   fi
   if [[ $store_ready -eq 1 ]]; then
     say "  --app-store    ready"
@@ -359,6 +418,7 @@ stage_app() {
   xattr -cr "$APP"
 }
 
+
 # ---------------------------------------------------------------------------
 # Developer ID
 # ---------------------------------------------------------------------------
@@ -395,11 +455,11 @@ notarize() {
   if [[ "$DEVELOPER_ID_APP" == "-" ]]; then
     fail "an ad-hoc signature cannot be notarized. Add --no-notarize for a local build, or configure VBX_DEVELOPER_ID_APP."
   fi
-  require_config VBX_NOTARY_PROFILE "$NOTARY_PROFILE"
-
   say "==> Notarizing (this waits on Apple; minutes, occasionally longer)"
-  run xcrun notarytool submit "$target" \
-    --keychain-profile "$NOTARY_PROFILE" --wait
+  if [[ ${#NOTARY_AUTH[@]} -eq 0 ]]; then
+    fail "no notarization credentials. Set VBX_NOTARY_KEY, VBX_NOTARY_KEY_ID and VBX_NOTARY_ISSUER (an App Store Connect API key), or VBX_NOTARY_PROFILE (a notarytool keychain profile)."
+  fi
+  run xcrun notarytool submit "$target" "${NOTARY_AUTH[@]}" --wait
 
   say "==> Stapling the ticket"
   # Stapling is what makes the download work offline; without it Gatekeeper has

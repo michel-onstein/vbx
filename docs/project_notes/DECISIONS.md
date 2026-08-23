@@ -702,3 +702,56 @@ is the one thing allowed past the rule.
   can push to `main` past the rule. That is the residual hole, and it is the
   reason the bypass is a deploy key scoped to this repository rather than a PAT
   carrying a person's whole account.
+
+---
+
+## ADR-017 — Notarize with an App Store Connect API key, not a keychain profile
+
+**Date:** 2026-08-22 · **Status:** Accepted
+
+**Context.** `package-app.sh` required `VBX_NOTARY_PROFILE`, a profile written
+by `xcrun notarytool store-credentials` from an Apple ID and an app-specific
+password. That is the form Apple's documentation leads with, and it has two
+problems.
+
+It lives in one login keychain. It cannot be put in CI, cannot be shared, and a
+new machine means creating it again — so the release path only ever works from
+one desk.
+
+And it is a *second* credential. Getting a signed release also needs a Developer
+ID Application certificate, which comes from the developer account; the
+app-specific password is a separate thing to create, store and rotate for no
+additional capability.
+
+**Decision.** `VBX_NOTARY_KEY`, `VBX_NOTARY_KEY_ID` and `VBX_NOTARY_ISSUER` — an
+App Store Connect API key — are accepted and preferred. The keychain profile
+still works and is not deprecated; when both are configured the key wins,
+because it is the form that behaves the same everywhere.
+
+The same key creates the certificate: `scripts/signing-setup.sh` uses it through
+`asc` to issue the Developer ID Application certificate and import it. One
+credential, both halves.
+
+**Consequences.**
+
+- **A release becomes possible from CI**, which a keychain profile made
+  impossible. Not wired up — the workflow tags and records and deliberately
+  builds nothing (ADR-014's note) — but it is no longer blocked by the
+  credential's shape.
+- **The key's identifiers are masked** like every other account identifier. The
+  `.p8` path can carry an account name and the issuer is an account-wide UUID;
+  neither is secret alone, and both are what ends up pasted into an issue beside
+  a build log.
+- **`--check` asks whether the credential *works*,** by calling
+  `notarytool history` with whichever form is configured, and reports which one
+  is in play. Configured and usable are different claims, and only the second
+  one ships.
+- **The missing `.p8` is caught before building.** A path that does not exist
+  otherwise fails inside `notarytool`, minutes into a release, after the
+  universal build and the signing.
+- **Creating the certificate still needs the Account Holder role.** An Admin key
+  notarizes fine and cannot create a Developer ID certificate; Apple's error
+  does not say so, so `signing-setup.sh --check` says it instead.
+- **Neither credential exists here yet**, so this does not make a signed release
+  possible on its own — it removes one of the two blockers and makes the other
+  a single credential rather than two.

@@ -5,6 +5,39 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-22 — Working towards a signed build
+
+Asked whether a signed release was possible yet. It is not, and the reason was
+worse than the one on record: `package-app.sh --check` reported "Developer ID
+cert in the keychain" while `VBX_DEVELOPER_ID_APP` pointed at an **Apple
+Development** certificate. The check grepped for the configured string rather
+than the certificate's kind, so it confirmed the string was present, not that it
+was usable. There is no Developer ID Application certificate on this machine at
+all. (Another session found the same thing and has PR #40 open fixing the check
+— left alone rather than duplicated.)
+
+Two blockers, then, both needing the Apple account. What could be done here was
+to collapse them into one credential and make the path to it short.
+
+Notarization now accepts an App Store Connect API key as well as a `notarytool`
+keychain profile, and prefers it. A profile lives in one login keychain: it
+cannot go to CI, cannot be shared, and needs an app-specific password that
+exists for no other purpose. An API key is the same credential that issues the
+Developer ID certificate, so there is one thing to obtain rather than two.
+ADR-017.
+
+`scripts/signing-setup.sh` turns getting the certificate into one command
+against `asc`, with a `--check` that names what is missing and a `--dry-run`
+that works before any credential exists — which is when reading the plan is
+most useful. The key and certificate go to `~/.vbx-signing`, outside the
+checkout, because this repository is public.
+
+Proved the rest of the pipeline is not the problem: an ad-hoc
+`--dmg --no-notarize` build produced a 50 MB universal disk image, both slices,
+signed and verified. The certificate really is the only missing piece.
+
+---
+
 ## 2026-08-22 — History loses the filter and sort it never read
 
 `vbx-ec6`, the decision left open when the other seven engine-payload surfaces
