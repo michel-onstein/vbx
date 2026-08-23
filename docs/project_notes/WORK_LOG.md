@@ -5,6 +5,34 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-22 — The API cannot issue a Developer ID certificate; the portal can
+
+`signing-setup.sh` was run for real and Apple refused:
+
+    This request is forbidden for security reasons:
+    This operation can only be performed by the Account Holder.
+
+Which is what `--check` had warned about, but the warning implied the problem
+was the *key's* role and therefore fixable. It is not: Account Holder is not
+among the roles a **Team** key can be given, so no team key will ever create a
+Developer ID certificate. An *Individual* key made by the Account Holder carries
+that person's role and might; worth one attempt, not a plan.
+
+So the script gained the route that always works. `--csr` generates the request
+locally — reusing the key and CSR a failed `asc` run already left behind, which
+matters because a fresh key would not match a certificate issued for the old
+request — and `--import` installs what the portal returns.
+
+`--import` refuses a certificate with no matching private key, and says why. A
+`.cer` imported alone is not a signing identity: it appears in the keychain,
+`security find-identity` does not list it, and `codesign` cannot use it. That
+failure would otherwise surface much later, during a release.
+
+Notarization is unaffected: it has no role restriction, so the Team key already
+configured is enough for that half.
+
+---
+
 ## 2026-08-22 — Working towards a signed build
 
 Asked whether a signed release was possible yet. It is not, and the reason was
