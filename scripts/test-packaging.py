@@ -669,6 +669,51 @@ def test_cask_and_release_script() -> None:
           "delete-generic-password" in template)
     check("the cask tracks new releases", "livecheck" in template)
 
+    # Three things `brew audit` rejected, all found by running it for real
+    # against a published release rather than reasoning about the template.
+    #
+    # A URL with the number written into it reads to the audit as *unversioned*
+    # — it looks for the interpolation, not for digits — and it then demands
+    # `sha256 :no_check`, which would switch the checksum off entirely.
+    check("the url interpolates the version",
+          "#{version}" in template, "the URL hard-codes the version")
+    check("...so no placeholder URL is substituted", "@URL@" not in template)
+    # `verified:` vouches for a URL whose host is not obviously the project's.
+    # A github.com release URL under the project's own repository is not that,
+    # and the parameter is deprecated.
+    check("the deprecated verified parameter is gone", "verified:" not in template)
+    # `>= :sonoma` and `:sonoma` mean the same thing; only one passes style.
+    check("the macOS requirement uses the bare symbol",
+          'macos: :sonoma' in template and '">= :sonoma"' not in template)
+
+
+def test_release_instructions_are_runnable() -> None:
+    """The tap instructions `release.sh` prints have to work when pasted.
+
+    They did not: they told you to run `brew audit --cask --new Casks/vbx.rb`,
+    and `brew audit` refuses a path outright — "Calling `brew audit [path ...]`
+    is disabled". Someone followed them and hit exactly that.
+    """
+    print("\nRelease instructions")
+    text = RELEASE.read_text()
+    lines = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+    body = "\n".join(lines)
+
+    check("brew audit is never given a path",
+          "brew audit --cask Casks/" not in body
+          and "brew audit --cask --new Casks/" not in body)
+    check("brew audit is given a tap-qualified name",
+          "brew audit --cask michel-onstein/tap/vbx" in body)
+    # `--new` is the strict submission audit for homebrew/homebrew-cask. It
+    # fails a personal tap on "repository not notable enough", which is not
+    # something a new project can act on.
+    check("the strict submission audit is not suggested for a personal tap",
+          "--cask --new" not in body)
+    # Tapping a directory clones it, so an uncommitted cask is invisible —
+    # which is what happened.
+    check("the instructions say the cask must be committed first",
+          "committed" in body.lower())
+
     result = subprocess.run([str(RELEASE), "--help"], capture_output=True, text=True)
     check("--help succeeds", result.returncode == 0)
     check("--help explains the modes",
@@ -911,8 +956,11 @@ def test_cask_lint() -> None:
           "render_cask" in release)
     check("the rendered release cask is linted too",
           release.count("brew style") >= 2)
-    # brew audit takes a cask *name*, which only resolves for an installed tap.
-    check("audit is named rather than run", "brew audit --cask --new" in release)
+    # brew audit takes a cask *name*, which only resolves for an installed tap,
+    # so it is named rather than run. Without `--new`: that is the submission
+    # audit for homebrew/homebrew-cask and it fails a personal tap on rules a
+    # new project cannot act on.
+    check("audit is named rather than run", "brew audit --cask michel" in release)
 
     if not shutil.which("brew"):
         print("  skip  brew is not on the PATH")
@@ -1286,6 +1334,7 @@ def main() -> int:
     test_built_bundle_carries_the_tag()
     test_notarization_accepts_an_api_key()
     test_signing_setup_script()
+    test_release_instructions_are_runnable()
     test_signing_setup_portal_route()
     test_check_does_not_fail_closed_on_its_own_bugs()
     test_config_is_found_from_a_worktree()

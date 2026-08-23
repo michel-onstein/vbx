@@ -63,15 +63,16 @@ cask_repo() {
 
 # render_cask <version> <sha256> <destination>
 render_cask() {
-  local version="$1" sha="$2" dest="$3" repo homepage url
+  local version="$1" sha="$2" dest="$3" repo homepage
   repo="$(cask_repo)"
   [[ -n "$repo" ]] || fail "could not read owner/repo from the origin remote"
   homepage="https://github.com/$repo"
-  url="$homepage/releases/download/$version/vbx-$version.dmg"
+  # No @URL@: the template builds the URL from `#{version}`, because a cask
+  # whose URL does not interpolate the version is read by `brew audit` as
+  # unversioned — and it then insists on `sha256 :no_check`.
   mkdir -p "$(dirname "$dest")"
   sed -e "s|@VERSION@|$version|g" \
       -e "s|@SHA256@|$sha|g" \
-      -e "s|@URL@|$url|g" \
       -e "s|@REPO@|$repo|g" \
       -e "s|@HOMEPAGE@|$homepage|g" \
       "$TEMPLATE" > "$dest"
@@ -112,7 +113,11 @@ if [[ $LINT_CASK -eq 1 ]]; then
   say "brew audit is not run here: it takes a cask *name*, which only resolves"
   say "for an installed tap, and installing one is more than a linter should do."
   say "It belongs to the tap repository, once the cask is in it:"
-  say "  brew audit --cask --new michel-onstein/tap/vbx"
+  say "  brew audit --cask michel-onstein/tap/vbx"
+  say ""
+  say "Not \`--new\`: that is the strict audit for submissions to"
+  say "homebrew/homebrew-cask. It fails a personal tap on rules a new project"
+  say "cannot act on — \"repository not notable enough\" among them."
   say ""
   say "The check that cannot be run anywhere but a clean Mac, after a release:"
   say "  brew install --cask vbx && open -a vbx"
@@ -263,8 +268,19 @@ fi
 
 say ""
 say "Then, in the tap repository (michel-onstein/homebrew-tap):"
-say "  cp ${CASK#"$ROOT"/} Casks/vbx.rb && brew audit --cask --new Casks/vbx.rb && brew style Casks/vbx.rb"
-say "  git commit -am \"vbx $VERSION\" && git push"
+say "  cp ${CASK#"$ROOT"/} Casks/vbx.rb"
+say "  git add Casks/vbx.rb && git commit -m \"vbx $VERSION\" && git push"
+say ""
+say "\`brew audit\` takes a cask *name*, not a path — a path is refused"
+say "outright — and the name resolves only once the tap is installed and the"
+say "cask is **committed**, because tapping a directory clones it:"
+say "  brew tap michel-onstein/tap    # once"
+say "  brew audit --cask michel-onstein/tap/vbx"
+say "  brew style \"\$(brew --repository michel-onstein/tap)/Casks/vbx.rb\""
+say ""
+say "Not \`--new\`: that is the strict audit for submissions to"
+say "homebrew/homebrew-cask, and it fails a personal tap on rules a new"
+say "project cannot satisfy — \"repository not notable enough\" among them."
 say ""
 say "The check that cannot be run here — on a Mac that has never seen this build:"
 say "  brew tap michel-onstein/tap && brew install --cask vbx && open -a vbx"

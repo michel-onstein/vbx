@@ -4,6 +4,54 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — The cask, and the instructions for it, did not survive contact
+
+**Symptom:** following `release.sh`'s own printed instructions produced
+
+```
+Error: Calling `brew audit [path ...]` is disabled! Use `brew audit [name ...]` instead.
+```
+
+and once that was worked around, `brew audit` rejected the cask three times
+over.
+
+**What was wrong, all of it found by running the real thing against a published
+release rather than reasoning about the template:**
+
+- **The printed instruction could not work.** It said
+  `brew audit --cask --new Casks/vbx.rb`. `brew audit` refuses a path outright;
+  it takes a cask *name*, which only resolves once the tap is installed — and
+  tapping a directory *clones* it, so an uncommitted cask is invisible even
+  then. Both halves had to be said.
+- **`--new` is the wrong audit for a personal tap.** It is the strict check for
+  submissions to homebrew/homebrew-cask and fails on "repository not notable
+  enough (<30 forks, <30 watchers and <75 stars)" — true, and not something a
+  new project can act on.
+- **The URL read as unversioned.** It had the number written into it rather
+  than `#{version}`, and the audit looks for the interpolation, not for digits.
+  It then demanded `sha256 :no_check`, which would have switched the checksum
+  off entirely — the opposite of the point.
+- **`verified:` is deprecated.** It vouches for a URL whose host is not
+  obviously the project's; a github.com release URL under the project's own
+  repository is not that.
+- **`>= :sonoma` fails style.** The bare symbol already means "that version or
+  newer".
+
+**Fix:** the template interpolates the version, drops `verified:` and uses the
+bare symbol; `release.sh` prints instructions that run.
+
+**Verified end to end, which had never been done:** `brew audit --cask` exits 0,
+`brew style` reports no offences, and `brew install --cask michel-onstein/tap/vbx`
+succeeds — `/Applications/vbx.app` and `vbx-cli` on the PATH, from a genuinely
+notarized disk image.
+
+**Prevention:** `test_release_instructions_are_runnable` asserts the printed
+commands never pass a path to `brew audit`, never suggest `--new` for a personal
+tap, and say the cask must be committed. The template assertions cover the
+interpolated URL, the absent `verified:` and the bare macOS symbol.
+
+---
+
 ## 2026-08-22 — Two preflight checks that failed closed on their own bugs
 
 **Symptom:** `package-app.sh --check` reported a working release setup as
