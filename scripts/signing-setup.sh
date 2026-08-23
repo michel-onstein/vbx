@@ -6,6 +6,7 @@
 #   ./scripts/signing-setup.sh --dry-run   # the plan, without touching anything
 #   ./scripts/signing-setup.sh             # create the certificate through asc
 #   ./scripts/signing-setup.sh --csr       # ...or prepare one for the web portal
+#   ./scripts/signing-setup.sh --csr --reveal   # ...and show it in Finder
 #   ./scripts/signing-setup.sh --import F  # install the certificate you download
 #
 # ## What this is for
@@ -52,12 +53,14 @@ CERT_TYPE=DEVELOPER_ID_APPLICATION
 CHECK=0
 DRY_RUN=0
 CSR_ONLY=0
+REVEAL=0
 IMPORT_PATH=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) CHECK=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --csr) CSR_ONLY=1; shift ;;
+    --reveal) REVEAL=1; shift ;;
     --import) IMPORT_PATH="${2-}"; shift 2 ;;
     -h|--help) sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -70,6 +73,24 @@ fail() { echo "error: $*" >&2; exit 1; }
 KEY_PATH="$OUT_DIR/developer-id.key"
 CSR_PATH="$OUT_DIR/developer-id.csr"
 CER_PATH="$OUT_DIR/developer-id.cer"
+
+# Somewhere a file picker will actually show it.
+#
+# The request has to be uploaded through a web form, and `$OUT_DIR` is a
+# dot-directory — macOS open dialogs hide those, so the file is effectively
+# unreachable without knowing that ⌘⇧G exists. The key must stay private and
+# out of the way; the request must not. They are different files with different
+# needs, and putting both in the hidden directory served only one of them.
+#
+# A copy rather than a move: `$OUT_DIR` stays the canonical pair, so `--import`
+# has one place to look and deleting the visible copy breaks nothing.
+#
+# Skipped where there is no Desktop — a CI runner, a container — rather than
+# inventing a location.
+VISIBLE_CSR=""
+if [[ -d "$HOME/Desktop" ]]; then
+  VISIBLE_CSR="$HOME/Desktop/vbx-developer-id.csr"
+fi
 
 # import_identity installs a certificate and its key, then proves the pair is
 # usable for signing.
@@ -197,21 +218,39 @@ if [[ $CSR_ONLY -eq 1 ]]; then
     chmod 600 "$KEY_PATH"
   fi
 
+  # The request is a public document — a public key and a subject. Copying it
+  # somewhere visible discloses nothing; the private key is what stays put.
+  if [[ -n "$VISIBLE_CSR" ]]; then
+    cp "$CSR_PATH" "$VISIBLE_CSR"
+  fi
+
   say ""
   say "Upload this file:"
-  say "  $CSR_PATH"
+  if [[ -n "$VISIBLE_CSR" ]]; then
+    say "  $VISIBLE_CSR"
+    say "  (a copy, put where a file picker can see it — delete it afterwards)"
+  else
+    say "  $CSR_PATH"
+    say "  (in an open dialog press Cmd-Shift-G and paste that path — the"
+    say "   directory is hidden and will not be listed)"
+  fi
   say ""
-  say "  developer.apple.com -> Certificates, Identifiers & Profiles"
-  say "  -> Certificates -> + -> Software -> Developer ID Application"
-  say "  -> upload the request -> download the .cer"
+  say "  developer.apple.com/account/resources/certificates/list"
+  say "  -> + -> Software -> Developer ID Application -> upload the request"
+  say "  -> Continue -> Download"
   say ""
   say "Sign in as the **Account Holder**; no other role can create one."
   say ""
   say "Then install it:"
   say "  ./scripts/signing-setup.sh --import ~/Downloads/developerID_application.cer"
   say ""
-  say "The private key stays here and is never uploaded. Keep it: without it the"
-  say "certificate cannot sign."
+  say "The private key stays in $OUT_DIR and is never uploaded. Keep it: the"
+  say "certificate cannot sign without the key whose request produced it."
+
+  if [[ $REVEAL -eq 1 ]]; then
+    open -R "${VISIBLE_CSR:-$CSR_PATH}" 2>/dev/null \
+      || say "(could not reveal it in Finder)"
+  fi
   exit 0
 fi
 
@@ -241,6 +280,11 @@ if [[ $DRY_RUN -eq 1 ]]; then
   say "    --generate-csr --key-out $KEY_PATH --csr-out $CSR_PATH"
   say "  security import $KEY_PATH -k login.keychain-db -T /usr/bin/codesign"
   say "  security import $CER_PATH -k login.keychain-db -T /usr/bin/codesign"
+  if [[ -n "$VISIBLE_CSR" ]]; then
+    say ""
+    say "  (--csr would also copy the request to $VISIBLE_CSR,"
+    say "   because a file picker cannot see into $OUT_DIR)"
+  fi
   say ""
   say "Then print the identity to configure, and nothing else."
   exit 0
