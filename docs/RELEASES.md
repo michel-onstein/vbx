@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.0.16 — 2026-08-23
+
+### Fixes
+
+- Make the release preflight tell the truth, and find its config from a worktree ([#49](https://github.com/michel-onstein/vbx/pull/49))
+
 ## 0.0.15 — 2026-08-23
 
 ### Fixes
