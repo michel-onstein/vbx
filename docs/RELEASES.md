@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.1.1 — 2026-08-23
+
+### Fixes
+
+- Make the cask pass brew audit, and the instructions runnable ([#50](https://github.com/michel-onstein/vbx/pull/50))
+
 ## 0.1.0 — 2026-08-22
 
 No recorded changes — this tag was not cut by `scripts/version-bump.sh`.
