@@ -37,6 +37,7 @@ BUILD_ENGINE = ROOT / "scripts" / "build-engine.sh"
 RELEASE = ROOT / "scripts" / "release.sh"
 VERSION = ROOT / "scripts" / "version.sh"
 CASK_TEMPLATE = ROOT / "packaging" / "homebrew" / "vbx.rb.template"
+SIGNING_SETUP = ROOT / "scripts" / "signing-setup.sh"
 BUMP = ROOT / "scripts" / "version-bump.sh"
 NOTES = ROOT / "scripts" / "release-notes.py"
 
@@ -962,6 +963,101 @@ def test_built_bundle_carries_the_tag() -> None:
           or expected == "0.1.0")
 
 
+def test_notarization_accepts_an_api_key() -> None:
+    """One credential should cover the certificate and the notarization.
+
+    `notarytool store-credentials` writes a keychain profile from an Apple ID
+    and an app-specific password. That works on one machine and nowhere else —
+    a keychain profile cannot go to CI, and the app-specific password is a
+    second thing to create and rotate. An App Store Connect API key is the same
+    credential that creates the Developer ID certificate, and it travels.
+    """
+    print("\nNotarization credentials")
+    text = PACKAGE.read_text()
+    for name in ("VBX_NOTARY_KEY", "VBX_NOTARY_KEY_ID", "VBX_NOTARY_ISSUER"):
+        check(f"{name} is read", name in text)
+
+    # The identifiers are account data and end up beside build logs in issues.
+    for name in ("NOTARY_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER"):
+        check(f"{name} is masked in output", f'_mask "${name}"' in text)
+
+    # Resolved in one place, so --check and the real submission cannot disagree
+    # about which credential is in play.
+    check("the credential is resolved once", "notary_auth()" in text)
+
+    env = {**os.environ}
+    for key in ("VBX_NOTARY_PROFILE", "VBX_NOTARY_KEY", "VBX_NOTARY_KEY_ID",
+                "VBX_NOTARY_ISSUER", "VBX_DEVELOPER_ID_APP"):
+        env.pop(key, None)
+    env["VBX_SIGNING_CONFIG"] = "/nowhere/none.env"
+
+    result = subprocess.run([str(PACKAGE), "--check"], capture_output=True, text=True, env=env)
+    check("no credentials is reported as such",
+          "no credentials" in result.stdout, result.stdout.strip()[-200:])
+
+    # A .p8 that is not there fails inside notarytool minutes into a release,
+    # after the build and the signing — so it is named before anything is built.
+    missing = {**env, "VBX_NOTARY_KEY": "/nowhere/key.p8",
+               "VBX_NOTARY_KEY_ID": "ABC123", "VBX_NOTARY_ISSUER": "iss"}
+    result = subprocess.run([str(PACKAGE), "--check"], capture_output=True, text=True, env=missing)
+    check("a missing key file is named before building",
+          "API key file not found" in result.stdout, result.stdout.strip()[-200:])
+
+    with tempfile.NamedTemporaryFile(suffix=".p8", delete=False) as handle:
+        handle.write(b"not a key")
+        fake_key = handle.name
+    try:
+        both = {**env, "VBX_NOTARY_KEY": fake_key, "VBX_NOTARY_KEY_ID": "ABC123",
+                "VBX_NOTARY_ISSUER": "iss", "VBX_NOTARY_PROFILE": "some-profile"}
+        result = subprocess.run(
+            [str(PACKAGE), "--check"], capture_output=True, text=True, env=both)
+        # The key wins when both are set: it is the form that behaves the same
+        # everywhere, so a machine that has both should use the portable one.
+        check("the API key is preferred over a keychain profile",
+              "App Store Connect API key" in result.stdout,
+              result.stdout.strip()[-200:])
+    finally:
+        os.unlink(fake_key)
+
+
+def test_signing_setup_script() -> None:
+    """Getting the certificate should be one command, not a wiki page."""
+    print("\nSigning setup")
+    check("signing-setup.sh exists", SIGNING_SETUP.exists())
+    if not SIGNING_SETUP.exists():
+        return
+    check("it is executable", os.access(SIGNING_SETUP, os.X_OK))
+    syntax = subprocess.run(["bash", "-n", str(SIGNING_SETUP)], capture_output=True, text=True)
+    check("it parses", syntax.returncode == 0, syntax.stderr.strip())
+
+    result = subprocess.run([str(SIGNING_SETUP), "--nonsense"], capture_output=True, text=True)
+    check("an unknown flag is rejected", result.returncode == 2)
+
+    result = subprocess.run([str(SIGNING_SETUP), "--check"], capture_output=True, text=True)
+    check("--check succeeds", result.returncode == 0, result.stderr.strip())
+    check("--check says whether the certificate exists",
+          "Developer ID Application certificate" in result.stdout)
+    # Apple restricts Developer ID creation to the Account Holder, and the
+    # failure when an Admin key tries does not say so.
+    check("--check names the Account Holder requirement",
+          "Account Holder" in result.stdout or "certificate exists" in result.stdout)
+
+    # A dry run must work with no credentials at all: reading the plan before
+    # obtaining a key is when it is most useful.
+    result = subprocess.run([str(SIGNING_SETUP), "--dry-run"], capture_output=True, text=True)
+    check("--dry-run works without credentials",
+          result.returncode == 0, (result.stdout + result.stderr).strip()[-200:])
+    check("--dry-run changes nothing", "Would run:" in result.stdout)
+
+    text = SIGNING_SETUP.read_text()
+    # This repository is public; ADR-009 is that no signing material is in it.
+    check("the key is written outside the repository", "$HOME/.vbx-signing" in text)
+    check("nothing is written into the checkout",
+          "$ROOT/signing" not in text and "$ROOT/scripts/developer-id" not in text)
+    check("the certificate type is the Developer ID one",
+          "DEVELOPER_ID_APPLICATION" in text)
+
+
 def main() -> int:
     print("Packaging and signing tests")
     check("package-app.sh is executable", os.access(PACKAGE, os.X_OK))
@@ -993,6 +1089,8 @@ def main() -> int:
     test_stale_prefix_is_named()
     test_cask_lint()
     test_built_bundle_carries_the_tag()
+    test_notarization_accepts_an_api_key()
+    test_signing_setup_script()
 
     print()
     if failures:

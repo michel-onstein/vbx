@@ -59,6 +59,14 @@ Distribution:
 VBX_DEVELOPER_ID_APP=- ./scripts/build-app.sh --dmg --no-notarize   # ad-hoc, local only
 ```
 
+Signing prerequisites:
+
+```bash
+./scripts/signing-setup.sh --check    # what is missing, and how to get it
+./scripts/signing-setup.sh --dry-run  # the plan, no credentials needed
+./scripts/signing-setup.sh            # create the Developer ID cert via asc
+```
+
 Release:
 
 ```bash
@@ -210,6 +218,22 @@ view snapshots for inspection.
   one is more than a linter should do — it belongs to the tap repository's CI.
   `./scripts/release.sh --lint-cask` renders the template with a placeholder
   checksum and styles it; it caught four real offences the first time it ran.
+- **There is no Developer ID Application certificate on this machine**, and
+  that is what blocks a signed release. `VBX_DEVELOPER_ID_APP` pointed at an
+  *Apple Development* certificate, which cannot sign for distribution outside
+  the App Store — Gatekeeper rejects it. `--check` reported it as present
+  because it grepped for the string rather than the certificate's kind.
+- **Notarization takes an App Store Connect API key**, `VBX_NOTARY_KEY` /
+  `_KEY_ID` / `_ISSUER`, in preference to a `notarytool` keychain profile. One
+  credential covers the certificate and the notarization, and it is the only
+  form that works in CI — a keychain profile cannot travel. See ADR-017.
+- **Creating a Developer ID certificate needs the Account Holder role.** An
+  Admin key can notarize and can list certificates, but cannot create one, and
+  Apple's error does not say so.
+- **The packaging pipeline itself is proven.** An ad-hoc `--dmg --no-notarize`
+  build produces a 50 MB universal disk image with both slices, signed and
+  verified, so the certificate is the only missing piece rather than one of
+  several unknowns.
 - **Nothing has been released.** `scripts/release.sh` and
   `packaging/homebrew/vbx.rb.template` produce a cask ready to paste, but there
   is no tagged release, no published `.dmg` and no `homebrew-tap` repository, so
