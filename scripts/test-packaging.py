@@ -1195,6 +1195,64 @@ def test_signing_setup_portal_route() -> None:
           "VBX_DEVELOPER_ID_APP" in SIGNING_SETUP.read_text())
 
 
+def test_check_does_not_fail_closed_on_its_own_bugs() -> None:
+    """Two false negatives, both of which sent someone to fix nothing.
+
+    A check that reports a working setup as broken is worse than no check: it
+    costs the time of investigating something that was never wrong. Both of
+    these did exactly that, and both were found by disbelieving the check and
+    running the underlying command by hand.
+    """
+    print("\nCheck accuracy")
+    text = PACKAGE.read_text()
+
+    # 1. `notarytool history` has no --limit. Passing one made the command fail
+    #    for a reason unrelated to the credential, and a perfectly good API key
+    #    was reported "configured but not usable".
+    # Comments stripped first: the line explaining why --limit is absent
+    # naturally mentions both, and a naive search reads the explanation as the
+    # thing it warns against. Third time this trap has been hit in this file.
+    history_lines = [
+        line for line in text.splitlines()
+        if "notarytool history" in line and not line.lstrip().startswith("#")
+    ]
+    check("notarytool history is called", bool(history_lines))
+    check("...without a flag it does not have",
+          all("--limit" not in line for line in history_lines), str(history_lines))
+
+    # 2. `check-ignore` was run from $ROOT against a path that can be outside
+    #    it. On a path in another checkout it answers "not ignored", turning
+    #    "your config lives in the primary worktree" into "your secrets are
+    #    about to be committed".
+    check("check-ignore is asked of the tree that owns the file",
+          'check-ignore -q "$CONFIG_FILE"' in text
+          and 'git -C "$(dirname "$CONFIG_FILE")"' in text)
+
+
+def test_config_is_found_from_a_worktree() -> None:
+    """The config is gitignored, so it exists in exactly one checkout.
+
+    This repository is worked in through linked worktrees, where
+    `scripts/signing.env` does not exist. `--check` reported every setting as
+    unset there, which reads as "you have not configured signing" rather than
+    "the configuration is in the other tree".
+    """
+    print("\nConfig discovery")
+    text = PACKAGE.read_text()
+    check("the primary worktree is consulted", "--git-common-dir" in text)
+    check("the fallback is visible in the output",
+          "the primary checkout, not this worktree" in text)
+
+    # An explicit override still wins over both.
+    env = {**os.environ, "VBX_SIGNING_CONFIG": "/nowhere/none.env"}
+    for key in ("VBX_DEVELOPER_ID_APP", "VBX_NOTARY_KEY", "VBX_NOTARY_KEY_ID",
+                "VBX_NOTARY_ISSUER", "VBX_NOTARY_PROFILE", "VBX_TEAM_ID"):
+        env.pop(key, None)
+    result = subprocess.run([str(PACKAGE), "--check"], capture_output=True, text=True, env=env)
+    check("VBX_SIGNING_CONFIG still overrides the search",
+          "absent" in result.stdout, result.stdout.strip()[:200])
+
+
 def main() -> int:
     print("Packaging and signing tests")
     check("package-app.sh is executable", os.access(PACKAGE, os.X_OK))
@@ -1229,6 +1287,8 @@ def main() -> int:
     test_notarization_accepts_an_api_key()
     test_signing_setup_script()
     test_signing_setup_portal_route()
+    test_check_does_not_fail_closed_on_its_own_bugs()
+    test_config_is_found_from_a_worktree()
 
     print()
     if failures:
