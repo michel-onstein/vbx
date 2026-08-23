@@ -200,6 +200,11 @@ view snapshots for inspection.
   into the annotated tag, so `release-notes.py` and its `--check` read git alone
   and work offline. A missing label is patch, announced. Before 1.0.0 a breaking
   change bumps MINOR. See ADR-013.
+- **A bead-only commit is not a release.** `version-bump.sh` skips any commit
+  whose diff touches nothing outside `.beads/`, and exits without tagging when
+  that is all that landed. Tracker bookkeeping arrives here as squash-merged
+  PRs like everything else, so otherwise each one would cut a patch. Verified by
+  `test_beads_only_does_not_release` in `test-packaging.py`. See ADR-013.
 - **The `semver:major` / `semver:minor` / `semver:patch` labels do not exist
   yet** on the GitHub repository. Until someone creates them every release is a
   patch, and the script says so on every run.

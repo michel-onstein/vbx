@@ -130,6 +130,14 @@ them.
   label defaults to patch **and says which rule fired**; a silent default is how
   a feature ships as a patch. Before 1.0.0, a breaking change bumps MINOR. See
   ADR-013.
+- **A commit that touches only `.beads/` bumps nothing.** Beads land as ordinary
+  squash-merged PRs, so without the rule every `br create` that reached `main`
+  would cut a patch — a release whose notes describe an issue somebody wrote
+  down rather than anything a user can install. The test is the *diff*, not the
+  subject: a PR that changes code and a bead is a real change and bumps as
+  usual. When a run finds nothing but bookkeeping it says so and exits, and each
+  skipped commit is named `beads-only` on the way past — a commit that silently
+  did not count is indistinguishable from one the script never saw. See ADR-013.
 - **Every distribution build is universal**, implied by `--dmg`, `--app-store`
   and `--sign` just as they already imply `--release`. Check the *artefact*, not
   the flag: `lipo -archs` on both binaries in the bundle, the same distinction

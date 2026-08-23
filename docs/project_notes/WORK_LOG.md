@@ -5,6 +5,42 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-23 — A bead-only commit no longer cuts a release (vbx-r0m)
+
+`vbx-r0m` was written down and pushed as PR #52, and shipping it would have
+released 0.1.3. `release.yml` advances the version on every merge, and
+`version-bump.sh` had no level below patch: a missing `semver:*` label defaults
+to patch, so a commit whose whole diff was one added line of
+`.beads/issues.jsonl` was about to become a version, a tag and an entry in
+`RELEASES.md` describing an issue nobody can install.
+
+The rule now is that a commit touching nothing outside `.beads/` contributes no
+level, and a run finding only those exits without tagging. Two details are the
+whole of it:
+
+- **The test is the diff, not the subject.** A PR that changes code *and* a bead
+  is a real change. The condition is "no file outside `.beads/`", not "any file
+  inside it", and there is a test for exactly that shape.
+- **Skipped commits are named.** They print as `beads-only`, because a commit
+  that silently did not count is indistinguishable from one the script never
+  saw — the same argument ADR-013 already makes for announcing the default
+  label.
+
+`git show --pretty=format: --name-only` rather than `git diff-tree`, so a root
+commit lists its files instead of nothing; a commit with no files at all is
+deliberately *not* bead-only, which keeps an unknown case on the path where it
+is at least reported.
+
+Checked against real history as well as the synthetic repos: a dry run on this
+branch reports `Only bead bookkeeping has landed since 0.1.2`.
+
+Tests: `test_beads_only_does_not_release` in `scripts/test-packaging.py` — eight
+assertions covering the bookkeeping-only run, the mixed run where the notes
+carry the change and not the bead, and the code-plus-bead commit that still
+bumps.
+
+---
+
 ## 2026-08-22 — The API cannot issue a Developer ID certificate; the portal can
 
 `signing-setup.sh` was run for real and Apple refused:

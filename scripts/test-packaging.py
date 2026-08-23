@@ -771,6 +771,23 @@ def commit(directory: Path, subject: str) -> None:
                    capture_output=True, env=env)
 
 
+def commit_bead(directory: Path, subject: str) -> None:
+    """A commit that touches nothing but `.beads/` — tracker bookkeeping.
+
+    Exactly what `br create` followed by a squash-merge leaves behind, which is
+    the shape the bump has to decline.
+    """
+    beads = directory / ".beads"
+    beads.mkdir(exist_ok=True)
+    with (beads / "issues.jsonl").open("a") as handle:
+        handle.write(f'{{"id":"vbx-{len(subject)}","title":"{subject}"}}\n')
+    env = {**os.environ, **GIT_ENV}
+    subprocess.run(["git", "add", "."], cwd=directory, check=True,
+                   capture_output=True, env=env)
+    subprocess.run(["git", "commit", "-qm", subject], cwd=directory, check=True,
+                   capture_output=True, env=env)
+
+
 def run_bump(directory: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(directory / "scripts" / "version-bump.sh"), *args],
@@ -834,6 +851,68 @@ def test_version_bump() -> None:
         run_bump(empty)
         result = run_bump(empty, "--dry-run")
         check("a run with nothing new is a no-op", "nothing to bump" in result.stdout)
+
+
+def test_beads_only_does_not_release() -> None:
+    """Writing a bead down is not shipping anything.
+
+    Beads land as ordinary squash-merged PRs, so without this rule every
+    `br create` that reached main would cut a patch — a release whose notes
+    describe an issue rather than a change anyone can install.
+    """
+    print("\nBeads-only commits")
+    text = BUMP.read_text()
+    check("the rule tests the diff, not the subject", "git show --pretty=format:" in text)
+
+    with tempfile.TemporaryDirectory() as raw:
+        # Nothing but bookkeeping since the tag: no bump, and a line saying so
+        # rather than silence, which is indistinguishable from a script that
+        # failed to see the commit at all.
+        only = Path(raw) / "only"
+        bump_repo(only)
+        commit(only, "Do a thing")
+        run_bump(only)
+        commit_bead(only, "Track a thing (#1)")
+        result = run_bump(only, "--dry-run")
+        check("a bead-only commit does not bump",
+              "nothing to bump" in result.stdout, result.stdout.strip())
+        check("...and is named as bookkeeping rather than passed over silently",
+              "beads-only" in result.stdout, result.stdout.strip())
+        check("...and cuts no tag",
+              subprocess.run(["git", "tag"], cwd=only, capture_output=True,
+                             text=True).stdout.split() == ["0.0.1"])
+
+        # A real change alongside bookkeeping still releases, and the notes
+        # carry the change rather than the bead.
+        mixed = Path(raw) / "mixed"
+        bump_repo(mixed)
+        commit(mixed, "Do a thing")
+        run_bump(mixed)
+        commit_bead(mixed, "Track a thing (#1)")
+        commit(mixed, "Fix a real thing (#2)")
+        result = run_bump(mixed, "--dry-run")
+        check("a real change still bumps past bookkeeping",
+              "0.0.1 -> 0.0.2 (patch)" in result.stdout, result.stdout.strip())
+
+        mixed_real = run_bump(mixed)
+        notes = (mixed / "docs" / "RELEASES.md").read_text()
+        check("the release records the change",
+              "Fix a real thing" in notes, mixed_real.stdout.strip())
+        check("...and not the bead", "Track a thing" not in notes)
+
+        # A commit that edits a bead *and* code is a real change. The rule is
+        # "no file outside .beads/", not "any file inside it".
+        both = Path(raw) / "both"
+        bump_repo(both)
+        commit(both, "Do a thing")
+        run_bump(both)
+        beads = both / ".beads"
+        beads.mkdir(exist_ok=True)
+        (beads / "issues.jsonl").write_text('{"id":"vbx-1"}\n')
+        commit(both, "Change code and its bead (#3)")
+        result = run_bump(both, "--dry-run")
+        check("a commit touching code and a bead still bumps",
+              "0.0.1 -> 0.0.2 (patch)" in result.stdout, result.stdout.strip())
 
 
 def test_no_v_prefix() -> None:
@@ -1326,6 +1405,7 @@ def main() -> int:
     test_version_comes_from_the_tag()
     test_cask_and_release_script()
     test_version_bump()
+    test_beads_only_does_not_release()
     test_no_v_prefix()
     test_release_notes()
     test_release_workflow()

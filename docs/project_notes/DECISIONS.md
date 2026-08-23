@@ -491,6 +491,14 @@ beginning, for the convenience of a script.
   decision about the software being finished, not one a label should make.
 - **The label is read once and written into the annotated tag.** Everything
   downstream reads git alone.
+- **A commit touching nothing outside `.beads/` contributes no level**, and a
+  run that finds only those exits without tagging. Beads are tracker
+  bookkeeping; they land squash-merged like everything else, so without the rule
+  every `br create` reaching `main` cut a patch release. The test is the diff
+  rather than the subject, so a PR that changes code *and* a bead still bumps —
+  the rule is "no file outside `.beads/`", not "any file inside it". Skipped
+  commits are named `beads-only` in the output, because a commit that silently
+  did not count reads exactly like one the script failed to see.
 - **`docs/RELEASES.md` is generated** from those tags, newest first, grouped
   into Features and Fixes.
 
@@ -512,6 +520,9 @@ relabelling cannot silently rewrite history.
 
 **Consequences.**
 
+- **A release always has something to describe.** The bead-only rule keeps
+  `RELEASES.md` free of entries for issues nobody can install, which is the same
+  boundary the next consequence draws for `BUGS.md` and `WORK_LOG.md`.
 - **`RELEASES.md` must not become a fourth copy.** `BUGS.md` keeps a bug and its
   regression test; `WORK_LOG.md` keeps dated engineering work. `RELEASES.md` is
   the user-facing view and says nothing about implementation.

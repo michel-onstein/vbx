@@ -33,6 +33,20 @@
 #
 # While the version is 0.x, a breaking change bumps MINOR. MAJOR waits for 1.0.0.
 #
+# What does not count as a change
+# -------------------------------
+#
+# A commit that touches nothing but `.beads/` is tracker bookkeeping, and does
+# not bump anything. Beads land here as ordinary squash-merged PRs, so without
+# this rule every `br create` that reached main would cut a patch release —
+# a version whose notes describe an issue somebody wrote down rather than
+# anything a user can install, and a tag nobody can tell apart from a real one.
+#
+# The test is the diff, not the subject. A PR that edits code *and* a bead is a
+# real change and bumps as usual; only a commit with no file outside `.beads/`
+# is skipped. When every commit since the last tag is bead-only there is nothing
+# to release, and the script says that rather than cutting an empty patch.
+#
 # The label is read once, here, and written into the annotated tag's message.
 # Everything downstream — `release-notes.py`, and therefore the `--check` in the
 # verify block — reads git alone and needs no network.
@@ -47,7 +61,7 @@ for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
     --check) CHECK=1 ;;
-    -h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -98,8 +112,8 @@ fi
 # --no-merges because work lands squash-merged: the commit carrying `(#N)` is an
 # ordinary commit, and a real merge commit would be a duplicate of it.
 
-mapfile -t SUBJECTS < <(git log ${RANGE:+"$RANGE"} --no-merges --format='%s')
-if [[ ${#SUBJECTS[@]} -eq 0 ]]; then
+mapfile -t COMMITS < <(git log ${RANGE:+"$RANGE"} --no-merges --format='%H %s')
+if [[ ${#COMMITS[@]} -eq 0 ]]; then
   say "==> Nothing has landed since $LAST_TAG; nothing to bump"
   exit 0
 fi
@@ -131,11 +145,35 @@ pr_level() {
   echo "patch no-semver-label"
 }
 
+# beads_only answers whether a commit changed nothing outside `.beads/`.
+#
+# `--pretty=format:` empties the header so only the file list is left, and
+# `git show` rather than `git diff-tree` so a root commit — the first commit in
+# a fresh clone, and in the tests — lists its files instead of nothing.
+#
+# A commit with no files at all is *not* bead-only: it is an unknown case, and
+# the conservative answer keeps it on the default path where it is at least
+# reported.
+beads_only() {
+  local files
+  files="$(git show --pretty=format: --name-only "$1" | grep -v '^$' || true)"
+  [[ -n "$files" ]] || return 1
+  ! grep -qv '^\.beads/' <<<"$files"
+}
+
 CHANGES=()
 LEVEL=patch
 rank() { case "$1" in major) echo 3 ;; minor) echo 2 ;; *) echo 1 ;; esac; }
 
-for subject in "${SUBJECTS[@]}"; do
+for entry in "${COMMITS[@]}"; do
+  sha="${entry%% *}"
+  subject="${entry#* }"
+  # Bookkeeping. Named on the way past, because a commit that silently did not
+  # count is indistinguishable from one the script failed to see.
+  if beads_only "$sha"; then
+    say "  none   (beads-only)  $subject"
+    continue
+  fi
   number="$(sed -nE 's/.*\(#([0-9]+)\)$/\1/p' <<<"$subject")"
   if [[ -z "$number" ]]; then
     level=patch
@@ -147,6 +185,14 @@ for subject in "${SUBJECTS[@]}"; do
   CHANGES+=("Change: $level: $subject")
   if [[ "$(rank "$level")" -gt "$(rank "$LEVEL")" ]]; then LEVEL="$level"; fi
 done
+
+# Everything that landed was bookkeeping. Distinct from "nothing landed", and
+# worth saying differently: this run had commits to consider and declined all of
+# them.
+if [[ ${#CHANGES[@]} -eq 0 ]]; then
+  say "==> Only bead bookkeeping has landed since ${LAST_TAG:-the beginning}; nothing to bump"
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # The next version
