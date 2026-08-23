@@ -4,6 +4,43 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-22 — Two preflight checks that failed closed on their own bugs
+
+**Symptom:** `package-app.sh --check` reported a working release setup as
+broken, twice, and each report sent someone to fix something that was never
+wrong.
+
+**`notarytool history --limit 1`.** `--limit` is not an option that subcommand
+takes. The command failed for a reason entirely unrelated to the credential, so
+a valid App Store Connect API key was reported as *"configured but not
+usable"*. Found by disbelieving the check and running the command by hand:
+without the flag it answers `Successfully received submission history.`
+
+**`check-ignore` asked of the wrong repository.** The check ran
+`git -C "$ROOT" check-ignore` against the config path — which, from a linked
+worktree, is in a *different* checkout. Git answers "not ignored" for a path it
+does not own, so the output read *"gitignored NO — this file carries account
+identifiers"* about a file that is correctly ignored where it lives. Alarming,
+and false. Introduced in the same change that taught `--check` to find the
+config in the primary worktree at all.
+
+**Why they matter more than a wrong line of output.** A check that fails closed
+on its own bug is worse than no check. It does not merely fail to help — it
+actively misdirects, and the thing it accuses is by definition the thing you
+were relying on. Both of these cost an investigation into correctly configured
+credentials.
+
+**Fix:** the flag is gone; `check-ignore` is asked of the tree that owns the
+file, via `git -C "$(dirname "$CONFIG_FILE")"`.
+
+**Prevention:** `test_check_does_not_fail_closed_on_its_own_bugs` asserts that
+no un-commented line passes `--limit` to `notarytool history`, and that
+`check-ignore` is run against the config's own directory. Comment lines are
+stripped first — the third time in this file that a naive substring search has
+matched the comment explaining the fix rather than the code.
+
+---
+
 ## 2026-08-22 — A test fixture deleted a directory the store was still watching
 
 **Symptom:** `swift test` exited non-zero roughly one run in eight, with **no

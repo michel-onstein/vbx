@@ -1044,11 +1044,25 @@ def test_signing_setup_script() -> None:
           "Account Holder" in result.stdout or "certificate exists" in result.stdout)
 
     # A dry run must work with no credentials at all: reading the plan before
-    # obtaining a key is when it is most useful.
-    result = subprocess.run([str(SIGNING_SETUP), "--dry-run"], capture_output=True, text=True)
-    check("--dry-run works without credentials",
-          result.returncode == 0, (result.stdout + result.stderr).strip()[-200:])
-    check("--dry-run changes nothing", "Would run:" in result.stdout)
+    # obtaining a key is when it is most useful. Run against a scratch HOME so
+    # the answer does not depend on whether *this* machine already has the
+    # certificate — an earlier version of this asserted the plan unconditionally
+    # and started failing the moment one was installed.
+    scratch = pathlib.Path(tempfile.mkdtemp())
+    try:
+        env = {**os.environ, "VBX_SIGNING_DIR": str(scratch / "sign")}
+        result = subprocess.run([str(SIGNING_SETUP), "--dry-run"],
+                                capture_output=True, text=True, env=env)
+        check("--dry-run works without credentials",
+              result.returncode == 0, (result.stdout + result.stderr).strip()[-200:])
+        # Either it prints the plan, or it says there is nothing to do because
+        # the certificate is already here. Both are "changed nothing".
+        check("--dry-run changes nothing",
+              "Would run:" in result.stdout or "already in the keychain" in result.stdout,
+              result.stdout.strip()[:200])
+        check("--dry-run really wrote nothing", not (scratch / "sign").exists())
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
     text = SIGNING_SETUP.read_text()
     # This repository is public; ADR-009 is that no signing material is in it.
@@ -1114,12 +1128,129 @@ def test_signing_setup_portal_route() -> None:
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
-    # The guidance has to name the route that works, not only the one that failed.
+    # The request has to be *reachable*. It is uploaded through a web form, and
+    # macOS open dialogs do not show dot-directories — so a CSR that only exists
+    # in ~/.vbx-signing is effectively unreachable without knowing about ⌘⇧G.
+    home = pathlib.Path(tempfile.mkdtemp())
+    try:
+        (home / "Desktop").mkdir()
+        env = {**os.environ, "HOME": str(home),
+               "VBX_SIGNING_DIR": str(home / ".vbx-signing")}
+        result = subprocess.run([str(SIGNING_SETUP), "--csr"],
+                                capture_output=True, text=True, env=env)
+        visible = home / "Desktop" / "vbx-developer-id.csr"
+        canonical = home / ".vbx-signing" / "developer-id.csr"
+        check("--csr puts the request where a picker can see it", visible.exists())
+        check("...and points at it", str(visible) in result.stdout,
+              result.stdout.strip()[:200])
+        # A copy, not a move: the canonical pair stays together so --import has
+        # one place to look, and deleting the visible copy breaks nothing.
+        check("the canonical request is still there", canonical.exists())
+        check("the copy is identical",
+              visible.exists() and canonical.exists()
+              and visible.read_bytes() == canonical.read_bytes())
+        # The private key must not follow it out.
+        check("the key is not copied anywhere visible",
+              not (home / "Desktop" / "developer-id.key").exists()
+              and (home / ".vbx-signing" / "developer-id.key").exists())
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+    # No Desktop — a CI runner, a container. It must still work, and say how to
+    # reach the file rather than inventing a location.
+    bare = pathlib.Path(tempfile.mkdtemp())
+    try:
+        env = {**os.environ, "HOME": str(bare),
+               "VBX_SIGNING_DIR": str(bare / ".vbx-signing")}
+        result = subprocess.run([str(SIGNING_SETUP), "--csr"],
+                                capture_output=True, text=True, env=env)
+        check("--csr works with no Desktop", result.returncode == 0,
+              (result.stdout + result.stderr).strip()[-200:])
+        check("...and explains how to reach a hidden path",
+              "Cmd-Shift-G" in result.stdout, result.stdout.strip()[:200])
+        check("...without creating a Desktop", not (bare / "Desktop").exists())
+    finally:
+        shutil.rmtree(bare, ignore_errors=True)
+
+    # The guidance has to name the route that works — and which route that is
+    # depends on whether the certificate exists yet. Asserting only the
+    # not-yet-created branch made this test fail the moment the certificate
+    # appeared, which is a test that expires rather than one that holds.
     guidance = subprocess.run([str(SIGNING_SETUP), "--check"],
                               capture_output=True, text=True).stdout
-    check("--check points at the portal route",
-          "--csr" in guidance and "--import" in guidance, guidance.strip()[-200:])
-    check("--check names the Account Holder refusal", "Account Holder" in guidance)
+    if "MISSING" in guidance:
+        check("--check points at the portal route",
+              "--csr" in guidance and "--import" in guidance, guidance.strip()[-200:])
+        check("--check names the Account Holder refusal", "Account Holder" in guidance)
+    else:
+        check("--check says how to configure the certificate it found",
+              "VBX_DEVELOPER_ID_APP" in guidance, guidance.strip()[-200:])
+        check("--check does not still ask for a request",
+              "--csr" not in guidance, guidance.strip()[-200:])
+
+    # Both branches exist and are reachable, whichever this machine is in.
+    check("the guidance covers the missing case",
+          "--csr" in SIGNING_SETUP.read_text())
+    check("the guidance covers the present case",
+          "VBX_DEVELOPER_ID_APP" in SIGNING_SETUP.read_text())
+
+
+def test_check_does_not_fail_closed_on_its_own_bugs() -> None:
+    """Two false negatives, both of which sent someone to fix nothing.
+
+    A check that reports a working setup as broken is worse than no check: it
+    costs the time of investigating something that was never wrong. Both of
+    these did exactly that, and both were found by disbelieving the check and
+    running the underlying command by hand.
+    """
+    print("\nCheck accuracy")
+    text = PACKAGE.read_text()
+
+    # 1. `notarytool history` has no --limit. Passing one made the command fail
+    #    for a reason unrelated to the credential, and a perfectly good API key
+    #    was reported "configured but not usable".
+    # Comments stripped first: the line explaining why --limit is absent
+    # naturally mentions both, and a naive search reads the explanation as the
+    # thing it warns against. Third time this trap has been hit in this file.
+    history_lines = [
+        line for line in text.splitlines()
+        if "notarytool history" in line and not line.lstrip().startswith("#")
+    ]
+    check("notarytool history is called", bool(history_lines))
+    check("...without a flag it does not have",
+          all("--limit" not in line for line in history_lines), str(history_lines))
+
+    # 2. `check-ignore` was run from $ROOT against a path that can be outside
+    #    it. On a path in another checkout it answers "not ignored", turning
+    #    "your config lives in the primary worktree" into "your secrets are
+    #    about to be committed".
+    check("check-ignore is asked of the tree that owns the file",
+          'check-ignore -q "$CONFIG_FILE"' in text
+          and 'git -C "$(dirname "$CONFIG_FILE")"' in text)
+
+
+def test_config_is_found_from_a_worktree() -> None:
+    """The config is gitignored, so it exists in exactly one checkout.
+
+    This repository is worked in through linked worktrees, where
+    `scripts/signing.env` does not exist. `--check` reported every setting as
+    unset there, which reads as "you have not configured signing" rather than
+    "the configuration is in the other tree".
+    """
+    print("\nConfig discovery")
+    text = PACKAGE.read_text()
+    check("the primary worktree is consulted", "--git-common-dir" in text)
+    check("the fallback is visible in the output",
+          "the primary checkout, not this worktree" in text)
+
+    # An explicit override still wins over both.
+    env = {**os.environ, "VBX_SIGNING_CONFIG": "/nowhere/none.env"}
+    for key in ("VBX_DEVELOPER_ID_APP", "VBX_NOTARY_KEY", "VBX_NOTARY_KEY_ID",
+                "VBX_NOTARY_ISSUER", "VBX_NOTARY_PROFILE", "VBX_TEAM_ID"):
+        env.pop(key, None)
+    result = subprocess.run([str(PACKAGE), "--check"], capture_output=True, text=True, env=env)
+    check("VBX_SIGNING_CONFIG still overrides the search",
+          "absent" in result.stdout, result.stdout.strip()[:200])
 
 
 def main() -> int:
@@ -1156,6 +1287,8 @@ def main() -> int:
     test_notarization_accepts_an_api_key()
     test_signing_setup_script()
     test_signing_setup_portal_route()
+    test_check_does_not_fail_closed_on_its_own_bugs()
+    test_config_is_found_from_a_worktree()
 
     print()
     if failures:

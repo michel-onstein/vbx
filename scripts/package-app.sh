@@ -68,7 +68,34 @@ done
 
 # The environment wins over the file, so CI can supply everything from a secret
 # store and never write a config file into the checkout at all.
-CONFIG_FILE="${VBX_SIGNING_CONFIG:-$ROOT/scripts/signing.env}"
+# The config is gitignored, so it exists in exactly one checkout — and this
+# repository is worked in through linked worktrees, where `$ROOT/scripts` has no
+# copy. Running `--check` from a worktree therefore reported *everything* as
+# unset, which reads as "you have not configured signing" rather than "the
+# configuration is somewhere else".
+#
+# So the primary worktree is consulted as a fallback. `--git-common-dir` is the
+# shared `.git` whatever tree is asking, and its parent is the checkout that
+# owns it.
+default_config() {
+  local here="$ROOT/scripts/signing.env"
+  if [[ -f "$here" ]]; then
+    printf '%s' "$here"
+    return
+  fi
+  local common primary
+  common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [[ -n "$common" ]]; then
+    primary="$(dirname "$common")/scripts/signing.env"
+    if [[ -f "$primary" ]]; then
+      printf '%s' "$primary"
+      return
+    fi
+  fi
+  printf '%s' "$here"
+}
+
+CONFIG_FILE="${VBX_SIGNING_CONFIG:-$(default_config)}"
 if [[ -f "$CONFIG_FILE" ]]; then
   # Snapshot what the environment already set, then restore it afterwards.
   _env_team="${VBX_TEAM_ID:-}"
@@ -273,7 +300,14 @@ check_config() {
     say "  config file            $(basename "$CONFIG_FILE") (present)"
     # A config file that is not ignored is the leak this whole design exists to
     # prevent, so it is an error rather than a warning.
-    if git -C "$ROOT" check-ignore -q "$CONFIG_FILE" 2>/dev/null; then
+    if [[ "$CONFIG_FILE" != "$ROOT/scripts/signing.env" ]]; then
+      say "  location               the primary checkout, not this worktree"
+    fi
+    # Asked of the tree that *owns* the file. `check-ignore` run from `$ROOT`
+    # against a path outside it answers about the wrong repository — and
+    # answers "no" — which turned "your config is in the other checkout" into
+    # "your secrets are about to be committed".
+    if git -C "$(dirname "$CONFIG_FILE")" check-ignore -q "$CONFIG_FILE" 2>/dev/null; then
       say "  gitignored             yes"
     else
       say "  gitignored             NO — this file carries account identifiers"
@@ -339,7 +373,13 @@ check_config() {
   elif command -v xcrun >/dev/null; then
     # Asked rather than assumed. Credentials that are *present* and credentials
     # that *work* are different claims, and only the second one ships.
-    if xcrun notarytool history "${NOTARY_AUTH[@]}" --limit 1 >/dev/null 2>&1; then
+    #
+    # No `--limit`: `notarytool history` does not take one, and passing it made
+    # the command fail for a reason that had nothing to do with the credential.
+    # A perfectly good API key was reported as "configured but not usable" —
+    # a check that fails closed on its own bug is worse than no check, because
+    # it sends you to fix something that was never broken.
+    if xcrun notarytool history "${NOTARY_AUTH[@]}" >/dev/null 2>&1; then
       say "  notarization           usable ($NOTARY_AUTH_KIND)"
     else
       say "  notarization           $NOTARY_AUTH_KIND configured but not usable"
