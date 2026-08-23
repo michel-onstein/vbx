@@ -23,7 +23,13 @@ struct CellAlignmentTests {
 
     private func hostedTable() async throws -> (NSTableView, NSView, ProjectStore) {
         let store = await Fixture.loadedStore()
-        let size = CGSize(width: 1100, height: 400)
+        // Wide enough that every column measured below is actually on screen.
+        // At 1100 the Labels column began at x=1114 once the uncommitted gutter
+        // was added, and a column off the right edge draws no ink — which reads
+        // as an alignment failure rather than as a viewport too narrow to hold
+        // the row. It had only ~6pt of itself visible before that, so this was
+        // luck rather than headroom.
+        let size = CGSize(width: 1400, height: 400)
         let host = NSHostingView(
             rootView: AnyView(
                 IssueListView().environmentObject(store)

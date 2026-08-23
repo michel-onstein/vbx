@@ -33,7 +33,25 @@ struct IssueListView: View {
     /// `customizationID`, and a title→id map the hidden-column markers read —
     /// with a test whose whole job was catching those drift apart. One value
     /// each now, and that test is unnecessary.
+    /// The gutter carrying `+` / `*` for a bead that is ahead of the last
+    /// commit.
+    ///
+    /// Unsortable, so it supplies its own identifier rather than taking one
+    /// from `SortColumn` — the same position the type glyph is in. Sorting by
+    /// it would need a `SortColumn` case *and* an answer to what the order is
+    /// between two marks; the toolbar's uncommitted count is the summary, and
+    /// nobody has asked to group by it.
+    static let dirtyMarkID = "dirtyMark"
+
     static let specs: [BeadColumnSpec] = [
+        // Before the ID rather than after it, because it is read as a gutter:
+        // the eye runs down one narrow strip instead of hunting a column that
+        // moves with the ID's width. Protected, since it is the only surface
+        // the uncommitted state has on a row — hiding it would leave the state
+        // with nowhere to appear at all.
+        BeadColumnSpec(
+            id: Self.dirtyMarkID, title: "", width: 20, minWidth: 20, maxWidth: 20,
+            isProtected: true),
         BeadColumnSpec(
             id: SortColumn.id.rawValue, title: "ID", sort: .id,
             width: 96, minWidth: 70, maxWidth: 160, isProtected: true),
@@ -171,6 +189,12 @@ struct IssueListView: View {
     @ViewBuilder
     private func cell(_ spec: BeadColumnSpec, _ row: IssueRow) -> some View {
         switch spec.id {
+        case Self.dirtyMarkID:
+            // Absent, never zero: an unknown dirty state has no marks at all,
+            // which falls out of `mark(for:)` returning nil rather than being
+            // special-cased here.
+            DirtyMarkCell(mark: store.dirtyBeads.mark(for: row.id))
+
         case SortColumn.id.rawValue:
             Text(row.issue.id).monospaced().font(.callout)
 
@@ -483,6 +507,43 @@ struct IssueRow: Identifiable {
 }
 
 /// Renders a Phase-2 value, or *why* there isn't one. Never shows a bare 0.
+/// One character saying how a bead differs from the last commit.
+///
+/// `+` added, `*` modified. There is no `-`: a deleted bead has no row to draw
+/// it on — see `BeadDirtyState.removed`.
+///
+/// Replaces a tint over the whole row, which could say only "something here is
+/// uncommitted": it collapsed the cases the state already keeps apart, and it
+/// was suppressed under selection, so selecting a dirty row hid the fact.
+///
+/// The glyph carries the distinction and the accent carries the noticing. Both
+/// marks take the same colour deliberately — a second colour would imply a
+/// severity ordering between "new" and "edited", which there isn't.
+struct DirtyMarkCell: View {
+    let mark: BeadDirtyState.Mark?
+
+    /// Monospaced so the two marks occupy the same width and the gutter reads
+    /// as a column rather than as text that shifts.
+    var body: some View {
+        Text(Self.symbol(for: mark))
+            .monospaced()
+            .font(.callout)
+            .foregroundStyle(.tint)
+            .help(mark?.reason ?? "")
+            .accessibilityLabel(mark?.reason ?? "Unchanged since the last commit")
+    }
+
+    /// A clean bead draws a space, not a dot or a dash: the gutter must be
+    /// quiet enough that a marked row is what the eye finds.
+    static func symbol(for mark: BeadDirtyState.Mark?) -> String {
+        switch mark {
+        case .added: "+"
+        case .changed: "*"
+        case nil: " "
+        }
+    }
+}
+
 struct MetricCell: View {
     let value: Double?
     let status: MetricStatusEntry?

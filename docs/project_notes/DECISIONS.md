@@ -631,7 +631,7 @@ works in a sandbox where shelling out to `git` would not
 
 - **Three cases, not one.** Changed, added and removed are different, and only
   the first two have a row to mark. A removed bead still counts towards what a
-  commit would carry, so the count includes it and the tint cannot.
+  commit would carry, so the count includes it and the gutter cannot.
 - **Absent is not clean.** A workspace with no repository, or one with no
   commits, has nothing to compare against. That is `unknown`, and it renders as
   nothing at all rather than as "nothing outstanding" — the same rule the
@@ -646,10 +646,26 @@ works in a sandbox where shelling out to `git` would not
   export: `HEAD` moves and every dirty bead becomes clean while the watched file
   sits unchanged. Without the second watch the list would keep marking rows that
   are no longer dirty.
-- **Colour is not the only signal.** The tint is deliberately subtle — it has to
-  survive the alternating stripe and read in both appearances — so each marked
-  row carries a tooltip saying why, and the status bar shows a count broken down
-  by kind. There is an accessibility audit bead open; colour alone would fail it.
+- **A mark in a gutter, not a tint across the row** (amended 2026-08-23,
+  `vbx-r0m`). The row was originally tinted with a low-alpha accent. That could
+  say only *something here is uncommitted*: it collapsed the three cases above
+  into one, and it was suppressed while a row was selected, so selecting a dirty
+  row hid the very fact it was there to show. A fixed 20pt column before the ID
+  now draws `+` for added and `*` for changed, and nothing at all for a clean
+  bead. Both marks take the same accent deliberately — a second colour would
+  imply a severity ordering between "new" and "edited" that does not exist.
+- **Colour is not the only signal.** A character in a gutter explains itself no
+  better than a tint did, so the whole row still carries a tooltip saying why —
+  the whole row, not just the marker cell, since asking someone to find a
+  one-character gutter before they can learn what it means repeats the mistake.
+  The reason text lives on the mark itself, so the glyph and its explanation
+  cannot drift. The status bar keeps the count broken down by kind. There is an
+  accessibility audit bead open; colour alone would fail it.
+- **Deleted beads still have no row.** `-` is not among the marks, because the
+  bead is gone from disk and nothing on screen represents it. Synthesising rows
+  from the `HEAD` snapshot is a real option and a separate decision — such a row
+  carries no metrics, must refuse every edit, and has to mean something on the
+  board, graph and tree too. Until then a deletion appears only in the count.
 - **Multi-repo is not solved.** A workspace can span repositories with a `HEAD`
   each. This compares against the one the engine resolves for the opened source;
   when that fails the state is `unknown`, which is honest but not complete.

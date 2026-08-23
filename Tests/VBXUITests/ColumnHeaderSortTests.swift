@@ -131,6 +131,7 @@ struct TableColumnOrderTests {
     func priorityFollowsID() throws {
         let ids = specs.map(\.id)
         let id = try #require(ids.firstIndex(of: SortColumn.id.rawValue), "no ID column")
+        #expect(id == 1, "the mark gutter is the only thing before ID; got \(ids)")
         let priority = try #require(
             ids.firstIndex(of: SortColumn.priority.rawValue), "no priority column")
         #expect(priority == id + 1, "priority must follow ID directly; got \(ids)")
@@ -173,7 +174,7 @@ struct TableColumnOrderTests {
         }
         let unsortable = specs.filter { $0.sort == nil }.map(\.id)
         #expect(
-            unsortable.sorted() == ["blockedRatio", "type"],
+            unsortable.sorted() == ["blockedRatio", "dirtyMark", "type"],
             "unexpected unsortable columns \(unsortable)")
     }
 
@@ -195,13 +196,16 @@ struct TableColumnOrderTests {
     @Test("The identifier and the type glyph cannot be hidden")
     func essentialColumnsAreNotHideable() {
         // Every bead link, context menu and URL is keyed by the id; the glyph
-        // column is headerless and would list as a blank menu row. Both are
-        // deliberately exempt, and a later tidy-up must not quietly re-enable
-        // them.
+        // column is headerless and would list as a blank menu row; the
+        // uncommitted gutter is the only place a row says it is ahead of the
+        // last commit, so hiding it would leave that state invisible. All three
+        // are deliberately exempt, and a later tidy-up must not quietly
+        // re-enable them.
         let protected = specs.filter(\.isProtected).map(\.id)
         #expect(
-            protected.sorted() == [SortColumn.id.rawValue, "type"].sorted(),
-            "expected exactly ID and the type glyph to be protected, got \(protected)")
+            protected.sorted()
+                == [SortColumn.id.rawValue, "type", IssueListView.dirtyMarkID].sorted(),
+            "expected exactly ID, the type glyph and the mark gutter, got \(protected)")
     }
 
     @Test("Only columns that can be edited declare an editor")

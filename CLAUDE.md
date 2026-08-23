@@ -71,6 +71,14 @@ them.
   it must equal its `SortColumn` raw value, or the header chevron and the order
   come apart. An *unsortable* column has no `SortColumn` to take one from and
   supplies its own (`type`, `blockedRatio`). Asserted in `Table columns`.
+- **A row's appearance that comes from outside the `Issue` record must be in
+  `BeadTable`'s fingerprint**, or it goes stale on screen. The table reloads
+  only when the fingerprint changes — it has to, because `updateNSView` runs on
+  every unrelated state change and an unconditional reload cancels an
+  in-progress edit on every keystroke elsewhere. The uncommitted mark is drawn
+  from git rather than from the bead, and a commit changes no bead: `HEAD`
+  moves, every mark clears, and a fingerprint of the record alone is identical
+  either side of it. Same trap for any later overlay. See BUGS.md, 2026-08-23.
 - **Hosted cell content is aligned leading by `HostedCell`, not by each
   column.** The hosting view is pinned to both edges, so content handed the full
   column width centres itself — which is what put every hosted column in the

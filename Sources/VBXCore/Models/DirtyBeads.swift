@@ -28,6 +28,12 @@ public struct BeadDirtyState: Equatable, Sendable {
     /// In the commit, gone from disk. There is no row to mark — nothing on
     /// screen represents it — but it is part of what a commit would contain,
     /// so a count that omitted it would be wrong.
+    ///
+    /// This is why ``mark(for:)`` has no deleted case. Surfacing these as rows
+    /// synthesised from the `HEAD` snapshot is a real option, and a separate
+    /// decision: such a row carries no metrics, must refuse every edit, and has
+    /// to mean something on the board, graph and tree as well. Until then the
+    /// count in the toolbar is where a deletion shows up.
     public var removed: Set<String>
 
     /// False when there is nothing to compare against: no git repository, no
@@ -60,15 +66,41 @@ public struct BeadDirtyState: Equatable, Sendable {
 
     public func isDirty(_ id: String) -> Bool { changed.contains(id) || added.contains(id) }
 
-    /// Why a row is marked, for a tooltip. Nil when it is not.
+    /// How a row differs from the last commit, or nil when it does not.
     ///
-    /// Colour alone is not an affordance, so every marked row has to be able to
-    /// say what the colour means.
-    public func reason(for id: String) -> String? {
-        if added.contains(id) { return "Added since the last commit" }
-        if changed.contains(id) { return "Modified since the last commit" }
+    /// Only the two cases that *have* a row. A deleted bead is not here for the
+    /// reason ``removed`` gives.
+    ///
+    /// Nothing to compare against yields nil for every bead, because `added`
+    /// and `changed` are empty when the state is unknown — absent, never a mark
+    /// meaning "clean".
+    public enum Mark: Sendable, Equatable, CaseIterable {
+        /// On disk, absent from the commit.
+        case added
+        /// In both, and different.
+        case changed
+
+        /// What the mark means, in words.
+        ///
+        /// A glyph alone is not an affordance, so every marked row has to be
+        /// able to say what its mark means; this is the row's tooltip. It lives
+        /// beside the case rather than in the view so the two cannot drift.
+        public var reason: String {
+            switch self {
+            case .added: "Added since the last commit"
+            case .changed: "Modified since the last commit"
+            }
+        }
+    }
+
+    public func mark(for id: String) -> Mark? {
+        if added.contains(id) { return .added }
+        if changed.contains(id) { return .changed }
         return nil
     }
+
+    /// Why a row is marked, for a tooltip. Nil when it is not.
+    public func reason(for id: String) -> String? { mark(for: id)?.reason }
 
     /// Compares the working bead set against the committed one.
     ///
