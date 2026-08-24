@@ -4,6 +4,66 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-23 — A development certificate signed a release, and every check passed it
+
+**Symptom:** the first release ever cut got as far as Apple and no further. The
+build was clean — universal, signed, `codesign --verify --deep --strict` passed,
+disk image built and submitted — and came back six minutes later:
+
+```
+  status: Invalid
+  "The binary is not signed with a valid Developer ID certificate."
+      vbx.app/Contents/MacOS/vbx-cli   x86_64 · arm64
+      vbx.app/Contents/MacOS/vbx       x86_64 · arm64
+```
+
+then `stapler` failed with error 65, because there was no ticket to staple.
+
+**Cause:** `VBX_DEVELOPER_ID_APP` was an **Apple Development** certificate.
+`codesign` signs with one happily and the local verification passes, because
+the signature is perfectly valid — it is simply not a distributable one.
+
+Nothing caught it because `assert_identity` took the kind as an argument —
+`assert_identity "$DEVELOPER_ID_APP" "Developer ID Application"` — and used it
+**only in the error message**. The check underneath asked whether the configured
+string appeared in `security find-identity` at all. So the label named a
+certificate the code never looked for, and `--check` reported
+
+```
+  Developer ID cert      in the keychain
+```
+
+which was true, and useless.
+
+**The family this belongs to.** *Two preflight checks that failed closed on
+their own bugs*, below, are the same defect pointing the other way: those
+accused a working setup, this one blessed a broken one. A check that fails
+**open** is the more expensive of the two — the ones that fail closed cost an
+investigation, this one costs a universal build and a round trip to Apple before
+anything says a word, and what finally says it is Apple.
+
+**Fix:** `identity_is` compares the identity against the canonical common-name
+prefix Apple issues — `Developer ID Application: Name (TEAMID)` — and the label
+is load-bearing now at all three call sites (Developer ID, Apple Distribution,
+3rd Party Mac Developer Installer). It runs **before** the keychain lookup and
+**before** the dry-run return, so the wrong kind of certificate is refused
+without building anything, and `--check` reports the kind rather than mere
+presence:
+
+```
+  Developer ID cert      NOT a Developer ID Application certificate
+                         only that kind notarizes; create one at
+                         https://developer.apple.com/account/resources/certificates
+```
+
+**Prevention:** `test_a_certificate_of_the_wrong_kind_is_refused` configures an
+`Apple Development` name and asserts `--check` reports the kind, `--dmg` is not
+ready, `--dmg --dry-run` fails *before* building, and the refusal names the kind
+needed without leaking the certificate's name — plus that a correctly named
+identity is still accepted, so the check is not a wall.
+
+---
+
 ## 2026-08-23 — A commit left the uncommitted gutter marking rows that were clean
 
 **Symptom.** Nothing visible at the moment it happens, which is what makes it

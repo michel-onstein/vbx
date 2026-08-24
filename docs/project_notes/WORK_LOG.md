@@ -5,6 +5,27 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-23 — The check that let a development certificate through
+
+Asked to publish the built binary as a GitHub release, back when there were
+eight tags and no releases. The preflight said the notary profile was unusable
+on a machine where notarization worked — the `--limit` bug, since fixed and
+logged under *Two preflight checks that failed closed on their own bugs*.
+
+What this adds is the bug underneath it, found by rehearsing the release rather
+than trusting the fix: with the preflight unblocked the build ran to completion
+and Apple refused it, because the app was signed with an **Apple Development**
+certificate. `assert_identity` had been taking the certificate's kind as an
+argument and using it only in the error text, so `"Developer ID Application"`
+appeared in a message beside a check that never looked for one.
+
+Worth keeping: the two preflight bugs failed closed and this one failed open,
+and the open one was much more expensive — it is only caught after a universal
+build and a round trip to Apple, by Apple. Running the whole path deliberately,
+before it mattered, is what turned a silent failure into a caught one.
+
+---
+
 ## 2026-08-23 — The uncommitted state is a gutter mark, not a row tint (vbx-r0m)
 
 The row background was tinted `controlAccentColor` at 12% when a bead was ahead
