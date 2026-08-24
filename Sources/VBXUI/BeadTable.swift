@@ -74,7 +74,21 @@ struct BeadTable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let table = NSTableView()
-        table.style = .inset
+        // `.fullWidth`, because the style decides how far in the row starts and
+        // `.inset` starts it too far. Measured on the real table, first cell's
+        // `minX`:
+        //
+        //     .inset      16pt      .plain       8pt      .fullWidth   6pt
+        //
+        // The choice moves only that margin. `intercellSpacing` is 17pt under
+        // all three, so every gap *between* columns is unchanged — including
+        // the one the uncommitted mark overhangs into, which stays 4pt short of
+        // the id exactly as it was. The row simply begins nearer the edge.
+        //
+        // Full width rather than plain because this table fills its window
+        // rather than sitting in a sidebar, so the stripes and the selection
+        // should run edge to edge; the 2pt it also saves is incidental.
+        table.style = .fullWidth
         table.usesAlternatingRowBackgroundColors = true
         table.allowsMultipleSelection = true
         table.allowsColumnReordering = true

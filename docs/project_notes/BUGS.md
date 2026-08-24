@@ -4,6 +4,69 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-24 — Every row started 16pt in, and a test measured where the mark used to be
+
+Two findings, one measurement session. The first was reported; the second was
+sitting red on `main` and nobody had noticed.
+
+### The row started too far in
+
+**Symptom:** reported from a real build — the gap between the uncommitted mark
+and the ID column was right, and the gap between the mark and the left edge of
+the table was too big.
+
+**Cause:** those cannot both be fixed by moving the mark. Moving it left reopens
+the gap it had just closed. What was too wide was the table's own leading
+margin, and that is set by `NSTableView.style`. Measured on the real table, as
+the first cell's `minX`:
+
+```
+.inset      16pt        .plain       8pt        .fullWidth   6pt
+```
+
+It was `.inset`.
+
+**Fix:** `.fullWidth`, which suits a table that fills its window rather than one
+in a sidebar, and starts the row 6pt in. The style moves *only* that margin —
+`intercellSpacing` measures 17pt under all three, so every gap between columns
+is unchanged, and the mark still stops 4pt short of the id exactly as it did.
+
+**A claim that was wrong, and is now corrected in place:** two comments said the
+17pt spacing was "because an inset-style table" put it there. It is not the
+style's doing — 17pt under `.inset`, `.plain` and `.fullWidth` alike. The
+comments said so confidently enough that the next person would have believed
+them while changing the style.
+
+**Prevention:** `The row starts near the table's leading edge` asserts the first
+cell's `minX` is 8 or less, and that the gap before the id still equals the
+table's own `intercellSpacing` — so the margin cannot be bought out of the
+spacing beside it. Confirmed to fail at exactly 16.0pt under `.inset`. It
+asserts the outcome rather than the enum: a future style with a small inset
+would be just as correct.
+
+### And the test that had gone red
+
+**Symptom:** `The gutter draws a mark in the real table after a real write`
+failed on a **pristine checkout of `main`**, in 1.4s, reporting
+`(marked → 0.0) > (clean → 0.0)` — no ink in the gutter for any row, marked or
+clean.
+
+**Cause:** not flakiness, and not the style change — it fails identically under
+`.inset`. The mark had been given a negative trailing inset so it could sit in
+the spacing before the id, which put it **outside the gutter cell**. The test
+measures ink inside that cell, so it measures the one place the glyph was
+deliberately told not to be. Its sibling, `The mark sits next to the ID`, was
+written for the overhang and measures zones relative to the id cell, so it kept
+passing — which is why a red suite looked like one flaky test rather than a
+stale assertion.
+
+**Fix:** the measured rect is the cell **plus the overhang**, taken from
+`contentTrailingInset` rather than written as a number, so moving the mark again
+moves the measurement with it. The clean-row control is measured the same way
+and still discriminates.
+
+---
+
 ## 2026-08-23 — A development certificate signed a release, and every check passed it
 
 **Symptom:** the first release ever cut got as far as Apple and no further. The
