@@ -138,6 +138,36 @@ struct CellAlignmentTests {
         #expect(id < 0.25, "ID content starts \(Int(id * 100))% across its column")
     }
 
+    @Test("The row starts near the table's leading edge")
+    func rowStartsNearTheLeadingEdge() async throws {
+        // Reported from a real build: the gap between the mark and the id was
+        // right, and the gap between the mark and the left edge of the table
+        // was not. Those cannot both be fixed by moving the mark — moving it
+        // left opens the gap it had just closed. What had to move was the row,
+        // and how far in a row starts is the table's `style`:
+        //
+        //     .inset      16pt      .plain       8pt      .fullWidth   6pt
+        //
+        // measured as the first cell's `minX` on this very table. The style is
+        // the only lever, so this asserts the outcome it produces rather than
+        // the enum — a later style with a small inset would be just as correct.
+        let (table, _, store) = try await hostedTable()
+        defer { store.stopWatching() }
+
+        let first = table.frameOfCell(atColumn: 0, row: 0)
+        #expect(
+            first.minX <= 8,
+            "the row starts \(first.minX)pt in; .inset's 16pt is what this exists to catch")
+
+        // And the fix did not pay for itself out of the gap beside it. The
+        // spacing between columns belongs to the table, not to the style, so it
+        // must be untouched by any of this.
+        let second = table.frameOfCell(atColumn: 1, row: 0)
+        #expect(
+            second.minX - first.maxX == table.intercellSpacing.width,
+            "the gap before the id is \(second.minX - first.maxX)pt rather than the table's \(table.intercellSpacing.width)pt")
+    }
+
     @Test("The natively drawn Title column is unaffected")
     func titleStaysLeading() async throws {
         // Title is an `EditableCell` with an `NSTextField` pinned to the leading

@@ -5,6 +5,31 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-24 — The table's leading margin, measured rather than nudged
+
+"Too much spacing between the status character and the left side of the table",
+with the gap to the ID column reported as good. Those constrain each other: the
+mark's distance from the id was already right, so the mark could not move — the
+row had to.
+
+How far in a row starts is `NSTableView.style`, and the three candidates were
+measured on the real table rather than guessed at: 16pt for `.inset`, 8pt for
+`.plain`, 6pt for `.fullWidth`, with `intercellSpacing` a constant 17pt across
+all three. So the change moves the outer margin and nothing else, and the 4pt
+between the mark and the id survives untouched. `.fullWidth` for a table that
+fills its window.
+
+The measurement also disproved a comment that had been sitting in two files
+claiming the 17pt gap came from the inset style. It does not, and the comment
+was confident enough to mislead someone changing exactly what was changed here.
+
+Found on the way: `swift test` was **already red on `main`** — the gutter's
+"draws a mark in the real table" test measures ink inside the gutter cell, and
+the mark had been moved outside that cell on purpose. Repaired here, because
+there is no green verify to ship against otherwise. See BUGS.md.
+
+---
+
 ## 2026-08-23 — The check that let a development certificate through
 
 Asked to publish the built binary as a GitHub release, back when there were

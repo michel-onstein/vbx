@@ -54,13 +54,19 @@ struct IssueListView: View {
         // column — 4pt each side of 10 leaves 2pt, which clips the glyph.
         //
         // The trailing overhang is what actually puts the mark *next to* the
-        // id. Measured in a real table: the gutter's cell is x=16…26 and the id
-        // cell starts at 43, because an inset-style table puts 17pt of
-        // `intercellSpacing` between every pair of columns. Halving the column
-        // moved the glyph 10pt; the remaining distance is that gap, which
-        // belongs to the table and cannot be narrowed for one column without
-        // narrowing all of them. -13 lets the one glyph sit in it, ending about
-        // 4pt short of the id cell so the two never touch.
+        // id. Measured in a real table: the gutter's cell is x=6…16 and the id
+        // cell starts at 33, because the table puts 17pt of `intercellSpacing`
+        // between every pair of columns. Halving the column moved the glyph
+        // 10pt; the remaining distance is that gap, which belongs to the table
+        // and cannot be narrowed for one column without narrowing all of them.
+        // -13 lets the one glyph sit in it, ending about 4pt short of the id
+        // cell so the two never touch.
+        //
+        // The 17pt is not the row style's doing, though it was once written
+        // here as if it were: it measures 17 under `.inset`, `.plain` and
+        // `.fullWidth` alike. What the style moves is where the row starts —
+        // 16pt, 8pt and 6pt — which is why these numbers are 10pt lower than
+        // they used to be while the spacing between them is untouched.
         BeadColumnSpec(
             id: Self.dirtyMarkID, title: "", width: 10, minWidth: 10, maxWidth: 10,
             isProtected: true, contentAlignment: .trailing, contentInset: 1,
