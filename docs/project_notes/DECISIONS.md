@@ -661,11 +661,30 @@ works in a sandbox where shelling out to `git` would not
   The reason text lives on the mark itself, so the glyph and its explanation
   cannot drift. The status bar keeps the count broken down by kind. There is an
   accessibility audit bead open; colour alone would fail it.
-- **Deleted beads still have no row.** `-` is not among the marks, because the
-  bead is gone from disk and nothing on screen represents it. Synthesising rows
-  from the `HEAD` snapshot is a real option and a separate decision — such a row
-  carries no metrics, must refuse every edit, and has to mean something on the
-  board, graph and tree too. Until then a deletion appears only in the count.
+- **Deleted beads get no row — decided, not deferred** (amended 2026-08-24,
+  `vbx-iyy`). `-` is not among the marks and will not be: the bead is gone from
+  disk, and nothing on screen represents it.
+
+  The alternative was real and was rejected. `BeadDirtyState.compare` already
+  reads the committed set through `snapshot_at`, so the records are in hand;
+  injecting the removed ones back into the list is the easy half. The hard half
+  is what such a row *is*. It has no metrics — `GraphMetrics` is computed over
+  the beads on disk, so blocks, blocked-by and PageRank are absent rather than
+  zero. It must refuse every edit, because `br` has nothing to write to. It is
+  not only the list: the board, graph, tree and detail pane read the same beads,
+  and a row that exists on one surface and not the others is its own kind of
+  wrong. Filtering, sorting, recipes and hybrid search all run over it, and the
+  engine — which ranks the ids — does not know the bead exists.
+
+  That is every feature that reads the workspace learning about a bead the
+  workspace does not contain, to display a row nobody can act on. The cost is
+  spread across the whole app; the benefit is one glyph.
+
+  **What a deletion gets instead: a name.** `BeadDirtyState.summary()` lists the
+  removed ids in the status bar's tooltip — bounded, and saying how many it left
+  out — so "which bead went?" has an answer without a ghost row to ask it of.
+  Ids rather than titles, because the record is gone from disk and the id is the
+  handle that still resolves against the commit.
 - **Multi-repo is not solved.** A workspace can span repositories with a `HEAD`
   each. This compares against the one the engine resolves for the opened source;
   when that fails the state is `unknown`, which is honest but not complete.

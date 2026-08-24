@@ -26,6 +26,44 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — A deleted bead gets a name, not a row (vbx-iyy)
+
+The open question left by the gutter: `+` and `*` shipped, `-` did not, because
+a deleted bead is gone from disk and nothing in `visibleIssues` represents it.
+This decides it rather than deferring it again.
+
+**No synthesised rows.** The records are available — `compare` already reads the
+committed set through `snapshot_at` — so injecting the removed ones is the easy
+half. The hard half is what such a row *is*: no metrics (absent, not zero, since
+`GraphMetrics` covers the beads on disk), every edit refused because `br` has
+nothing to write to, and the same question again for the board, graph, tree and
+detail pane, which read the same beads. Filtering, sorting, recipes and hybrid
+search would all run over it, and the engine that ranks those ids does not know
+the bead exists.
+
+That is every feature that reads the workspace learning about a bead the
+workspace does not contain, to show a row nobody can act on. Spread the cost
+across the app, and the benefit is one glyph.
+
+**What a deletion gets instead is a name.** The status bar already counted
+removals; it now names them. `BeadDirtyState.summary()` lists the removed ids —
+sorted, bounded, and saying how many it left out — so "which bead went?" has an
+answer. Ids rather than titles, because the record is gone and the id is the
+handle that still resolves against the commit.
+
+The formatting moved from `ContentView` into `BeadDirtyState`, next to
+`Mark.reason`: it is a description of the state, the state already owns the
+words for its other cases, and a private computed property in a view is not
+testable.
+
+Tests: naming (present, sorted), bounding (`+7 more` rather than silent
+truncation), clean and unknown reading differently — absent is not zero — and
+that `mark(for:)` still answers nil for a removed bead while `total` still
+counts it. That last one is the test to reconsider first if a `-` is ever
+wanted.
+
+---
+
 ## 2026-08-24 — A release regenerates the HTML it invalidates (vbx-uq4)
 
 `docs/html/` is generated from `docs/*.md` and committed, and nothing
