@@ -17,7 +17,7 @@ box, the README title.
 | [FEATURE_PARITY.md](docs/FEATURE_PARITY.md) | — | Every bv capability mapped to a vbx surface and delivery phase | Living |
 | [RELEASES.md](docs/RELEASES.md) | ADR-013 | User-facing changes per release — generated from the git tags, never edited | Generated |
 | [project_notes/BUGS.md](docs/project_notes/BUGS.md) | — | Bug log with the regression test locking each fix in | Living |
-| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…016 | Architectural decisions and their trade-offs | Living |
+| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…018 | Architectural decisions and their trade-offs | Living |
 | [project_notes/KEY_FACTS.md](docs/project_notes/KEY_FACTS.md) | — | Toolchain, commands, layout, gotchas | Living |
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
@@ -107,6 +107,18 @@ them.
   side file to fall out of step with an external `br` run or a checkout. See
   ADR-015. Note `HEAD` moving is invisible to the bead-file watch, so `.git` is
   watched too.
+- **The graph's camera is ``GraphCamera``, and nothing recomputes its
+  arithmetic.** Drawing, hit-testing, the zoom buttons and both trackpad
+  gestures go through the one value — a click that lands on the node that *was*
+  under the cursor is what a second copy of the transform looks like. Zoom is
+  clamped in one place, so the percentage readout means the same thing whichever
+  input produced it. See ADR-018.
+- **SwiftUI has no scroll gesture, and a view that hit-tests to get one takes
+  every click with it.** Two-finger scrolling over the graph arrives through an
+  `NSEvent` local monitor scoped to the catcher's window and bounds, behind a
+  view that returns `nil` from `hitTest(_:)`; the mouse stays SwiftUI's. Also:
+  **a synthesised scroll event carries no window**, so delivery cannot be
+  asserted — test the deltas and the catcher's rectangle instead.
 - **A synthetic click cannot activate anything inside a table.** It presses a
   plain SwiftUI `Button` in a hosting view, but inside a table it neither
   focuses a known-editable `NSTextField` nor fires a double-click action. So a

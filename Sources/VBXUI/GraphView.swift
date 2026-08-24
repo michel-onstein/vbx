@@ -14,8 +14,7 @@ struct GraphCanvas: View {
     let pageRank: [String: Double]?
     var selection: String?
     var hovered: String?
-    var zoom: CGFloat = 1
-    var pan: CGSize = .zero
+    var camera = GraphCamera()
 
     /// Node radius encodes PageRank when available, uniform otherwise — an
     /// un-computed metric must not masquerade as "all equally important".
@@ -27,8 +26,8 @@ struct GraphCanvas: View {
 
     var body: some View {
         Canvas { context, _ in
-            context.translateBy(x: pan.width, y: pan.height)
-            context.scaleBy(x: zoom, y: zoom)
+            context.translateBy(x: camera.pan.width, y: camera.pan.height)
+            context.scaleBy(x: camera.zoom, y: camera.zoom)
             draw(in: &context)
         }
     }
@@ -104,8 +103,12 @@ struct GraphCanvas: View {
     }
 
     /// Nearest node within its own radius, in canvas coordinates.
+    ///
+    /// Through the camera rather than repeating its arithmetic: when the two
+    /// disagree, clicks land on the node that *was* under the cursor before the
+    /// last zoom, which reads as the graph ignoring the click.
     func node(at point: CGPoint) -> LayoutNode? {
-        let p = CGPoint(x: (point.x - pan.width) / zoom, y: (point.y - pan.height) / zoom)
+        let p = camera.canvasPoint(for: point)
         return layout.nodes
             .map { ($0, hypot($0.position.x - p.x, $0.position.y - p.y)) }
             .filter { $0.1 <= radius(for: $0.0.id) + 4 }
@@ -118,11 +121,21 @@ struct GraphCanvas: View {
 struct GraphView: View {
     @EnvironmentObject var store: ProjectStore
     @State private var layout: GraphLayout = .empty
-    @State private var zoom: CGFloat = 1
-    @State private var pan: CGSize = .zero
-    @State private var dragStart: CGSize = .zero
+    @State private var camera = GraphCamera()
     @State private var hovered: String?
     @State private var isLaidOut = false
+
+    // Both continuous gestures are applied as increments — the change since the
+    // last event — rather than recomputed from a camera captured at the start.
+    // A pinch and a drag can run at once on a trackpad, and two gestures each
+    // recomputing from their own baseline would discard each other's work; the
+    // graph then jumps between two cameras while both hands are moving.
+    @State private var lastDragTranslation: CGSize = .zero
+    @State private var lastMagnification: CGFloat = 1
+
+    /// The pane's size, for the zoom buttons — which are drawn over the graph
+    /// rather than inside the reader that measures it.
+    @State private var paneSize: CGSize = .zero
 
     private var canvas: GraphCanvas {
         GraphCanvas(
@@ -132,8 +145,7 @@ struct GraphView: View {
             pageRank: store.metrics.pageRank,
             selection: store.focusedID,
             hovered: hovered,
-            zoom: zoom,
-            pan: pan
+            camera: camera
         )
     }
 
@@ -142,14 +154,40 @@ struct GraphView: View {
             GeometryReader { geo in
                 canvas
                     .contentShape(Rectangle())
+                    // Two-finger scrolling. An overlay, so its rectangle is the
+                    // canvas's; it never takes a click, so every gesture below
+                    // is untouched.
+                    .overlay {
+                        GraphScrollCatcher { translation in
+                            camera = camera.panned(by: translation)
+                        }
+                    }
                     .gesture(
                         DragGesture()
                             .onChanged { value in
-                                pan = CGSize(
-                                    width: dragStart.width + value.translation.width,
-                                    height: dragStart.height + value.translation.height)
+                                camera = camera.panned(
+                                    by: CGSize(
+                                        width: value.translation.width - lastDragTranslation.width,
+                                        height: value.translation.height
+                                            - lastDragTranslation.height))
+                                lastDragTranslation = value.translation
                             }
-                            .onEnded { _ in dragStart = pan }
+                            .onEnded { _ in lastDragTranslation = .zero }
+                    )
+                    // Simultaneous with the drag: a pinch that also slides is
+                    // one motion to the hand, and making them exclusive means
+                    // whichever the framework recognises first wins and the
+                    // other half of the motion is dropped.
+                    .simultaneousGesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                guard lastMagnification > 0 else { return }
+                                camera = camera.magnified(
+                                    by: value.magnification / lastMagnification,
+                                    around: anchor(of: value, in: geo.size))
+                                lastMagnification = value.magnification
+                            }
+                            .onEnded { _ in lastMagnification = 1 }
                     )
                     .onTapGesture { location in
                         if let hit = canvas.node(at: location) { store.select(id: hit.id) }
@@ -160,7 +198,14 @@ struct GraphView: View {
                         case .ended: hovered = nil
                         }
                     }
-                    .onAppear { center(in: geo.size) }
+                    .onAppear {
+                        paneSize = geo.size
+                        camera = camera.centred(content: layout.size, in: geo.size)
+                    }
+                    // The buttons sit outside this reader and zoom about the
+                    // middle of the pane, so the size has to be carried out to
+                    // them.
+                    .onChange(of: geo.size) { _, size in paneSize = size }
             }
 
             controls
@@ -197,28 +242,42 @@ struct GraphView: View {
         isLaidOut = true
     }
 
-    private func center(in size: CGSize) {
-        guard layout.size.width > 0 else { return }
-        pan = CGSize(
-            width: max(0, (size.width - layout.size.width * zoom) / 2),
-            height: 20)
-        dragStart = pan
+    /// Where a pinch is happening, in the canvas's own coordinates.
+    ///
+    /// `MagnifyGesture` reports its anchor as a `UnitPoint` — a fraction of the
+    /// view — so it has to be multiplied back out by the size the gesture was
+    /// measured in.
+    private func anchor(of value: MagnifyGesture.Value, in size: CGSize) -> CGPoint {
+        CGPoint(x: value.startAnchor.x * size.width, y: value.startAnchor.y * size.height)
+    }
+
+    /// The middle of the pane, which is what the buttons zoom about.
+    ///
+    /// Anchoring them matters for the same reason it matters for a pinch: a
+    /// step that leaves the pan alone slides the graph across the pane and off
+    /// it, so zooming in twice from the buttons used to need a drag afterwards
+    /// to find the nodes again. Before the pane has been measured there is
+    /// nothing to anchor to, and the origin is the old behaviour.
+    private var paneCentre: CGPoint {
+        CGPoint(x: paneSize.width / 2, y: paneSize.height / 2)
     }
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Button { zoom = max(0.25, zoom - 0.15) } label: {
+                Button { camera = camera.zoomed(to: camera.zoom - 0.15, around: paneCentre) } label: {
                     Image(systemName: "minus.magnifyingglass")
                 }
-                Button { zoom = min(3, zoom + 0.15) } label: {
+                .help("Zoom out — or pinch on a trackpad")
+                Button { camera = camera.zoomed(to: camera.zoom + 0.15, around: paneCentre) } label: {
                     Image(systemName: "plus.magnifyingglass")
                 }
-                Button { zoom = 1; pan = .zero; dragStart = .zero } label: {
+                .help("Zoom in — or pinch on a trackpad")
+                Button { camera = GraphCamera() } label: {
                     Image(systemName: "arrow.counterclockwise")
                 }
                 .help("Reset view")
-                Text("\(Int(zoom * 100))%")
+                Text("\(Int(camera.zoom * 100))%")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }

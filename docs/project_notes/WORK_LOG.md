@@ -5,6 +5,39 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-24 — Pinch and two-finger scroll on the graph (vbx-vnl)
+
+The graph zoomed only from its two buttons and panned only by holding the mouse
+down. Asked for the trackpad gestures a canvas is expected to have.
+
+SwiftUI supplies half. `MagnifyGesture` is a real pinch over a `Canvas`; there
+is no scroll gesture at all, and `ScrollView` cannot be the answer because the
+camera is a transform *inside* the canvas rather than a scrolled subview. So the
+scroll half is an `NSEvent` local monitor behind a view that returns `nil` from
+`hitTest(_:)` — the mouse stays entirely SwiftUI's, which after ADR-014 is worth
+insisting on. ADR-018 records why a monitor rather than a view that takes the
+event.
+
+The camera became a value type in the same change, which is the part that made
+any of this assertable: a pinch cannot be delivered headlessly, so the
+arithmetic has to be reachable without one. Ten assertions came out of it,
+including one that surprised me — a synthesised `CGEvent` scroll posted to the
+process arrives with **no window**, so the monitor's own scoping rejects it. That
+closed the door on testing delivery, and the honest thing was to write that down
+in the ADR rather than assert something weaker and call it covered. What *is*
+covered either side of the gap: the anchored zoom, the clamping, the pan, a
+scroll event's deltas in both units, and — with the catcher hosted for real —
+that its rectangle actually covers the graph, the failure mode being an overlay
+that ends up zero-sized and looks exactly like a gesture macOS never sent.
+
+Two things fell out of doing it properly. Hit-testing now goes through the same
+camera as the drawing, where it had been a second copy of the transform. And the
+buttons anchor on the middle of the pane: leaving the offset alone had slid the
+graph off the pane, so zooming in twice needed a drag afterwards to find the
+nodes again.
+
+---
+
 ## 2026-08-23 — The check that let a development certificate through
 
 Asked to publish the built binary as a GitHub release, back when there were
