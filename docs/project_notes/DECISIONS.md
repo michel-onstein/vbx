@@ -809,3 +809,63 @@ credential, both halves.
 - **Neither credential exists here yet**, so this does not make a signed release
   possible on its own — it removes one of the two blockers and makes the other
   a single credential rather than two.
+
+---
+
+## ADR-017 — A closed bead is immutable in vbx, and vbx is the only thing enforcing it
+
+**Date:** 2026-08-24 · **Status:** Accepted
+
+**Context.** A closed bead is a record of what happened. Editing one rewrites
+history rather than tracking work, and vbx offered both of its edits — the title
+field editor and the priority menu — on closed beads exactly as on open ones.
+
+The first question was whether `br` already refuses, because it changes what
+this is. **It does not.** Measured against a scratch workspace before anything
+was written:
+
+    $ br close scr-985 --reason done
+    $ br update scr-985 --title "Retitled after closing"
+    [{"id":"scr-985","title":"Retitled after closing","status":"closed",...}]
+    exit: 0
+
+Priority behaves the same way. So this is not vbx aligning with the engine; it
+is vbx's own rule.
+
+**Decision.** A bead whose status is `closed` or `tombstone` is immutable in
+vbx. `IssueStatus.isImmutable` is the single expression of it.
+
+- **Not offered, rather than refused afterwards.** The double-click does not
+  open the field editor and the priority menu shows its reason instead of
+  values. By the time a title has been typed and Return pressed, an edit that
+  vanishes into an error is worse than one that was never offered.
+- **Refused at the write as well.** `setTitle` and `setPriority` check the same
+  rule. A gate is not a rule if the thing behind it still says yes, and the
+  thing behind it — `br` — does.
+- **A mixed selection refuses as a whole**, naming how many beads stood in the
+  way. The alternative, applying to the open beads and skipping the closed
+  ones, is the kind of partial success noticed a week later, when the beads that
+  did not change look like beads nobody got to.
+- **The rule is a function of status and nothing else.** The escape hatch for a
+  bead closed by mistake is to reopen it, after which it edits again because it
+  is no longer closed. Nothing is stored, and there is no separate lock to fall
+  out of step with the status — the same argument
+  [ADR-015](#adr-015--uncommitted-is-defined-against-git-not-tracked-by-vbx)
+  makes for defining "uncommitted" against git.
+- **An unknown status stays editable.** `IssueStatus` is an open enum on
+  purpose. A status this build has never heard of must not silently become
+  read-only: refusing an edit is the more surprising of the two failures, and
+  the one nobody would think to report — they would assume the bead was closed.
+
+**Consequences.**
+
+- **This does not make a closed bead immutable anywhere else.** A terminal
+  `br update` still rewrites one, and vbx will show the result on the next
+  reload. Stated here rather than implied, because a rule enforced in one
+  surface is a rule people are surprised by in another.
+- **Reopening is the escape hatch and is not yet built.** Until it is, a bead
+  closed by mistake is edited from the terminal — which works, per the above.
+- **Colour is not the affordance.** The refused cell carries the reason as its
+  tooltip, and a refusal outranks the uncommitted mark's tooltip on a column
+  that edits: it explains an affordance that just did nothing.
+

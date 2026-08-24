@@ -974,6 +974,42 @@ public final class ProjectStore: ObservableObject {
         return nil
     }
 
+    /// Why these beads cannot be edited, or nil when they can.
+    ///
+    /// The whole-app reasons first — no `br`, or time travel — because they
+    /// apply whatever is selected. Then the per-bead one: a closed bead is a
+    /// record of what happened (see ``Issue/Status/isImmutable``).
+    ///
+    /// **A mixed selection refuses outright** rather than applying to the open
+    /// beads and skipping the closed ones. Partial success is the kind of thing
+    /// noticed a week later, when the beads that did not change look like beads
+    /// nobody got to; refusing is one rule to hold in your head, and the
+    /// selection is the user's to narrow. The reason says how many stood in the
+    /// way, so the refusal is never mysterious.
+    ///
+    /// Ids that are not in the workspace are ignored rather than treated as
+    /// immutable: a stale selection is a reason to write nothing for that id,
+    /// not to refuse the ones that are real.
+    public func editingUnavailableReason(for ids: Set<Issue.ID>) -> String? {
+        if let global = editingUnavailableReason { return global }
+        let byID = issuesByID
+        let immutable = ids.filter { byID[$0]?.status.isImmutable == true }
+        guard !immutable.isEmpty else { return nil }
+        let present = ids.filter { byID[$0] != nil }
+        if immutable.count == present.count {
+            return immutable.count == 1
+                ? "A closed bead is a record of what happened. Reopen it to edit."
+                : "All \(immutable.count) selected beads are closed. Reopen them to edit."
+        }
+        return "\(immutable.count) of \(present.count) selected beads are closed. "
+            + "Reopen them, or narrow the selection."
+    }
+
+    /// Whether these beads can be edited at all.
+    public func canEdit(_ ids: Set<Issue.ID>) -> Bool {
+        editingUnavailableReason(for: ids) == nil
+    }
+
     // MARK: - Uncommitted beads
 
     /// Which beads differ from the last commit.
@@ -1043,6 +1079,14 @@ public final class ProjectStore: ObservableObject {
     @discardableResult
     public func setPriority(_ priority: Int, for ids: Set<Issue.ID>) async -> Set<Issue.ID> {
         guard canEditBeads, let workspace = workspaceDirectory else { return ids }
+        // Refused here as well as hidden in the UI. The affordance is gated on
+        // the same rule, so reaching this with a closed bead means the view was
+        // stale — and a stale view must not be able to rewrite a record.
+        if let reason = editingUnavailableReason(for: ids) {
+            loadError = reason
+            return ids
+        }
+
         var failed: Set<Issue.ID> = []
         var lastError: String?
         for id in ids.sorted() {
@@ -1072,6 +1116,12 @@ public final class ProjectStore: ObservableObject {
     public func setTitle(_ title: String, for id: Issue.ID) async -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canEditBeads, let workspace = workspaceDirectory else { return false }
+        // As above: the field editor does not open on a closed bead, so getting
+        // here with one means the view was stale.
+        if let reason = editingUnavailableReason(for: [id]) {
+            loadError = reason
+            return false
+        }
         guard !trimmed.isEmpty else { return false }
         guard trimmed != issues.first(where: { $0.id == id })?.title else { return false }
         do {

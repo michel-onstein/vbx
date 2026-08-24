@@ -194,6 +194,7 @@ struct UncommittedBeadsTests {
                 commitText: { _, _, _ in },
                 valueMenu: { _, _ in nil },
                 rowMenu: { _ in nil },
+                editRefusal: { _ in nil },
                 uncommittedReason: { id in
                     marked.contains(id) ? BeadDirtyState.Mark.changed.reason : nil
                 })

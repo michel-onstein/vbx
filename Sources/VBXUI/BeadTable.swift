@@ -56,6 +56,13 @@ struct BeadTable: NSViewRepresentable {
     /// The row context menu, for the ids AppKit's selection rules produce.
     let rowMenu: (Set<Issue.ID>) -> NSMenu?
 
+    /// Why this bead cannot be edited, or nil when it can.
+    ///
+    /// Consulted *before* the editor opens rather than at the write: by the
+    /// time a title has been typed and Return pressed, an edit that vanishes
+    /// with an error is worse than one that was never offered.
+    let editRefusal: (Issue.ID) -> String?
+
     /// Why a row is marked as uncommitted, or nil when it is not.
     ///
     /// A reason rather than a Bool, because the mark alone says nothing: the
@@ -231,7 +238,25 @@ struct BeadTable: NSViewRepresentable {
             tableColumn: NSTableColumn?, row: Int, mouseLocation: NSPoint
         ) -> String {
             guard row >= 0, row < parent.rows.count else { return "" }
-            return parent.uncommittedReason(parent.rows[row].id) ?? ""
+            let column = tableColumn.flatMap { self.spec(for: $0) }
+            return Self.tooltip(
+                editRefusal: parent.editRefusal(parent.rows[row].id),
+                columnEdits: column?.editing != nil,
+                uncommittedReason: parent.uncommittedReason(parent.rows[row].id))
+        }
+
+        /// Which of the two things a cell has to say takes the tooltip.
+        ///
+        /// A refusal wins, and only over a column that would otherwise have
+        /// accepted an edit: it explains an affordance that just did nothing,
+        /// which is the more urgent question, and on a column that never edits
+        /// it would be answering a question nobody asked. The uncommitted
+        /// reason is what every other cell says.
+        static func tooltip(
+            editRefusal: String?, columnEdits: Bool, uncommittedReason: String?
+        ) -> String {
+            if columnEdits, let editRefusal { return editRefusal }
+            return uncommittedReason ?? editRefusal ?? ""
         }
 
         func tableView(
@@ -419,6 +444,14 @@ struct BeadTable: NSViewRepresentable {
             else { return }
             let column = table.tableColumns[columnIndex]
             guard let spec = spec(for: column), let editing = spec.editing else { return }
+
+            // Not offered rather than refused later. The cell's tooltip carries
+            // the reason, so the double-click doing nothing is explainable
+            // without a dialog interrupting a double-click.
+            if parent.editRefusal(parent.rows[row].id) != nil {
+                NSSound.beep()
+                return
+            }
 
             switch editing {
             case .text:

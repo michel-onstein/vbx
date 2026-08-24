@@ -153,6 +153,7 @@ struct IssueListView: View {
             },
             valueMenu: { spec, ids in priorityMenu(spec, ids) },
             rowMenu: { ids in rowMenu(for: ids) },
+            editRefusal: { id in store.editingUnavailableReason(for: [id]) },
             uncommittedReason: { id in store.dirtyBeads.reason(for: id) }
         )
         // Shows where columns were hidden, and brings them back on a
@@ -216,7 +217,7 @@ struct IssueListView: View {
                 .monospacedDigit()
                 .foregroundStyle(row.issue.priority <= 1 ? .primary : .secondary)
                 .help(
-                    store.editingUnavailableReason
+                    store.editingUnavailableReason(for: [row.id])
                         ?? "Double-click to change the priority")
 
         case "type":
@@ -328,7 +329,10 @@ struct IssueListView: View {
         guard !ids.isEmpty else { return nil }
         let menu = NSMenu()
         menu.autoenablesItems = false
-        if let reason = store.editingUnavailableReason {
+        // The selection's reason, not just the app-wide one: a closed bead in
+        // the selection refuses the command, and the menu says which and how
+        // many rather than presenting values that would do nothing.
+        if let reason = store.editingUnavailableReason(for: ids) {
             // A disabled menu with no explanation is the state this app
             // deliberately avoids elsewhere; say why rather than just refuse.
             let item = NSMenuItem(title: reason, action: nil, keyEquivalent: "")
