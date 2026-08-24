@@ -259,7 +259,7 @@ struct StatusBar: View {
                         "\(store.dirtyBeads.total) uncommitted",
                         systemImage: "pencil.circle"
                     )
-                    .help(uncommittedSummary)
+                    .help(store.dirtyBeads.summary())
                 }
 
                 if store.isWatching {
@@ -286,17 +286,6 @@ struct StatusBar: View {
         .padding(.vertical, 6)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
-    }
-
-    /// Spells out the three kinds, because "7 uncommitted" does not say whether
-    /// anything was deleted — and a deletion has no row to notice.
-    private var uncommittedSummary: String {
-        let state = store.dirtyBeads
-        var parts: [String] = []
-        if !state.changed.isEmpty { parts.append("\(state.changed.count) modified") }
-        if !state.added.isEmpty { parts.append("\(state.added.count) added") }
-        if !state.removed.isEmpty { parts.append("\(state.removed.count) removed") }
-        return parts.joined(separator: ", ") + " since the last commit"
     }
 
     @ViewBuilder

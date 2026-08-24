@@ -29,11 +29,15 @@ public struct BeadDirtyState: Equatable, Sendable {
     /// screen represents it — but it is part of what a commit would contain,
     /// so a count that omitted it would be wrong.
     ///
-    /// This is why ``mark(for:)`` has no deleted case. Surfacing these as rows
-    /// synthesised from the `HEAD` snapshot is a real option, and a separate
-    /// decision: such a row carries no metrics, must refuse every edit, and has
-    /// to mean something on the board, graph and tree as well. Until then the
-    /// count in the toolbar is where a deletion shows up.
+    /// This is why ``mark(for:)`` has no deleted case, and — decided in
+    /// ADR-015 — why it never will. Synthesising rows from the `HEAD` snapshot
+    /// was the alternative: a row that carries no metrics, refuses every edit,
+    /// and would have to mean something on the board, graph and tree too. Every
+    /// feature that reads the workspace would have had to learn about a bead
+    /// the workspace does not contain, to show a row nobody can act on.
+    ///
+    /// A deletion is named instead of drawn — see ``summary`` — which answers
+    /// "which bead went?" without putting a ghost in the list.
     public var removed: Set<String>
 
     /// False when there is nothing to compare against: no git repository, no
@@ -91,6 +95,37 @@ public struct BeadDirtyState: Equatable, Sendable {
             case .changed: "Modified since the last commit"
             }
         }
+    }
+
+    /// The pending state in words, naming what has no row of its own.
+    ///
+    /// "7 uncommitted" does not say whether anything was deleted, and a
+    /// deletion is the one case with nothing on screen to notice — so the
+    /// removed beads are listed by id. That is the whole of what vbx does for
+    /// a deleted bead, deliberately: the alternative was a synthesised row, and
+    /// ADR-015 records why it is not worth what it costs.
+    ///
+    /// Ids rather than titles because the record is gone from disk; the id is
+    /// the handle that still resolves, against the commit.
+    ///
+    /// Bounded, and it says how many it left out. A workspace where a hundred
+    /// beads were deleted is exactly where an unbounded tooltip is useless.
+    public func summary(namingUpTo limit: Int = 4) -> String {
+        var parts: [String] = []
+        if !changed.isEmpty { parts.append("\(changed.count) modified") }
+        if !added.isEmpty { parts.append("\(added.count) added") }
+        if !removed.isEmpty {
+            // Sorted so the same state always reads the same way; a tooltip
+            // that reorders itself between renders looks like it changed.
+            let named = removed.sorted().prefix(limit)
+            var detail = named.joined(separator: ", ")
+            if removed.count > limit { detail += ", +\(removed.count - limit) more" }
+            parts.append("\(removed.count) removed (\(detail))")
+        }
+        guard !parts.isEmpty else {
+            return isKnown ? "Nothing uncommitted" : "No commit to compare against"
+        }
+        return parts.joined(separator: ", ") + " since the last commit"
     }
 
     public func mark(for id: String) -> Mark? {

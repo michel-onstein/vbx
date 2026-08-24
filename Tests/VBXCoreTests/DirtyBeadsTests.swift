@@ -103,4 +103,52 @@ struct DirtyBeadsTests {
         let state = BeadDirtyState.compare(working: [b, a], committed: [a, b])
         #expect(state.isClean, "reordering was read as a change")
     }
+
+    // MARK: - The summary, which is what a deletion gets instead of a row
+
+    @Test("A deletion is named, because it has no row to notice")
+    func summaryNamesRemovedBeads() {
+        // The decision in ADR-015: no synthesised rows for deleted beads. So
+        // the only place a deletion can be seen is this string, and a count
+        // alone would not say which bead went.
+        let state = BeadDirtyState(
+            changed: ["vbx-1", "vbx-2"], added: ["vbx-3"], removed: ["vbx-9", "vbx-4"])
+        let summary = state.summary()
+        #expect(summary.contains("2 modified"))
+        #expect(summary.contains("1 added"))
+        #expect(summary.contains("2 removed"))
+        #expect(summary.contains("vbx-4"), "the removed bead is not named: \(summary)")
+        #expect(summary.contains("vbx-9"))
+        // Sorted, so the same state always reads the same way — a tooltip that
+        // reorders itself between renders looks like something changed.
+        #expect(summary.range(of: "vbx-4")!.lowerBound < summary.range(of: "vbx-9")!.lowerBound)
+    }
+
+    @Test("Naming is bounded, and says what it left out")
+    func summaryIsBounded() {
+        // A hundred deleted beads is exactly where an unbounded tooltip stops
+        // being useful, and silently truncating would misreport the state.
+        let removed = Set((1...10).map { "vbx-\($0)" })
+        let summary = BeadDirtyState(removed: removed).summary(namingUpTo: 3)
+        #expect(summary.contains("10 removed"))
+        #expect(summary.contains("+7 more"), "\(summary)")
+    }
+
+    @Test("Clean and unknown do not read the same")
+    func summaryDistinguishesCleanFromUnknown() {
+        // The rule this repo applies everywhere: absent is not zero. A
+        // workspace with no history must not claim nothing is outstanding.
+        #expect(BeadDirtyState().summary() == "Nothing uncommitted")
+        #expect(BeadDirtyState.unknown.summary() == "No commit to compare against")
+    }
+
+    @Test("A deleted bead is not marked, because it has no row")
+    func removedBeadsAreNotMarked() {
+        // The other half of the same decision: `mark(for:)` answers only for
+        // beads that are on screen. If a `-` ever appears, this is the test
+        // that should have been reconsidered first.
+        let state = BeadDirtyState(removed: ["vbx-9"])
+        #expect(state.mark(for: "vbx-9") == nil)
+        #expect(state.total == 1, "a deletion still counts towards the commit")
+    }
 }
