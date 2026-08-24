@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.1.6 — 2026-08-24
+
+### Fixes
+
+- Halve the uncommitted gutter, and put its mark against the ID ([#56](https://github.com/michel-onstein/vbx/pull/56))
+
 ## 0.1.5 — 2026-08-24
 
 ### Fixes
