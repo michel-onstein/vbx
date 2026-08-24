@@ -26,6 +26,42 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — The gutter is half as wide, and its mark sits against the ID (vbx-tkx)
+
+20pt to 10pt, and the glyph moved from the leading edge to the trailing one, so
+it reads as attached to the bead whose id is immediately to its right instead of
+floating at the left of the window.
+
+Two things made this more than two numbers, both of them the same constraint
+seen from different sides: `HostedCell` pins its hosting view to both cell edges
+and aligns content leading, in *one* place, precisely so a column cannot forget
+to do it. So:
+
+- **The alignment is declared on the spec.** `BeadColumnSpec.contentAlignment`
+  defaults to `.leading` and `HostedCell` reads it. Wrapping the gutter's own
+  content in a trailing frame would have worked and would have put the decision
+  back in the place the rule exists to take it out of.
+- **The inset is declared on the spec too.** 4pt each side of a 10pt column
+  leaves 2pt, and the glyph clips. The gutter asks for 1pt; everything else
+  keeps 4.
+
+`HostedCell` now keeps its edge constraints so the inset can change, rebuilt
+only when a spec asks for a different one — a cell is reused across the rows of
+one column, so this is not per-row work.
+
+Checked by rendering rather than by reasoning, because at 10pt "tight" and
+"clipped" are two points apart: the mark drew complete in a real list, and the
+clipping guard was confirmed to fail at a 4pt inset, where 2pt of content leaves
+a sliver that would still have satisfied "there is ink here".
+
+Tests: `The glyph still fits once the gutter is halved` renders the same mark in
+the real content width and in a generous one and requires the same ink;
+`The gutter is the one column on the other edge` asserts the trailing alignment
+*and* that every other column kept the default, which is the half that says the
+rule still holds. 499 passing.
+
+---
+
 ## 2026-08-23 — The uncommitted state is a gutter mark, not a row tint (vbx-r0m)
 
 The row background was tinted `controlAccentColor` at 12% when a bead was ahead

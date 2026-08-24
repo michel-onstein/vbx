@@ -27,6 +27,23 @@ struct BeadColumnSpec: Identifiable, Sendable {
     let isProtected: Bool
     /// Whether a double-click on this cell starts an edit.
     let editing: Editing?
+    /// Which edge hosted content sits against.
+    ///
+    /// Its own type rather than SwiftUI's `Alignment` so the spec stays a plain
+    /// `Sendable` value, and so the only two answers a column may give are the
+    /// two that exist.
+    let contentAlignment: CellAlignment
+    /// How far hosted content is held off the cell's edges.
+    ///
+    /// 4pt suits a column with room. The uncommitted gutter is 10pt wide, where
+    /// 4pt each side leaves 2pt to draw a character in and the glyph clips, so
+    /// a narrow column says so here.
+    let contentInset: CGFloat
+
+    enum CellAlignment: Sendable {
+        case leading
+        case trailing
+    }
 
     enum Editing: Sendable {
         /// A field editor over the cell, committing on Return or on losing
@@ -44,7 +61,9 @@ struct BeadColumnSpec: Identifiable, Sendable {
         minWidth: CGFloat? = nil,
         maxWidth: CGFloat? = nil,
         isProtected: Bool = false,
-        editing: Editing? = nil
+        editing: Editing? = nil,
+        contentAlignment: CellAlignment = .leading,
+        contentInset: CGFloat = 4
     ) {
         self.id = id
         self.title = title
@@ -54,6 +73,8 @@ struct BeadColumnSpec: Identifiable, Sendable {
         self.maxWidth = maxWidth ?? max(width, 10_000)
         self.isProtected = isProtected
         self.editing = editing
+        self.contentAlignment = contentAlignment
+        self.contentInset = contentInset
     }
 }
 

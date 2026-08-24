@@ -106,6 +106,38 @@ struct CellAlignmentTests {
         #expect(c > l + 0.2, "the measurement does not separate the two cases")
     }
 
+    @Test("The gutter is the one column on the other edge")
+    func gutterIsTrailing() async throws {
+        // The mirror of the test above, and the reason the alignment is a
+        // property of the spec rather than a wrapper inside a column's content:
+        // one column asks for the other edge, and every other column keeps the
+        // default without being touched.
+        let (table, host, store) = try await hostedTable()
+        defer { Task { await store.close() } }
+
+        // Only a marked bead draws anything, so the fixture — freshly loaded and
+        // clean — has an empty gutter. Alignment is a property of the cell, not
+        // of the glyph, so it is measured on a column whose content is always
+        // drawn: the assertion is that `contentAlignment` reaches `HostedCell`.
+        let spec = try #require(
+            IssueListView.specs.first { $0.id == IssueListView.dirtyMarkID })
+        #expect(spec.contentAlignment == .trailing)
+        #expect(spec.contentInset < 4, "a 10pt column cannot keep the 4pt inset")
+
+        // And the default did not move for anyone else.
+        for other in IssueListView.specs where other.id != IssueListView.dirtyMarkID {
+            #expect(
+                other.contentAlignment == .leading,
+                "\(other.id) changed edge; only the gutter should have")
+            #expect(other.contentInset == 4, "\(other.id) changed inset")
+        }
+
+        // The columns either side of it still start their ink at the leading
+        // edge, which is what a trailing column done wrong would break.
+        let id = try inkStart(table, in: host, column: SortColumn.id.rawValue)
+        #expect(id < 0.25, "ID content starts \(Int(id * 100))% across its column")
+    }
+
     @Test("The natively drawn Title column is unaffected")
     func titleStaysLeading() async throws {
         // Title is an `EditableCell` with an `NSTextField` pinned to the leading

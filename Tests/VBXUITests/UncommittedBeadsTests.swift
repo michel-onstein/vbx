@@ -265,6 +265,41 @@ struct UncommittedBeadsTests {
         #expect(marked > clean, "the marked bead's gutter is no darker than a clean one")
     }
 
+    @Test("The glyph still fits once the gutter is halved")
+    func markIsNotClipped() throws {
+        // The failure this column is most likely to ship: 10pt of column less
+        // two 1pt insets is 8pt to draw a monospaced callout character in, and
+        // a glyph clipped to a sliver still passes "there is ink here". So the
+        // same mark is rendered in the real content width and in a generous
+        // one, and required to put the same amount of ink on screen.
+        let spec = try #require(
+            IssueListView.specs.first { $0.id == IssueListView.dirtyMarkID })
+        let content = spec.width - spec.contentInset * 2
+
+        func ink(width: CGFloat) throws -> Double {
+            let size = CGSize(width: 60, height: 24)
+            let host = NSHostingView(
+                rootView: AnyView(
+                    DirtyMarkCell(mark: .changed)
+                        .frame(width: width, alignment: .trailing)
+                        .frame(width: size.width, height: size.height, alignment: .trailing)))
+            host.frame = CGRect(origin: .zero, size: size)
+            let window = NSWindow(
+                contentRect: host.frame, styleMask: [.borderless],
+                backing: .buffered, defer: false)
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            return try ViewCapture.image(of: host).inkCoverage()
+        }
+
+        let tight = try ink(width: content)
+        let roomy = try ink(width: 60)
+        #expect(tight > 0, "the glyph drew nothing at \(content)pt")
+        #expect(
+            tight >= roomy * 0.9,
+            "the glyph is clipped at \(content)pt: \(tight) ink against \(roomy)")
+    }
+
     @Test("The marker column is the first thing on the row, and cannot be hidden")
     func markerColumnLeadsTheRow() throws {
         // A gutter is only a gutter at the edge; and it is the only surface the
@@ -278,5 +313,7 @@ struct UncommittedBeadsTests {
         #expect(first.editing == nil, "the mark is derived from git; it cannot be edited")
         #expect(first.width == first.minWidth && first.width == first.maxWidth,
                 "the gutter is a fixed width")
+        #expect(first.contentAlignment == .trailing,
+                "the mark belongs against the ID beside it")
     }
 }

@@ -79,11 +79,17 @@ them.
   from git rather than from the bead, and a commit changes no bead: `HEAD`
   moves, every mark clears, and a fingerprint of the record alone is identical
   either side of it. Same trap for any later overlay. See BUGS.md, 2026-08-23.
-- **Hosted cell content is aligned leading by `HostedCell`, not by each
-  column.** The hosting view is pinned to both edges, so content handed the full
-  column width centres itself — which is what put every hosted column in the
-  middle of its cell after the move to `NSTableView`. A new column cannot forget
-  it, because it is applied once where the cell hosts the view.
+- **Hosted cell content is aligned by `HostedCell`, not by each column.** The
+  hosting view is pinned to both edges, so content handed the full column width
+  centres itself — which is what put every hosted column in the middle of its
+  cell after the move to `NSTableView`. A new column cannot forget it, because
+  it is applied once where the cell hosts the view. Leading is the default; a
+  column wanting the other edge sets `contentAlignment` **on its spec**, which
+  `HostedCell` reads. Wrapping a column's own content in an alignment instead
+  puts the decision back where this exists to take it out of. The same goes for
+  `contentInset`: the gutter is 10pt wide, and 4pt each side would leave 2pt and
+  clip the glyph — asserted by rendering, since at that size "tight" and
+  "clipped" are two points apart.
 - **"Uncommitted" is defined against git, not tracked by vbx.** A bead is dirty
   when its record differs from the same record at `HEAD`, read through the
   engine's `snapshot_at` — the object store directly, as ADR-006 requires. No
