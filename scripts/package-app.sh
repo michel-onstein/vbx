@@ -264,6 +264,18 @@ identity_present() {
   security find-identity -v -p codesigning 2>/dev/null | grep -qF "$identity"
 }
 
+# identity_is answers whether a certificate is of the kind it is being used as.
+#
+# Apple names these canonically — "Developer ID Application: Name (TEAMID)",
+# "Apple Distribution: …", "3rd Party Mac Developer Installer: …" — and the
+# prefix is the whole of the distinction. It is not cosmetic: a development
+# certificate signs an app that runs on provisioned Macs and nowhere else, and
+# the notary service refuses it outright.
+identity_is() {
+  local identity="$1" kind="$2"
+  [[ "$identity" == "$kind: "* ]]
+}
+
 assert_identity() {
   local identity="$1" label="$2"
   # `-` is codesign's ad-hoc identity. Supported deliberately: it makes the
@@ -277,6 +289,20 @@ assert_identity() {
   if [[ "$identity" == "-" ]]; then
     say "  NOTE: ad-hoc signature. Gatekeeper will reject this on any other Mac."
     return 0
+  fi
+  # The kind is checked first, and before the dry-run return: it needs no
+  # keychain, and a dry run whose purpose is to prove the plan must catch a
+  # certificate that cannot work.
+  #
+  # `$label` used to be decorative. It named the certificate in the error
+  # message while the check underneath only asked whether the string appeared
+  # in `security find-identity` at all — so an "Apple Development" identity
+  # configured as VBX_DEVELOPER_ID_APP passed --check, passed this assertion,
+  # signed the app, built the disk image, and was refused by the notary service
+  # six minutes later: "The binary is not signed with a valid Developer ID
+  # certificate", every binary, every slice.
+  if ! identity_is "$identity" "$label"; then
+    fail "the configured certificate is not a $label certificate. Apple issues those with the common name \"$label: Name (TEAMID)\", and nothing else notarizes — a development certificate comes back \"not signed with a valid Developer ID certificate\"."
   fi
   if [[ $DRY_RUN -eq 1 ]]; then return 0; fi
   if ! security find-identity -v -p codesigning 2>/dev/null | grep -qF "$identity"; then
@@ -334,20 +360,35 @@ check_config() {
 
   DEVID_CERT_OK=1
   STORE_CERT_OK=1
+  # The kind before the keychain, because a certificate of the wrong kind is
+  # wrong whether or not it is installed — and "NOT in the keychain" sends you
+  # looking for a certificate you already have. This is the line that was
+  # missing: an "Apple Development" identity configured here read as
+  # "Developer ID cert in the keychain", which was true and useless.
   if [[ -n "$DEVELOPER_ID_APP" ]]; then
-    if identity_present "$DEVELOPER_ID_APP"; then
-      say "  Developer ID cert      in the keychain"
-    else
+    if [[ "$DEVELOPER_ID_APP" != "-" ]] \
+       && ! identity_is "$DEVELOPER_ID_APP" "Developer ID Application"; then
+      say "  Developer ID cert      NOT a Developer ID Application certificate"
+      say "                         only that kind notarizes; create one at"
+      say "                         https://developer.apple.com/account/resources/certificates"
+      DEVID_CERT_OK=0
+    elif ! identity_present "$DEVELOPER_ID_APP"; then
       say "  Developer ID cert      NOT in the keychain"
       DEVID_CERT_OK=0
+    else
+      say "  Developer ID cert      in the keychain"
     fi
   fi
   if [[ -n "$APP_STORE_APP" ]]; then
-    if identity_present "$APP_STORE_APP"; then
-      say "  App Store cert         in the keychain"
-    else
+    if [[ "$APP_STORE_APP" != "-" ]] \
+       && ! identity_is "$APP_STORE_APP" "Apple Distribution"; then
+      say "  App Store cert         NOT an Apple Distribution certificate"
+      STORE_CERT_OK=0
+    elif ! identity_present "$APP_STORE_APP"; then
       say "  App Store cert         NOT in the keychain"
       STORE_CERT_OK=0
+    else
+      say "  App Store cert         in the keychain"
     fi
   fi
   if [[ -n "$APP_STORE_INSTALLER" ]] && ! identity_present "$APP_STORE_INSTALLER"; then
