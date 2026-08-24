@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.1.10 — 2026-08-24
+
+### Fixes
+
+- Refuse edits to closed beads, which are records rather than work ([#63](https://github.com/michel-onstein/vbx/pull/63))
+
 ## 0.1.9 — 2026-08-24
 
 ### Fixes
