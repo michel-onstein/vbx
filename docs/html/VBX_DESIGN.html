@@ -995,7 +995,7 @@ without re-analysing, so an incidental touch does not cost a re-render.</p>
 <td><strong>List</strong></td>
 <td><code>Table</code> with sortable columns</td>
 <td><code>NSTableView</code> via <code>NSViewRepresentable</code> (<code>BeadTable</code>); cell appearance is SwiftUI</td>
-<td>Columns: ID, title, status, priority, type, labels, PageRank, blocks, blocked-by, a combined blocked/by, created, updated. Column visibility, order and width persisted. Multi-select. Double-click edits the cell that was clicked (ADR-014). Rows ahead of the last commit are tinted (ADR-015).</td>
+<td>Columns: ID, title, status, priority, type, labels, PageRank, blocks, blocked-by, a combined blocked/by, created, updated. Column visibility, order and width persisted. Multi-select. Double-click edits the cell that was clicked (ADR-014). A gutter before the ID marks beads ahead of the last commit — <code>+</code> added, <code>*</code> changed (ADR-015).</td>
 </tr>
 <tr>
 <td><strong>Kanban board</strong></td>

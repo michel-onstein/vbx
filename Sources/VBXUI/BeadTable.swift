@@ -58,8 +58,9 @@ struct BeadTable: NSViewRepresentable {
 
     /// Why a row is marked as uncommitted, or nil when it is not.
     ///
-    /// A reason rather than a Bool, because the tint alone says nothing: the
-    /// same string becomes the row's tooltip.
+    /// A reason rather than a Bool, because the mark alone says nothing: the
+    /// same string becomes the row's tooltip. The mark itself is drawn by the
+    /// marker column like any other cell — see ``IssueListView/dirtyMarkID``.
     let uncommittedReason: (Issue.ID) -> String?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -139,8 +140,18 @@ struct BeadTable: NSViewRepresentable {
 
         /// Rows are identified by id plus what is drawn, so an edit that only
         /// changes a title still reloads.
+        ///
+        /// **The uncommitted mark is part of what is drawn.** Committing does
+        /// not touch a single bead — `HEAD` moves and every mark clears at
+        /// once — so a fingerprint of the bead fields alone is identical before
+        /// and after, no reload happens, and the gutter keeps showing marks for
+        /// changes that are now committed until something unrelated forces a
+        /// redraw.
         func fingerprint(of rows: [IssueRow]) -> [String] {
-            rows.map { "\($0.id)|\($0.issue.title)|\($0.issue.priority)|\($0.issue.status.rawValue)" }
+            rows.map {
+                let mark = parent.uncommittedReason($0.id) ?? ""
+                return "\($0.id)|\($0.issue.title)|\($0.issue.priority)|\($0.issue.status.rawValue)|\(mark)"
+            }
         }
 
         // MARK: Columns
@@ -209,17 +220,12 @@ struct BeadTable: NSViewRepresentable {
 
         func numberOfRows(in tableView: NSTableView) -> Int { parent.rows.count }
 
-        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-            let identifier = NSUserInterfaceItemIdentifier("bead.row")
-            let view =
-                tableView.makeView(withIdentifier: identifier, owner: self) as? BeadRowView
-                ?? BeadRowView(identifier: identifier)
-            view.isUncommitted =
-                row < parent.rows.count && parent.uncommittedReason(parent.rows[row].id) != nil
-            return view
-        }
-
-        /// The tooltip for a cell, so the tint is never the only signal.
+        /// The tooltip for a cell, so the mark is never the only signal.
+        ///
+        /// The whole row answers, not just the marker cell: the mark is a
+        /// single character in a gutter, and asking the user to find it before
+        /// they can learn what it means would be the same mistake as the tint
+        /// it replaced.
         func tableView(
             _ tableView: NSTableView, toolTipFor cell: NSCell?, rect: NSRectPointer,
             tableColumn: NSTableColumn?, row: Int, mouseLocation: NSPoint
@@ -439,38 +445,6 @@ struct BeadTable: NSViewRepresentable {
 }
 
 // MARK: - Cells
-
-/// A row that can mark itself as carrying uncommitted changes.
-///
-/// `NSTableRowView` rather than a background on the cells: a row is the thing
-/// that is uncommitted, and drawing it here composes with the alternating
-/// stripe and with selection instead of fighting them. Painting cells would
-/// leave the gaps between them untinted and would sit *over* the selection
-/// highlight.
-final class BeadRowView: NSTableRowView {
-    var isUncommitted = false {
-        didSet { if isUncommitted != oldValue { needsDisplay = true } }
-    }
-
-    init(identifier: NSUserInterfaceItemIdentifier) {
-        super.init(frame: .zero)
-        self.identifier = identifier
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    override func drawBackground(in dirtyRect: NSRect) {
-        super.drawBackground(in: dirtyRect)
-        guard isUncommitted, !isSelected else { return }
-        // Subtle on purpose: it has to survive the alternating stripe beneath
-        // it, read in both appearances, and not look like an error. A low-alpha
-        // accent is the usual answer, and `controlAccentColor` follows whatever
-        // the user has chosen rather than inventing a colour.
-        NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
-        dirtyRect.fill(using: .sourceOver)
-    }
-}
 
 /// A cell whose appearance is a SwiftUI view.
 ///

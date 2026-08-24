@@ -5,6 +5,71 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-23 — The uncommitted state is a gutter mark, not a row tint (vbx-r0m)
+
+The row background was tinted `controlAccentColor` at 12% when a bead was ahead
+of `HEAD`. Two things were wrong with it, and neither is cosmetic: the tint
+could say only *something here is uncommitted*, collapsing the three cases
+`BeadDirtyState` keeps apart; and it was suppressed while a row was selected, so
+selecting a dirty row hid the fact it was dirty.
+
+A fixed 20pt column before the ID now draws `+` for added and `*` for changed.
+`BeadRowView` existed only to paint the tint and is gone with it.
+
+**`-` is deliberately absent.** A deleted bead has no row — it is gone from
+disk, and nothing in `visibleIssues` represents it. Surfacing removed beads as
+rows synthesised from the `HEAD` snapshot was considered and deferred: such a
+row carries no metrics, must refuse every edit and every `br` write, and has to
+mean something on the board, graph and tree as well. That decision is its own
+bead; until it lands a deletion shows up only in the toolbar count, which has
+always included it.
+
+Details worth keeping:
+
+- **The mark and its explanation are one thing.** `Mark.reason` sits on the enum
+  in `VBXCore`, so the glyph and the tooltip cannot drift, and the tooltip
+  answers for the *whole row* — asking someone to find a one-character gutter
+  before they can learn what it means would repeat the mistake the tint made.
+- **Both marks take the same accent.** A second colour would imply a severity
+  ordering between "new" and "edited" that does not exist.
+- **The column is protected.** It is now the only surface a row has for this
+  state, so hiding it would leave the state with nowhere to appear. Its
+  identifier is hand-written (`dirtyMark`) because it is unsortable, which is
+  the position the type glyph is already in.
+
+**A bug found on the way**, and the reason this is not a pure rendering change:
+the table reloads only when its row fingerprint changes, and the fingerprint was
+built from the bead record alone. A commit touches no bead, so every mark
+cleared while the fingerprint stayed identical and the gutter kept drawing marks
+for committed changes. Logged in BUGS.md with a regression test confirmed to
+fail on the unfixed code.
+
+Tests: `Uncommitted beads` grew to 11 — the three glyphs, an unknown state
+marking nothing, a reason for every case over `allCases`, ink on the rendered
+cell, the column's position and protection, the fingerprint regression, and an
+end-to-end one that writes through `br` and requires ink in that bead's gutter
+cell of an actually-rendered `IssueListView`, with a clean row in the same table
+as the control. That last one exists because this repo has shipped a table
+feature every unit test agreed with and that did nothing in a real build; it was
+confirmed to fail with the glyphs blanked.
+
+The two tint tests are gone, and `Table columns` had both of its enumerated sets
+updated — deliberately, since both exist to make a change here a conscious act.
+
+One unrelated test moved: `Cell alignment` renders the list at a fixed width and
+measures where ink starts in a given column. Twenty more points of columns put
+Labels at x=1114 in an 1100pt host, off the right edge, where it drew nothing —
+which reads as an alignment failure rather than as a viewport too narrow. It had
+about 6pt of itself visible before, so the harness was lucky rather than roomy.
+Widened to 1400; the assertion is untouched.
+
+Two follow-ups filed: `vbx-iyy` carries the deleted-row decision above, and
+`vbx-uq4` records that nothing regenerates `docs/html/` when a release rewrites
+`RELEASES.md` — found because regenerating for this change also pulled in 0.1.2
+and 0.1.3, which had been missing from the committed HTML.
+
+---
+
 ## 2026-08-23 — A bead-only commit no longer cuts a release (vbx-r0m)
 
 `vbx-r0m` was written down and pushed as PR #52, and shipping it would have

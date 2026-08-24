@@ -4,6 +4,39 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-23 — A commit left the uncommitted gutter marking rows that were clean
+
+**Symptom.** Nothing visible at the moment it happens, which is what makes it
+easy to ship: after committing, the list keeps drawing `*` and `+` beside beads
+that are now committed, until an unrelated edit forces the table to redraw.
+
+**Cause.** `BeadTable` reloads only when its row fingerprint changes — a guard
+that exists because `updateNSView` runs on every unrelated state change in the
+enclosing view, and reloading unconditionally cancels an in-progress edit on
+every keystroke elsewhere in the app. The fingerprint was built from the bead's
+id, title, priority and status. **A commit touches no bead**: `HEAD` moves and
+every mark clears at once, so the fingerprint is byte-identical before and
+after, no reload happens, and the gutter keeps its stale marks.
+
+The same reasoning is already written down one layer up — ADR-015 watches
+`.git` as well as the bead file because a commit does not touch the export. The
+watch fired and the state was recomputed correctly; the table simply declined to
+redraw it.
+
+**Fix.** The mark is part of what a row draws, so it is part of the fingerprint.
+
+**Regression test.** `Committing changes the row fingerprint, so the gutter
+reloads` in `Tests/VBXUITests/UncommittedBeadsTests.swift` — builds the
+fingerprint twice over identical rows, once with a bead marked and once without,
+and requires the two to differ. Confirmed to fail on the unfixed code.
+
+**Prevention.** Any derived, per-row appearance that does not come from the
+`Issue` record needs the same treatment. The fingerprint is the list of things a
+row's appearance depends on, and anything drawn from outside the record — the
+dirty mark today, a correlation or heat overlay tomorrow — has to be in it.
+
+---
+
 ## 2026-08-22 — File ▸ New Window opened no window
 
 **Symptom:** ⌘N did nothing. No window, no error, no log line. Opening a
