@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.1.7 — 2026-08-24
+
+### Fixes
+
+- Regenerate docs/html when a release rewrites the notes ([#57](https://github.com/michel-onstein/vbx/pull/57))
+
 ## 0.1.6 — 2026-08-24
 
 ### Fixes
