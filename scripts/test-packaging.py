@@ -21,6 +21,7 @@ No certificates are needed: every packaging path is exercised through
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import pathlib
@@ -41,6 +42,7 @@ CASK_TEMPLATE = ROOT / "packaging" / "homebrew" / "vbx.rb.template"
 SIGNING_SETUP = ROOT / "scripts" / "signing-setup.sh"
 BUMP = ROOT / "scripts" / "version-bump.sh"
 DOCS_BUILD = ROOT / "scripts" / "build-docs.py"
+BEADS_CHECK = ROOT / "scripts" / "beads-check.py"
 NOTES = ROOT / "scripts" / "release-notes.py"
 
 # Fabricated, and deliberately distinctive: a substring that appears nowhere
@@ -916,6 +918,52 @@ def test_version_bump() -> None:
         check("a run with nothing new is a no-op", "nothing to bump" in result.stdout)
 
 
+def test_beads_source_repo_check() -> None:
+    """Every bead should say it came from this repository.
+
+    `br` stamps `source_repo` with the basename of the directory it runs in, and
+    this repo's discipline is that every session works in a worktree — so the
+    two rules fight, and 30 of 54 records named a throwaway topic directory that
+    no longer exists. There is no way to set the value correctly at creation
+    time (`br create` has no flag, `.beads/config.yaml` has no key), so a
+    failing check is what replaces a rule nobody can be relied on to remember.
+    """
+    print("\nBeads source_repo")
+    result = subprocess.run(
+        [sys.executable, str(BEADS_CHECK)], cwd=ROOT, capture_output=True, text=True)
+    check("every bead is stamped with this repo", result.returncode == 0,
+          (result.stdout + result.stderr).strip())
+
+    # The canonical value comes from git, not a constant, so it is right from a
+    # worktree too — which is where nearly every bead is now created.
+    source = BEADS_CHECK.read_text()
+    check("the canonical name comes from git", "--git-common-dir" in source)
+    check("...not from a hard-coded name", '"vbx"' not in source)
+
+    # And it can fail: a check that cannot is worse than none.
+    with tempfile.TemporaryDirectory() as raw:
+        scratch = Path(raw) / "repo"
+        (scratch / ".beads").mkdir(parents=True)
+        (scratch / "scripts").mkdir()
+        target = scratch / "scripts" / BEADS_CHECK.name
+        target.write_bytes(BEADS_CHECK.read_bytes())
+        target.chmod(0o755)
+        subprocess.run(["git", "init", "-q"], cwd=scratch, check=True,
+                       capture_output=True, env={**os.environ, **GIT_ENV})
+        (scratch / ".beads" / "issues.jsonl").write_text(
+            json.dumps({
+                "id": "scr-1", "title": "from a worktree",
+                "source_repo": "some-topic-branch",
+                "source_repo_path": "/gone/some-topic-branch",
+            }) + "\n")
+        drifted = subprocess.run(
+            [sys.executable, str(target)], cwd=scratch, capture_output=True, text=True)
+        check("a foreign stamp is caught", drifted.returncode == 1,
+              (drifted.stdout + drifted.stderr).strip())
+        check("...and the offending repo is named",
+              "some-topic-branch" in drifted.stderr, drifted.stderr.strip())
+
+
 def test_docs_html_check() -> None:
     """The generated HTML has to still match the Markdown it came from.
 
@@ -1541,6 +1589,7 @@ def main() -> int:
     test_version_bump()
     test_beads_only_does_not_release()
     test_docs_html_check()
+    test_beads_source_repo_check()
     test_bump_regenerates_the_html()
     test_no_v_prefix()
     test_release_notes()

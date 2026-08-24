@@ -869,3 +869,65 @@ vbx. `IssueStatus.isImmutable` is the single expression of it.
   tooltip, and a refusal outranks the uncommitted mark's tooltip on a column
   that edits: it explains an affordance that just did nothing.
 
+---
+
+## ADR-018 — Beads are stamped with the repository, and a check keeps them that way
+
+**Date:** 2026-08-24 · **Status:** Accepted
+
+**Context.** `br` records where each bead was created, as `source_repo` and
+`source_repo_path`. It takes the basename of the directory it runs in — and this
+repository's discipline is that **every session works in
+`.claude/worktrees/<topic>`**. The two rules are in direct conflict, and the
+worktree rule is the correct one, so essentially every bead filed since it took
+hold carried a throwaway topic name.
+
+Measured on 54 records: **11 distinct `source_repo` values, 30 of them not this
+repository**, and **29 records naming a `source_repo_path` that no longer
+existed** — 19 pointing at the pre-rename `bvx` checkout, the rest at worktrees
+deleted when their work landed.
+
+**Nothing reads the field today.** `RepoInfo.owns(_:)` matches beads to a
+repository by id prefix, `--robot-repos` reports this workspace as single-repo,
+and the sidebar's repository section only renders for a workspace. Said plainly
+so this is not over-prioritised: no bead is mis-grouped today. The cost is
+latent — `br`'s own help calls `source_repo_path` "the canonical filesystem
+location of the repo for cross-machine sync awareness", and any future surface
+that groups by origin would inherit 11 apparent repositories, 9 of them phantom,
+as plausible-looking strings rather than as something that reads as broken.
+
+**Decision.**
+
+- **Every record is stamped with this repository** — the primary checkout's name
+  and path. The 30 offenders were rewritten through `br update`, in one commit,
+  a per-record diff rather than a whole-file rewrite.
+- **The 19 pre-rename `bvx` records became `vbx`.** A decision rather than an
+  obvious cleanup: they *were* filed in a directory called `bvx`. But the rename
+  was a rename of this same project, so the honest answer to "which repository
+  is this bead from?" is the one it is from now, and keeping two names for one
+  repository is precisely the phantom-repository problem in miniature.
+- **`scripts/beads-check.py` guards it**, in the verify block beside the other
+  checks. `--fix` rewrites; the default reports, grouped by the repository that
+  stamped them.
+- **The canonical name comes from git**, not a constant: the common git
+  directory is shared by every worktree and its parent is the primary checkout,
+  so the check is right from wherever it runs — which matters, because it will
+  almost always run from a worktree.
+
+**Why a check rather than a convention.** The value cannot be set correctly at
+creation time: `br create` has no `--source-repo` flag, and `.beads/config.yaml`
+holds only `issue_prefix`. That leaves "remember to run `br update` after every
+`br create`" — a rule of exactly the kind that produced this mess. A failing
+check turns it into something the build says out loud, with a one-line answer.
+
+**Consequences.**
+
+- **The real fix is upstream.** A `source_repo` key in `.beads/config.yaml`, or
+  `--source-repo` on `br create`, would make this check redundant. Worth raising
+  with `beads_rust` rather than worked around forever.
+- **Creating a bead now has a second step.** `br create` then
+  `scripts/beads-check.py --fix`. The check is what makes forgetting visible.
+- **The rewrite bumped `updated_at` on 30 records**, so they all read as
+  modified since their last real change. Accepted: the alternative is editing
+  the export by hand, behind `br`'s back, which is how the database and the
+  JSONL come apart.
