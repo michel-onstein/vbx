@@ -26,6 +26,44 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — Beads now say which repository they came from (vbx-pjf)
+
+`br` stamps `source_repo` with the basename of the directory it runs in, and
+this repo's discipline is that every session works in a worktree. The two rules
+fight, and the worktree rule is the right one — so 30 of 54 records carried a
+throwaway topic name and 29 named a path that no longer existed, 19 of them the
+pre-rename `bvx` checkout.
+
+Nothing reads the field today, and the ADR says so rather than inflating the
+problem: `RepoInfo.owns(_:)` matches by id prefix and `--robot-repos` reports
+this workspace as single-repo. The cost is latent, in a field `br`'s own help
+calls the canonical location "for cross-machine sync awareness".
+
+Rewrote all 30 through `br update` — a per-record diff, 31 lines changed, not
+the whole-file rewrite that would mean clobbering another session. The 19 `bvx`
+records became `vbx`, which is a decision rather than a cleanup: they *were*
+filed in a directory of that name, but the rename was a rename of this same
+project, and two names for one repository is the phantom-repository problem in
+miniature.
+
+`scripts/beads-check.py` guards it from here, in the verify block. The canonical
+name comes from git — the common git directory is shared by every worktree and
+its parent is the primary checkout — so it is right from wherever it runs, which
+matters because it will nearly always run from a worktree.
+
+**A check rather than a convention, deliberately.** The value cannot be set
+correctly at creation: `br create` has no `--source-repo` flag and
+`.beads/config.yaml` holds only `issue_prefix`. That leaves "remember to run
+`br update` after every `br create`" — the same class of rule that produced the
+mess. A failing check makes forgetting a build failure with a one-line answer.
+The real fix is upstream in `beads_rust`.
+
+Tests: `test_beads_source_repo_check` — the export is clean, the canonical name
+comes from git rather than a constant, and a scratch repo carrying a foreign
+stamp is caught with the offending repository named.
+
+---
+
 ## 2026-08-24 — Closed beads stopped accepting edits (vbx-78c)
 
 The bead's open question first, because it decided the shape of everything else:
