@@ -15,6 +15,7 @@ from __future__ import annotations
 import html as html_mod
 import re
 import sys
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -381,7 +382,7 @@ def wrap_tables(rendered: str) -> str:
     )
 
 
-def build() -> int:
+def build(out: Path = OUT, vendor: bool = True) -> int:
     if not DOCS.is_dir():
         print("docs/ not found", file=sys.stderr)
         return 1
@@ -398,9 +399,10 @@ def build() -> int:
             ordered.append(p)
     ordered += [p for p in sources if p not in ordered]
 
-    OUT.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
+    quiet = out != OUT
     ASSETS.mkdir(parents=True, exist_ok=True)
-    if not MERMAID_LOCAL.exists():
+    if not MERMAID_LOCAL.exists() and vendor:
         try:
             fetch_mermaid()
         except Exception as exc:  # offline: fall back to a CDN-less stub
@@ -425,7 +427,7 @@ def build() -> int:
         body = wrap_tables(body)
         body = rewrite_links(body)
 
-        target = OUT / (src.stem + ".html")
+        target = out / (src.stem + ".html")
         nav_items = []
         for other in ordered:
             cls = ' class="current"' if other is src else ""
@@ -442,18 +444,70 @@ def build() -> int:
             source=html_mod.escape(src.name),
         )
         target.write_text(page, encoding="utf-8")
-        print(f"docs/{src.name} -> docs/html/{target.name}  ({len(blocks)} diagrams)")
+        if not quiet:
+            print(f"docs/{src.name} -> docs/html/{target.name}  ({len(blocks)} diagrams)")
 
-    index = OUT / "index.html"
-    home = OUT / "README.html"
+    index = out / "index.html"
+    home = out / "README.html"
     if home.exists():
         index.write_text(home.read_text(encoding="utf-8"), encoding="utf-8")
-        print("docs/html/index.html (copy of README.html)")
+        if not quiet:
+            print("docs/html/index.html (copy of README.html)")
 
+    return 0
+
+
+def check() -> int:
+    """Is the committed HTML what the Markdown would produce right now?
+
+    `docs/html/` is generated and committed, and nothing regenerated it when a
+    release rewrote `docs/RELEASES.md` — so the one page whose whole purpose is
+    listing releases was the page guaranteed to go stale. It was missing two
+    releases when this was found.
+
+    Offline, like every other `--check` in CLAUDE.md's verify block: it renders
+    to a temporary directory and compares. The mermaid bundle is not fetched or
+    compared — it is a vendored dependency, not output, and reaching the network
+    would make the check pass at a desk and fail on a plane.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        scratch = Path(raw)
+        # `vendor=False`: the mermaid bundle is a vendored dependency rather
+        # than output, it is not compared, and fetching it would make this
+        # check pass at a desk and fail on a plane.
+        code = build(out=scratch, vendor=False)
+        if code != 0:
+            return code
+
+        stale: list[str] = []
+        for rendered in sorted(scratch.glob("*.html")):
+            committed = OUT / rendered.name
+            if not committed.exists():
+                stale.append(f"{rendered.name} (never generated)")
+            elif committed.read_bytes() != rendered.read_bytes():
+                stale.append(rendered.name)
+
+        # A page whose source is gone is drift in the other direction: it is
+        # still served, and nothing produces it any more.
+        expected = {p.name for p in scratch.glob("*.html")}
+        for committed in sorted(OUT.glob("*.html")):
+            if committed.name not in expected:
+                stale.append(f"{committed.name} (no longer has a source)")
+
+    if stale:
+        print("error: docs/html is stale — regenerate with scripts/build-docs.py",
+              file=sys.stderr)
+        for name in stale:
+            print(f"  {name}", file=sys.stderr)
+        return 1
+
+    print(f"==> docs check ok ({len(list(OUT.glob('*.html')))} pages match their Markdown)")
     return 0
 
 
 if __name__ == "__main__":
     if "--fetch" in sys.argv:
         fetch_mermaid()
+    if "--check" in sys.argv:
+        raise SystemExit(check())
     raise SystemExit(build())
