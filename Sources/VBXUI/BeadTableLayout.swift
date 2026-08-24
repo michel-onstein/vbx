@@ -33,12 +33,26 @@ struct BeadColumnSpec: Identifiable, Sendable {
     /// `Sendable` value, and so the only two answers a column may give are the
     /// two that exist.
     let contentAlignment: CellAlignment
-    /// How far hosted content is held off the cell's edges.
+    /// How far hosted content is held off the cell's leading edge.
     ///
     /// 4pt suits a column with room. The uncommitted gutter is 10pt wide, where
     /// 4pt each side leaves 2pt to draw a character in and the glyph clips, so
     /// a narrow column says so here.
     let contentInset: CGFloat
+    /// The same for the trailing edge, defaulting to ``contentInset``.
+    ///
+    /// **Negative overhangs**, which is the point of it being separate. An
+    /// inset-style table sets `intercellSpacing.width` to 17pt, and that gap —
+    /// not the 10pt column — is what stands between the uncommitted mark and
+    /// the id it belongs to. The spacing is a property of the table, so it
+    /// cannot be narrowed for one column without narrowing every column; a
+    /// trailing overhang moves the one glyph into the gap instead and leaves
+    /// the rest of the table alone.
+    ///
+    /// Overhanging is only safe leftwards-into-a-gap like this: it draws over
+    /// spacing that belongs to no column. Enough overhang to reach the *next*
+    /// column would draw over that column's content.
+    let contentTrailingInset: CGFloat
 
     enum CellAlignment: Sendable {
         case leading
@@ -63,7 +77,8 @@ struct BeadColumnSpec: Identifiable, Sendable {
         isProtected: Bool = false,
         editing: Editing? = nil,
         contentAlignment: CellAlignment = .leading,
-        contentInset: CGFloat = 4
+        contentInset: CGFloat = 4,
+        contentTrailingInset: CGFloat? = nil
     ) {
         self.id = id
         self.title = title
@@ -75,6 +90,7 @@ struct BeadColumnSpec: Identifiable, Sendable {
         self.editing = editing
         self.contentAlignment = contentAlignment
         self.contentInset = contentInset
+        self.contentTrailingInset = contentTrailingInset ?? contentInset
     }
 }
 

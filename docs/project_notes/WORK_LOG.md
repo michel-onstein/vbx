@@ -26,6 +26,37 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — The mark moves into the gap, not just closer to it (vbx-be4)
+
+Halving the gutter to 10pt moved the mark 10pt and stopped, which still read as
+far from the id. Measuring the real table said why: the gutter's cell is
+x=16…26, the id cell starts at 43, and the 17pt between them is the table's own
+`intercellSpacing` — an inset-style `NSTableView` sets it, it applies between
+every pair of columns, and it is not settable per column. Narrowing a column can
+only ever move its content by the width removed.
+
+So the glyph overhangs into the gap instead. `BeadColumnSpec` grew
+`contentTrailingInset`, defaulting to `contentInset` and allowed to go negative;
+`HostedCell` holds leading and trailing separately. The gutter asks for -13,
+which puts the mark about 4pt short of the id cell.
+
+Overhanging is only safe in this direction: the gap belongs to no column, so
+drawing in it covers nothing. An overhang as long as the spacing would reach the
+next column's *content*, which is why the test asserts it stays shorter than
+`intercellSpacing` rather than just asserting the mark looks right.
+
+**The test took three attempts, and the failures are the interesting part.**
+First version measured how far across a strip the first ink appeared: it passed
+alone and failed in the parallel suite, because the strip started outside the
+row and the step from the window's background to the row's counted as ink.
+Confining it to the row left 0.8% ink in the far zone — antialiasing at a zone
+boundary — so demanding exactly zero failed on that rather than on the mark's
+position. It now compares the ink in the 14pt before the id against the ink
+before that, which is the actual claim: the mark is *there*, not *here*.
+Confirmed to fail with the overhang removed, and the full suite ran green twice.
+
+---
+
 ## 2026-08-24 — A deleted bead gets a name, not a row (vbx-iyy)
 
 The open question left by the gutter: `+` and `*` shipped, `-` did not, because

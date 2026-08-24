@@ -300,6 +300,102 @@ struct UncommittedBeadsTests {
             "the glyph is clipped at \(content)pt: \(tight) ink against \(roomy)")
     }
 
+    @Test("The mark sits next to the ID, and cannot reach it")
+    func markSitsBesideTheID() async throws {
+        // Halving the column moved the glyph 10pt and no further, because what
+        // actually separates it from the id is the table's own
+        // `intercellSpacing` — 17pt on an inset-style table, between every pair
+        // of columns and therefore not narrowable for one of them. The mark
+        // overhangs into that gap instead.
+        //
+        // Two halves, and the second is why the overhang is safe: it draws over
+        // spacing that belongs to no column, and it must not be long enough to
+        // reach the column beyond.
+        let (store, directory) = try await Fixture.committedStore()
+        defer {
+            store.stopWatching()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let target = try #require(store.visibleIssues.first)
+        _ = await store.setPriority(target.priority == 0 ? 3 : 0, for: [target.id])
+        try #require(store.dirtyBeads.mark(for: target.id) != nil, "nothing was marked")
+
+        let size = CGSize(width: 1400, height: 400)
+        let host = NSHostingView(
+            rootView: AnyView(
+                IssueListView().environmentObject(store)
+                    .frame(width: size.width, height: size.height)))
+        host.frame = CGRect(origin: .zero, size: size)
+        let window = NSWindow(
+            contentRect: host.frame, styleMask: [.borderless],
+            backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+
+        func tables(in view: NSView) -> [NSTableView] {
+            var found: [NSTableView] = []
+            if let table = view as? NSTableView { found.append(table) }
+            for sub in view.subviews { found += tables(in: sub) }
+            return found
+        }
+        let table = try #require(tables(in: host).first, "the table did not render")
+        let row = try #require(store.visibleIssues.firstIndex { $0.id == target.id })
+        let gutter = table.frameOfCell(atColumn: 0, row: row)
+        let idCell = table.frameOfCell(atColumn: 1, row: row)
+
+        // Two zones in the space before the id: the gap the mark should now sit
+        // in, and everything before it, where it used to sit. Stated as "which
+        // zone holds the ink" rather than "how far across the ink starts",
+        // because the second is sensitive to the row stripe and to whatever the
+        // table has managed to draw so far — it passed alone and failed in the
+        // parallel suite.
+        func zones() throws -> (near: Double, far: Double) {
+            let image = try ViewCapture.image(of: host)
+            let nearRect = CGRect(
+                x: idCell.minX - 14, y: gutter.minY, width: 14, height: gutter.height)
+            // From the gutter cell, not from x=0: everything left of it is
+            // outside the row, and the step from the window's background to the
+            // row's counts as ink — which is what made this fail in the
+            // parallel suite while passing alone.
+            let farRect = CGRect(
+                x: gutter.minX, y: gutter.minY,
+                width: idCell.minX - 14 - gutter.minX, height: gutter.height)
+            return (
+                image.inkCoverage(in: host.convert(nearRect, from: table)),
+                image.inkCoverage(in: host.convert(farRect, from: table)))
+        }
+
+        // Waited for rather than assumed: under a loaded parallel suite the
+        // table needs longer than a fixed pause to draw a state that arrives
+        // asynchronously.
+        var measured = try zones()
+        for _ in 0..<20 where measured.near == 0 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+            measured = try zones()
+        }
+
+        #expect(
+            measured.near > 0,
+            "the mark drew nothing in the 14pt before the id")
+        // Several times, not "none at all": a rendered row leaves a few
+        // antialiased pixels at a zone boundary, and demanding exactly zero
+        // fails on those rather than on the mark being in the wrong place.
+        #expect(
+            measured.near > measured.far * 3,
+            "the mark is still a gap away from the id (near \(measured.near), far \(measured.far))")
+
+        // And it stops short of the id: an overhang as long as the spacing
+        // would draw over the next column's content rather than over the gap.
+        let spec = try #require(
+            IssueListView.specs.first { $0.id == IssueListView.dirtyMarkID })
+        let overhang = -spec.contentTrailingInset
+        #expect(overhang > 0, "the mark no longer overhangs; it will sit a gap away from the id")
+        #expect(
+            overhang < table.intercellSpacing.width,
+            "an overhang of \(overhang) reaches past the \(table.intercellSpacing.width)pt gap into the id column")
+    }
+
     @Test("The marker column is the first thing on the row, and cannot be hidden")
     func markerColumnLeadsTheRow() throws {
         // A gutter is only a gutter at the edge; and it is the only surface the
