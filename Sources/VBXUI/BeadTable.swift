@@ -255,7 +255,9 @@ struct BeadTable: NSViewRepresentable {
             let cell =
                 tableView.makeView(withIdentifier: identifier, owner: self) as? HostedCell
                 ?? HostedCell(identifier: identifier)
-            cell.host(parent.content(spec, beadRow))
+            cell.host(
+                parent.content(spec, beadRow),
+                alignment: spec.contentAlignment, inset: spec.contentInset)
             return cell
         }
 
@@ -454,23 +456,40 @@ struct BeadTable: NSViewRepresentable {
 final class HostedCell: NSTableCellView {
     private let hosting: NSHostingView<AnyView> = NSHostingView(rootView: AnyView(EmptyView()))
 
+    /// The edge constraints, kept so the inset can follow the column's
+    /// declaration. A cell is reused across the rows of one column, so these
+    /// are rebuilt when a spec asks for a different inset and not per row.
+    private var edges: [NSLayoutConstraint] = []
+    private var currentInset: CGFloat = .nan
+
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
         hosting.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            hosting.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            hosting.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        hosting.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+        setInset(4)
+    }
+
+    private func setInset(_ inset: CGFloat) {
+        NSLayoutConstraint.deactivate(edges)
+        edges = [
+            hosting.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            hosting.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+        ]
+        NSLayoutConstraint.activate(edges)
+        currentInset = inset
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func host(_ view: AnyView) {
-        // Leading, explicitly.
+    func host(
+        _ view: AnyView,
+        alignment: BeadColumnSpec.CellAlignment = .leading,
+        inset: CGFloat = 4
+    ) {
+        // Aligned explicitly, always.
         //
         // The hosting view is pinned to both edges, so content is handed the
         // full column width — and a view given more width than it needs centres
@@ -481,8 +500,12 @@ final class HostedCell: NSTableCellView {
         // looked like before it moved to `NSTableView`.
         //
         // Applied here rather than in each column's content, so a new column
-        // cannot forget it.
-        hosting.rootView = AnyView(view.frame(maxWidth: .infinity, alignment: .leading))
+        // cannot forget it — and so a column that wants the *other* edge says
+        // so on its spec rather than wrapping its own content, which would put
+        // the decision back in the place this exists to take it out of.
+        let edge: Alignment = alignment == .leading ? .leading : .trailing
+        hosting.rootView = AnyView(view.frame(maxWidth: .infinity, alignment: edge))
+        if inset != currentInset { setInset(inset) }
     }
 }
 

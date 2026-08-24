@@ -49,9 +49,14 @@ struct IssueListView: View {
         // moves with the ID's width. Protected, since it is the only surface
         // the uncommitted state has on a row — hiding it would leave the state
         // with nowhere to appear at all.
+        // 10pt, and the mark on the trailing edge: it belongs to the bead
+        // whose id is immediately to its right, and against that edge it reads
+        // as attached to the row rather than as a stray character floating at
+        // the left of the window. The inset shrinks with the column — 4pt each
+        // side of 10 leaves 2pt, which clips the glyph.
         BeadColumnSpec(
-            id: Self.dirtyMarkID, title: "", width: 20, minWidth: 20, maxWidth: 20,
-            isProtected: true),
+            id: Self.dirtyMarkID, title: "", width: 10, minWidth: 10, maxWidth: 10,
+            isProtected: true, contentAlignment: .trailing, contentInset: 1),
         BeadColumnSpec(
             id: SortColumn.id.rawValue, title: "ID", sort: .id,
             width: 96, minWidth: 70, maxWidth: 160, isProtected: true),
