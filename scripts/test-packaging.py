@@ -40,6 +40,7 @@ VERSION = ROOT / "scripts" / "version.sh"
 CASK_TEMPLATE = ROOT / "packaging" / "homebrew" / "vbx.rb.template"
 SIGNING_SETUP = ROOT / "scripts" / "signing-setup.sh"
 BUMP = ROOT / "scripts" / "version-bump.sh"
+DOCS_BUILD = ROOT / "scripts" / "build-docs.py"
 NOTES = ROOT / "scripts" / "release-notes.py"
 
 # Fabricated, and deliberately distinctive: a substring that appears nowhere
@@ -807,11 +808,19 @@ def bump_repo(directory: Path) -> None:
     labelled the PR.
     """
     (directory / "scripts").mkdir(parents=True)
-    for script in (BUMP, NOTES):
+    for script in (BUMP, NOTES, DOCS_BUILD):
         target = directory / "scripts" / script.name
         target.write_bytes(script.read_bytes())
         target.chmod(0o755)
     (directory / "docs").mkdir()
+    # A page to generate, so `docs/html/` is real here and the bump's
+    # regeneration is exercised rather than skipped.
+    (directory / "docs" / "README.md").write_text("# Scratch\n\nA page.\n")
+    # Pre-vendored, so building never reaches for the CDN: a test that fetches
+    # is a test that fails on a plane.
+    assets = directory / "docs" / "html" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "mermaid.min.js").write_text("/* stub */\n")
     subprocess.run(["git", "init", "-q"], cwd=directory, check=True,
                    capture_output=True, env={**os.environ, **GIT_ENV})
 
@@ -905,6 +914,76 @@ def test_version_bump() -> None:
         run_bump(empty)
         result = run_bump(empty, "--dry-run")
         check("a run with nothing new is a no-op", "nothing to bump" in result.stdout)
+
+
+def test_docs_html_check() -> None:
+    """The generated HTML has to still match the Markdown it came from.
+
+    `docs/html/` is committed, and before this nothing regenerated it when a
+    release rewrote `docs/RELEASES.md` — so the page listing releases was the
+    one guaranteed to go stale, and it was two releases behind when that was
+    found.
+    """
+    print("\nGenerated docs")
+    result = subprocess.run(
+        [sys.executable, str(DOCS_BUILD), "--check"], cwd=ROOT,
+        capture_output=True, text=True)
+    check("docs/html matches docs/*.md", result.returncode == 0,
+          (result.stdout + result.stderr).strip())
+
+    # Offline, like every other --check in the verify block. Asserted on the
+    # source because a network call that happens to fail looks like a pass.
+    source = DOCS_BUILD.read_text()
+    body = source[source.index("def check(") : source.index('if __name__ ==')]
+    check("--check does not fetch", "fetch_mermaid()" not in body)
+    check("...and says so where it renders", "vendor=False" in body)
+
+    # And it can actually fail: a check that cannot is worse than none.
+    page = ROOT / "docs" / "html" / "RELEASES.html"
+    original = page.read_bytes()
+    try:
+        page.write_bytes(original + b"\n<!-- drift -->\n")
+        drifted = subprocess.run(
+            [sys.executable, str(DOCS_BUILD), "--check"], cwd=ROOT,
+            capture_output=True, text=True)
+        check("stale HTML is caught", drifted.returncode != 0)
+        check("...and the stale page is named", "RELEASES.html" in drifted.stderr,
+              drifted.stderr.strip())
+    finally:
+        page.write_bytes(original)
+
+
+def test_bump_regenerates_the_html() -> None:
+    """Recording a release must not leave its own HTML behind.
+
+    The release rewrites `docs/RELEASES.md`; the HTML generated from it is
+    committed. Regenerating in `version-bump.sh` rather than in `release.yml`
+    is what makes a bump run by hand leave the same tree as one run by the
+    workflow.
+    """
+    print("\nBump regenerates the docs")
+    with tempfile.TemporaryDirectory() as raw:
+        repo = Path(raw) / "docs"
+        bump_repo(repo)
+        commit(repo, "Do a thing")
+        result = run_bump(repo)
+        check("the bump ran", result.returncode == 0,
+              (result.stdout + result.stderr).strip())
+
+        rendered = repo / "docs" / "html" / "RELEASES.html"
+        check("the release notes were rendered", rendered.exists())
+        check("...and list the release",
+              rendered.exists() and "0.0.1" in rendered.read_text())
+
+        # In the same commit, not left dirty for someone to notice later.
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=repo,
+            capture_output=True, text=True, env={**os.environ, **GIT_ENV}).stdout.strip()
+        check("the tree is clean afterwards", dirty == "", dirty)
+        tracked = subprocess.run(
+            ["git", "ls-files", "docs/html"], cwd=repo,
+            capture_output=True, text=True, env={**os.environ, **GIT_ENV}).stdout
+        check("the HTML is committed", "RELEASES.html" in tracked, tracked.strip())
 
 
 def test_beads_only_does_not_release() -> None:
@@ -1461,6 +1540,8 @@ def main() -> int:
     test_cask_and_release_script()
     test_version_bump()
     test_beads_only_does_not_release()
+    test_docs_html_check()
+    test_bump_regenerates_the_html()
     test_no_v_prefix()
     test_release_notes()
     test_release_workflow()

@@ -22,7 +22,10 @@ box, the README title.
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
 `docs/html/` is generated from `docs/*.md` by `scripts/build-docs.py`; never
-edit it by hand.
+edit it by hand. `--check` proves it still matches its Markdown, and
+`version-bump.sh` regenerates it as part of recording a release — the release
+rewrites `RELEASES.md`, so without that the one page listing releases is the
+page guaranteed to go stale.
 
 ## Rules specific to this repo
 
@@ -176,6 +179,7 @@ them.
 python3 scripts/build-notices.py --check  # every dependency is acknowledged
 python3 scripts/test-packaging.py   # signing, redaction, universal, version, cask
 python3 scripts/release-notes.py --check  # docs/RELEASES.md matches the tags
+python3 scripts/build-docs.py --check     # docs/html matches docs/*.md
 swift test                          # Swift suite
 cd Engine/bridge && go test ./...   # Go suite
 gofmt -l Engine/bridge              # must print nothing

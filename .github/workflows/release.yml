@@ -66,6 +66,12 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # `version-bump.sh` regenerates `docs/html/` after rewriting the notes,
+      # so the runner needs what `build-docs.py` imports. Without it the bump
+      # stops rather than committing notes whose HTML disagrees with them.
+      - name: Install the docs toolchain
+        run: python3 -m pip install --quiet markdown
+
       - name: Bump the version and record it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

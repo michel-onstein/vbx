@@ -26,6 +26,46 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — A release regenerates the HTML it invalidates (vbx-uq4)
+
+`docs/html/` is generated from `docs/*.md` and committed, and nothing
+regenerated it when a release rewrote `docs/RELEASES.md`. So the one page whose
+whole purpose is listing releases was the page guaranteed to go stale: it was
+missing 0.1.2 and 0.1.3 when this was noticed, and went stale again for 0.1.4
+and 0.1.5 while the bead sat open.
+
+Both halves, because either alone leaves a hole:
+
+- **`build-docs.py --check`** renders to a temporary directory and compares,
+  naming any page that differs — and any committed page whose source is gone,
+  which is drift in the other direction. In the verify block beside the other
+  four checks.
+- **`version-bump.sh` regenerates** after writing the notes, and commits the
+  HTML in the same commit. In the *script*, not in `release.yml`, for the reason
+  the workflow holds no logic of its own: a bump run by hand has to leave the
+  same tree as one run by the workflow, or the next person's verify block fails
+  on someone else's release. The workflow gained a `pip install markdown` step,
+  since the bump now needs what `build-docs.py` imports.
+
+A missing `build-docs.py` is tolerated — the versioning tests run against a
+scratch repository holding only the scripts under test — but a *failing* one
+stops the release rather than committing notes whose HTML disagrees with them.
+
+**The check was not offline when first written.** It called `build()`, which
+vendors mermaid from a CDN when the bundle is absent. In a checkout the bundle
+is committed so it never fired, which is exactly the kind of thing that works
+until it does not: a check that reaches the network passes at a desk and fails
+on a plane. `build(vendor:)` now exists so the check can decline, and the test
+asserts it on the source rather than on a run that happened to succeed.
+
+Tests: `test_docs_html_check` (matches, does not fetch, catches drift, names the
+page) and `test_bump_regenerates_the_html` (the bump renders the notes, the tree
+is clean afterwards, the HTML is committed rather than left dirty). The bump's
+scratch repository now carries `build-docs.py`, a page to render and a stubbed
+mermaid asset, so the regeneration is exercised rather than skipped. 242 passing.
+
+---
+
 ## 2026-08-24 — The gutter is half as wide, and its mark sits against the ID (vbx-tkx)
 
 20pt to 10pt, and the glyph moved from the leading edge to the trailing one, so

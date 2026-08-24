@@ -234,8 +234,28 @@ say "==> Tagged $TAG"
 
 python3 "$ROOT/scripts/release-notes.py"
 
-if [[ -n "$(git status --porcelain docs/RELEASES.md)" ]]; then
+# `docs/html/` is generated from `docs/*.md` and committed, so rewriting
+# RELEASES.md above invalidates RELEASES.html. Nothing used to regenerate it,
+# which made the one page whose purpose is listing releases the page guaranteed
+# to go stale — it was two releases behind when that was noticed.
+#
+# Regenerated here rather than in `release.yml`, for the reason the workflow
+# holds no logic of its own: a bump run by hand has to leave the tree in the
+# same state as a bump run by the workflow, or `build-docs.py --check` fails for
+# whoever runs the verify block next.
+#
+# A missing `build-docs.py` is tolerated because the versioning tests run
+# against a scratch repository holding only the scripts under test. A *failing*
+# one is not: that is the drift this exists to prevent, and it stops the
+# release rather than committing notes whose HTML disagrees with them.
+if [[ -f "$ROOT/scripts/build-docs.py" ]]; then
+  python3 "$ROOT/scripts/build-docs.py" >/dev/null \
+    || fail "build-docs.py failed; the release notes and their HTML would disagree"
+fi
+
+if [[ -n "$(git status --porcelain docs/RELEASES.md docs/html)" ]]; then
   git add docs/RELEASES.md
+  [[ -d docs/html ]] && git add docs/html
   git commit -q -m "Record $TAG in the release notes"
   # Re-pointed at the commit that carries the notes, so a checkout of the tag is
   # a checkout of a tree whose RELEASES.md already lists it. Otherwise
