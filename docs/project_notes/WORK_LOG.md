@@ -26,6 +26,44 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — Closed beads stopped accepting edits (vbx-78c)
+
+The bead's open question first, because it decided the shape of everything else:
+**does `br` already refuse a write to a closed issue?** No. Against a scratch
+workspace, `br update --title` and `br update --priority` both rewrote a closed
+bead and exited 0. So this is vbx's own rule, not vbx agreeing with the engine,
+and ADR-017 says so out loud — a terminal `br update` still rewrites a closed
+bead, and pretending otherwise would be worse than the gap.
+
+`IssueStatus.isImmutable` is the whole rule: `closed` and `tombstone`. The
+affordances consult it before opening — the field editor does not open, the
+priority menu shows its reason instead of values — and `setTitle`/`setPriority`
+check it again, because a gate is not a rule if the thing behind it still says
+yes.
+
+**Mixed selection: refuse as a whole**, naming the count. Applying to the open
+beads and skipping the closed ones is a partial success that surfaces a week
+later, when the beads that did not change look like beads nobody got to.
+
+**An unknown status stays editable.** The status enum is open on purpose, and
+refusing an edit is the more surprising of the two failures — nobody would
+report it, they would assume the bead was closed.
+
+The write-path test was nearly a test of nothing: CLAUDE.md warns that writes
+against the fixture used to fail for unrelated reasons, so a refusal test could
+pass while proving only that the fixture is unwritable. Removing the guard and
+re-running settled it — `br` wrote the closed bead and its priority went 0 → 3,
+which is both the discrimination check and the direct evidence for the ADR's
+central claim.
+
+Tests: `Immutable statuses` in core (closed and tombstone, nothing else, unknown
+stays editable) and `Immutable closed beads` in the UI suite — the refusal names
+Reopen, an open bead is untouched, a mixed selection counts what stopped it, a
+stale id does not refuse for the others, the write itself refuses through `br`,
+and the tooltip precedence. 512 passing.
+
+---
+
 ## 2026-08-24 — The mark moves into the gap, not just closer to it (vbx-be4)
 
 Halving the gutter to 10pt moved the mark 10pt and stopped, which still read as
