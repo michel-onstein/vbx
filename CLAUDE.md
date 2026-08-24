@@ -93,6 +93,14 @@ them.
   `contentInset`: the gutter is 10pt wide, and 4pt each side would leave 2pt and
   clip the glyph — asserted by rendering, since at that size "tight" and
   "clipped" are two points apart.
+- **What separates two columns is the table's `intercellSpacing`, not their
+  widths.** An inset-style table sets it to 17pt, so the uncommitted gutter's
+  cell ends at x=26 while the ID cell starts at 43. Narrowing a column moves its
+  content by the width you removed and no further; the gap is a property of the
+  table and cannot be set for one column. `contentTrailingInset` may go
+  **negative** so a column's content overhangs into that gap, which is safe
+  because the gap belongs to no column — but an overhang as long as the spacing
+  reaches the next column's content, and the test asserts it stays shorter.
 - **"Uncommitted" is defined against git, not tracked by vbx.** A bead is dirty
   when its record differs from the same record at `HEAD`, read through the
   engine's `snapshot_at` — the object store directly, as ADR-006 requires. No

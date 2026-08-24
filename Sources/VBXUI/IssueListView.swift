@@ -50,13 +50,21 @@ struct IssueListView: View {
         // the uncommitted state has on a row — hiding it would leave the state
         // with nowhere to appear at all.
         // 10pt, and the mark on the trailing edge: it belongs to the bead
-        // whose id is immediately to its right, and against that edge it reads
-        // as attached to the row rather than as a stray character floating at
-        // the left of the window. The inset shrinks with the column — 4pt each
-        // side of 10 leaves 2pt, which clips the glyph.
+        // whose id is immediately to its right. The inset shrinks with the
+        // column — 4pt each side of 10 leaves 2pt, which clips the glyph.
+        //
+        // The trailing overhang is what actually puts the mark *next to* the
+        // id. Measured in a real table: the gutter's cell is x=16…26 and the id
+        // cell starts at 43, because an inset-style table puts 17pt of
+        // `intercellSpacing` between every pair of columns. Halving the column
+        // moved the glyph 10pt; the remaining distance is that gap, which
+        // belongs to the table and cannot be narrowed for one column without
+        // narrowing all of them. -13 lets the one glyph sit in it, ending about
+        // 4pt short of the id cell so the two never touch.
         BeadColumnSpec(
             id: Self.dirtyMarkID, title: "", width: 10, minWidth: 10, maxWidth: 10,
-            isProtected: true, contentAlignment: .trailing, contentInset: 1),
+            isProtected: true, contentAlignment: .trailing, contentInset: 1,
+            contentTrailingInset: -13),
         BeadColumnSpec(
             id: SortColumn.id.rawValue, title: "ID", sort: .id,
             width: 96, minWidth: 70, maxWidth: 160, isProtected: true),

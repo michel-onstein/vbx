@@ -257,7 +257,8 @@ struct BeadTable: NSViewRepresentable {
                 ?? HostedCell(identifier: identifier)
             cell.host(
                 parent.content(spec, beadRow),
-                alignment: spec.contentAlignment, inset: spec.contentInset)
+                alignment: spec.contentAlignment, inset: spec.contentInset,
+                trailingInset: spec.contentTrailingInset)
             return cell
         }
 
@@ -460,7 +461,12 @@ final class HostedCell: NSTableCellView {
     /// declaration. A cell is reused across the rows of one column, so these
     /// are rebuilt when a spec asks for a different inset and not per row.
     private var edges: [NSLayoutConstraint] = []
-    private var currentInset: CGFloat = .nan
+
+    private struct Insets: Equatable {
+        var leading: CGFloat
+        var trailing: CGFloat
+    }
+    private var currentInsets = Insets(leading: .nan, trailing: .nan)
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
@@ -468,17 +474,17 @@ final class HostedCell: NSTableCellView {
         hosting.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hosting)
         hosting.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
-        setInset(4)
+        setInsets(leading: 4, trailing: 4)
     }
 
-    private func setInset(_ inset: CGFloat) {
+    private func setInsets(leading: CGFloat, trailing: CGFloat) {
         NSLayoutConstraint.deactivate(edges)
         edges = [
-            hosting.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            hosting.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            hosting.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leading),
+            hosting.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailing),
         ]
         NSLayoutConstraint.activate(edges)
-        currentInset = inset
+        currentInsets = Insets(leading: leading, trailing: trailing)
     }
 
     @available(*, unavailable)
@@ -487,7 +493,8 @@ final class HostedCell: NSTableCellView {
     func host(
         _ view: AnyView,
         alignment: BeadColumnSpec.CellAlignment = .leading,
-        inset: CGFloat = 4
+        inset: CGFloat = 4,
+        trailingInset: CGFloat? = nil
     ) {
         // Aligned explicitly, always.
         //
@@ -505,7 +512,8 @@ final class HostedCell: NSTableCellView {
         // the decision back in the place this exists to take it out of.
         let edge: Alignment = alignment == .leading ? .leading : .trailing
         hosting.rootView = AnyView(view.frame(maxWidth: .infinity, alignment: edge))
-        if inset != currentInset { setInset(inset) }
+        let wanted = Insets(leading: inset, trailing: trailingInset ?? inset)
+        if wanted != currentInsets { setInsets(leading: wanted.leading, trailing: wanted.trailing) }
     }
 }
 
