@@ -472,7 +472,7 @@ struct BeadTable: NSViewRepresentable {
                 // The field editor, which is what makes this feel like every
                 // other editable table on the system.
                 table.editColumn(columnIndex, row: row, with: nil, select: true)
-            case .priority:
+            case .priority, .labels:
                 guard let menu = parent.valueMenu(spec, targetIDs()) else { return }
                 let rect = table.frameOfCell(atColumn: columnIndex, row: row)
                 menu.popUp(

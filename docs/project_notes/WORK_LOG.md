@@ -51,6 +51,55 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — Labels are editable from the list (vbx-dot)
+
+Double-clicking the Labels cell now opens a menu of the workspace's labels, each
+one toggling, with `New Label…` at the bottom. The write is `br label add` /
+`br label remove`, one invocation for the whole selection — `br` takes several
+issue ids, so there is no half-applied state to report.
+
+**The editor is a menu, not a token field.** The common case is applying a label
+the workspace already has, which is one click; creating one is rarer and gets an
+item of its own. A token field is better at free text and is a second editing
+mechanism to build and keep — an `NSTokenField` in a table cell is its own
+project.
+
+**Presence has three answers.** Across a selection a label may be on some beads
+and not others, so the checkmark is on, off, or mixed. Clicking a mixed one
+*applies* the label to the rest rather than clearing it: the click after a mixed
+checkmark is far more often "make these the same" than "take it off the ones
+that have it".
+
+**The double-click conflict, resolved.** A pill's double-click used to toggle
+that label as a *filter*, and the cell's double-click now edits — one gesture
+cannot mean both. Filtering keeps two homes, both showing more than the gesture
+did: the sidebar's Labels section with counts, and the Labels surface with all
+of them rather than only those a visible row carries. The gesture was also the
+least reliable of the three, being exactly what ADR-014 records as not working —
+a SwiftUI gesture on hosted content inside a table.
+
+Removing it left `toggleLabelFilter` with no caller in Sources. Deleting it
+would have been the clean-break move and would have been wrong: it does
+something the sidebar's rows did not, namely clear an active recipe, because a
+recipe owns the filter wholesale and one the user has since edited by hand is no
+longer the recipe's. The sidebar now routes through it, which removes an
+inconsistency rather than the function.
+
+**A latent bug found on the way.** `rowMenu` built its priority submenu with
+`priorityMenu(Self.specs[1], ids)` — and `specs[1]` stopped being the priority
+column when the uncommitted gutter was added in front of it. It was harmless
+only because the parameter was never read. The parameter is gone, which is what
+makes it stay harmless.
+
+Tests: `Label editing` — the argument vectors are pinned (the ids are
+positional and the label is an option, the reverse of `update`), a label round
+trips through `br`, one invocation covers a selection, presence is three-way, a
+closed bead refuses through ADR-017's gate, an empty label is not written, and
+filtering keeps its homes. `Table columns` had its editable-column list updated,
+deliberately. 528 passing.
+
+---
+
 ## 2026-08-24 — History is only offered where there is a repository (vbx-x8x)
 
 History correlates beads to commits. A workspace outside a git repository has
