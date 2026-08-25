@@ -27,7 +27,7 @@ private struct SidebarViewsSection: View {
 
     var body: some View {
         Section("Views") {
-            ForEach(ViewSurface.allCases) { surface in
+            ForEach(store.availableSurfaces) { surface in
                 Button {
                     store.surface = surface
                 } label: {

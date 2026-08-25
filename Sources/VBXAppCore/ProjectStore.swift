@@ -666,6 +666,14 @@ public final class ProjectStore: ObservableObject {
             // load is not somewhere the user has been, and offering it again
             // in the menu would just reproduce the error.
             recents.record(path)
+            // A workspace with no repository does not offer History, and the
+            // user may have been on it when they opened this one. Left alone,
+            // `surface` would name a view nothing offers — hidden from every
+            // control and still rendered, which is a worse bug than the one
+            // hiding it fixes.
+            if !availableSurfaces.contains(surface) {
+                surface = .list
+            }
             // Loaded here rather than from the sidebar section that shows
             // them: that view renders before any workspace has, so its `.task`
             // ran while `isLoaded` was still false, returned early, and never
@@ -749,6 +757,57 @@ public final class ProjectStore: ObservableObject {
         watcher.stop()
         gitWatcher.stop()
         isWatching = false
+    }
+
+    /// The repository the workspace is in, or nil when it is in none.
+    ///
+    /// Walks up from the workspace rather than testing `<workspace>/.git`,
+    /// because a `.beads` directory in a *subdirectory* of a repository is in
+    /// that repository — and History works there. Testing one level would call
+    /// it "no repository" and hide a surface that would have worked, which is
+    /// the more annoying of the two possible mistakes.
+    ///
+    /// `.git` is accepted as a **file** as well as a directory: that is what it
+    /// is inside a git worktree or a submodule, where it holds a `gitdir:`
+    /// pointer. This repository's own discipline puts every session in a
+    /// worktree, so the file form is the common case here, not an exotic one.
+    ///
+    /// Synchronous and cheap — a handful of `stat` calls up a path that is
+    /// rarely deep. The alternative, asking the engine for revisions, is exact
+    /// but loaded lazily, so "no revisions yet" and "no repository" would be
+    /// the same answer until the load had run: absent read as zero, which is
+    /// the trap ADR-015 exists to avoid.
+    public var gitRepositoryRoot: String? {
+        guard let workspace = workspaceDirectory else { return nil }
+        var directory = URL(fileURLWithPath: workspace).standardizedFileURL
+        let manager = FileManager.default
+        while true {
+            let dot = directory.appendingPathComponent(".git")
+            if manager.fileExists(atPath: dot.path) { return directory.path }
+            let parent = directory.deletingLastPathComponent().standardizedFileURL
+            // `/` is its own parent; stopping on that is what ends the walk.
+            if parent.path == directory.path { return nil }
+            directory = parent
+        }
+    }
+
+    /// Whether this workspace has a repository behind it at all.
+    public var hasGitRepository: Bool { gitRepositoryRoot != nil }
+
+    /// The surfaces worth offering for this workspace.
+    ///
+    /// Read by everything that offers a surface — the toolbar picker, the
+    /// sidebar's Views section and the View menu — so the three cannot come
+    /// apart. A surface hidden in one place and present in another is worse
+    /// than one that is always offered.
+    ///
+    /// History correlates beads to commits, so without a repository it has
+    /// nothing to correlate and is left out. Nothing else is conditional yet;
+    /// time travel needs a repository too, and when its controls learn that
+    /// they should read this rather than deciding for themselves.
+    public var availableSurfaces: [ViewSurface] {
+        guard !hasGitRepository else { return ViewSurface.allCases }
+        return ViewSurface.allCases.filter { $0 != .history }
     }
 
     /// `<workspace>/.git/HEAD`, when the workspace is in a git repository.

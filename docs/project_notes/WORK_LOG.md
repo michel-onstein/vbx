@@ -51,6 +51,52 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — History is only offered where there is a repository (vbx-x8x)
+
+History correlates beads to commits. A workspace outside a git repository has
+none, so the surface had nothing to show and was offered anyway.
+
+`ProjectStore.availableSurfaces` is the list, and all *three* places that offer
+a surface now read it — the toolbar picker, the sidebar's Views section, and the
+View menu in `VBXCommands`. The bead named two; the menu was the third, and a
+command that switches to a surface neither control offers would strand the user
+on a view they cannot leave by the route they arrived.
+
+**How "is there a repository" is answered.** The bead weighed `gitHeadPath`
+against `store.revisions` and neither is right:
+
+- `gitHeadPath` tests `<workspace>/.git/HEAD`, one level only, so it answers
+  "no" for a `.beads` directory in a *subdirectory* of a repository — where
+  History works. Hiding a surface that would have worked is the more annoying of
+  the two mistakes.
+- `revisions` is exact but lazily loaded, so "not loaded yet" and "no
+  repository" would be the same answer: absent read as zero, the trap ADR-015
+  exists to avoid.
+
+So `gitRepositoryRoot` walks up from the workspace looking for `.git`, and
+accepts it as a **file** as well as a directory — which is what it is inside a
+worktree or a submodule. That is not an exotic case here: this repo's own
+discipline puts every session in a worktree.
+
+**The selected surface falls back.** Opening a repository-less workspace while
+on History leaves `surface` naming a view nothing offers — hidden from every
+control and still rendered, which is worse than what was being fixed. It moves
+to `.list`, and only in that case: an open must not quietly move the user off
+the view they chose.
+
+**A limitation this uncovered but did not change.** `gitHeadPath` still tests
+one level, so ADR-015's `HEAD` watch does not fire in a worktree, where `.git`
+is a file — meaning dirty marks there do not clear on commit until something
+else forces a reload. Pre-existing, out of scope for this bead, and worth fixing
+where the watch lives rather than here.
+
+Tests: `History needs a repository` — hidden without one, offered with one, a
+workspace one level down still counts, a `.git` file counts as much as a
+directory, the selected surface falls back, and a valid one is left alone. 521
+passing.
+
+---
+
 ## 2026-08-24 — The toolbar's filter menu is gone (vbx-bcj)
 
 It was the *third* copy of one setting. The sidebar's Filters section shows all

@@ -122,7 +122,7 @@ public struct ContentView: View {
 
         ToolbarItem(placement: .navigation) {
             Picker("View", selection: $store.surface) {
-                ForEach(ViewSurface.allCases) { surface in
+                ForEach(store.availableSurfaces) { surface in
                     Label(surface.displayName, systemImage: surface.symbolName).tag(surface)
                 }
             }
