@@ -217,7 +217,11 @@ struct TableColumnOrderTests {
             spec.editing == nil ? nil : spec.id
         }
         #expect(
-            editable.sorted() == [SortColumn.priority.rawValue, SortColumn.title.rawValue].sorted(),
+            editable.sorted()
+                == [
+                    SortColumn.priority.rawValue, SortColumn.title.rawValue,
+                    SortColumn.labels.rawValue,
+                ].sorted(),
             "unexpected editable columns: \(editable)")
     }
 

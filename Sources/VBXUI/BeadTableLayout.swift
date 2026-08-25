@@ -65,6 +65,12 @@ struct BeadColumnSpec: Identifiable, Sendable {
         case text
         /// A menu at the cell, for a small closed set of values.
         case priority
+        /// A menu at the cell listing the workspace's labels, each toggling.
+        ///
+        /// Its own case rather than reusing ``priority``: both are menus, but
+        /// what they are a menu *of* is decided per column, and a case named
+        /// for one of them would make the other read as a mistake.
+        case labels
     }
 
     init(

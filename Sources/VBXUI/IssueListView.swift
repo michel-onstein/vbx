@@ -110,7 +110,7 @@ struct IssueListView: View {
             width: 86, minWidth: 76, maxWidth: 120),
         BeadColumnSpec(
             id: SortColumn.labels.rawValue, title: "Labels", sort: .labels,
-            width: 140, minWidth: 80, maxWidth: 4000),
+            width: 140, minWidth: 80, maxWidth: 4000, editing: .labels),
         BeadColumnSpec(
             id: SortColumn.created.rawValue, title: "Created", sort: .created,
             width: 100, minWidth: 80, maxWidth: 140),
@@ -157,7 +157,7 @@ struct IssueListView: View {
             commitText: { _, id, text in
                 Task { await store.setTitle(text, for: id) }
             },
-            valueMenu: { spec, ids in priorityMenu(spec, ids) },
+            valueMenu: { spec, ids in valueMenu(spec, ids) },
             rowMenu: { ids in rowMenu(for: ids) },
             editRefusal: { id in store.editingUnavailableReason(for: [id]) },
             uncommittedReason: { id in store.dirtyBeads.reason(for: id) }
@@ -273,10 +273,21 @@ struct IssueListView: View {
             HStack(spacing: 4) {
                 ForEach(Array(row.issue.labels.enumerated()), id: \.offset) { _, label in
                     LabelPill(label: label, isFiltered: store.query.labels.contains(label))
-                        .onTapGesture(count: 2) { store.toggleLabelFilter(label) }
                 }
             }
-            .help(row.issue.labels.joined(separator: ", "))
+            // Double-clicking a pill used to toggle that label as a *filter*.
+            // The cell's double-click now edits the labels, as it does for
+            // Title and P, and one gesture cannot mean both things.
+            //
+            // Filtering by label keeps two homes, both of which show more than
+            // the gesture did: the sidebar's Labels section, with a count each,
+            // and the Labels surface, which lists all of them rather than only
+            // the ones a visible row happens to carry. The gesture was also the
+            // least reliable of the three — a SwiftUI gesture on hosted content
+            // inside a table is exactly what ADR-014 records as not working.
+            .help(
+                store.editingUnavailableReason(for: [row.id])
+                    ?? "Double-click to edit labels")
 
         case SortColumn.created.rawValue:
             Text(
@@ -330,8 +341,92 @@ struct IssueListView: View {
 
     // MARK: - Menus
 
+    /// The menu for whichever column was double-clicked.
+    private func valueMenu(_ spec: BeadColumnSpec, _ ids: Set<Issue.ID>) -> NSMenu? {
+        switch spec.editing {
+        case .labels: labelMenu(ids)
+        default: priorityMenu(ids)
+        }
+    }
+
+    /// The label editor: every label the workspace uses, each one toggling.
+    ///
+    /// A menu rather than a token field. The common case is applying a label
+    /// the workspace already has, which is one click here; creating one is
+    /// rarer and gets an item of its own. A token field would be better at free
+    /// text and is a second editing mechanism to build and keep — an
+    /// `NSTokenField` in a table cell is its own project.
+    private func labelMenu(_ ids: Set<Issue.ID>) -> NSMenu? {
+        guard !ids.isEmpty else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        // The same gate as every other edit, so a closed bead refuses here for
+        // the same reason and in the same words. See ADR-017.
+        if let reason = store.editingUnavailableReason(for: ids) {
+            let item = NSMenuItem(title: reason, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            return menu
+        }
+
+        for entry in store.labelCounts {
+            let presence = store.labelPresence(entry.label, on: ids)
+            let item = MenuAction.item(entry.label) {
+                // Toggling a partly-applied label *applies* it to the rest
+                // rather than clearing it: the click after a mixed checkmark is
+                // far more often "make these all the same" than "take it off
+                // the ones that have it".
+                Task { await store.setLabel(entry.label, on: ids, present: presence != .all) }
+            }
+            // Three states, because across a selection a label may be on some
+            // beads and not others, and a checkmark rounding that to on or off
+            // would misreport what the click is about to do.
+            switch presence {
+            case .all: item.state = .on
+            case .some: item.state = .mixed
+            case .none: item.state = .off
+            }
+            menu.addItem(item)
+        }
+
+        if !store.labelCounts.isEmpty { menu.addItem(.separator()) }
+        menu.addItem(
+            MenuAction.item("New Label…") {
+                guard let label = Self.askForLabel() else { return }
+                Task { await store.setLabel(label, on: ids, present: true) }
+            })
+        return menu
+    }
+
+    /// Asks for a label to create. Nil when cancelled, or when nothing was
+    /// typed — creating an empty label is not a thing to do quietly.
+    ///
+    /// An alert rather than an inline field: a text field inside a menu item is
+    /// not a control AppKit gives you.
+    static func askForLabel() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "New Label"
+        alert.informativeText = "A label exists by being used; there is nothing to create first."
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.placeholderString = "backend"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// The priority editor: a menu at the cell, for a closed set of values.
-    private func priorityMenu(_ spec: BeadColumnSpec, _ ids: Set<Issue.ID>) -> NSMenu? {
+    ///
+    /// Takes no column, because it is the priority menu wherever it is opened
+    /// from. The parameter it used to take was never read — `rowMenu` passed
+    /// `specs[1]`, which stopped being the priority column when the uncommitted
+    /// gutter was added in front of it, and nothing noticed precisely because
+    /// nothing read it.
+    private func priorityMenu(_ ids: Set<Issue.ID>) -> NSMenu? {
         guard !ids.isEmpty else { return nil }
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -387,7 +482,7 @@ struct IssueListView: View {
         let priority = NSMenuItem(
             title: ids.count == 1 ? "Priority" : "Priority of \(ids.count) Beads",
             action: nil, keyEquivalent: "")
-        priority.submenu = priorityMenu(Self.specs[1], ids)
+        priority.submenu = priorityMenu(ids)
         priority.isEnabled = store.canEditBeads
         menu.addItem(priority)
 

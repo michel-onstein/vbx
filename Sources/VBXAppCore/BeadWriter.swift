@@ -86,6 +86,39 @@ public final class BeadWriter: ObservableObject {
         ["update", id, "--title", title, "--json"]
     }
 
+    /// Adds a label to every bead in `ids`.
+    ///
+    /// One invocation for the whole selection: `br label add` takes several
+    /// issues, so this is one process and one write rather than a loop that can
+    /// half-succeed.
+    public func addLabel(
+        _ label: String, to ids: [String], in workspace: String
+    ) async throws {
+        try await run(Self.addLabelArguments(label, to: ids), in: workspace)
+    }
+
+    /// Removes a label from every bead in `ids`.
+    public func removeLabel(
+        _ label: String, from ids: [String], in workspace: String
+    ) async throws {
+        try await run(Self.removeLabelArguments(label, from: ids), in: workspace)
+    }
+
+    /// The argument vector for adding a label, without running it.
+    ///
+    /// Note the shape: the issue ids are **positional** and the label is an
+    /// option, which is the reverse of `update`. Pinned by a test for exactly
+    /// that reason — getting it backwards would label an issue named after the
+    /// label, or fail in a way that reads like `br` being broken.
+    public static func addLabelArguments(_ label: String, to ids: [String]) -> [String] {
+        ["label", "add"] + ids.sorted() + ["--label", label, "--json"]
+    }
+
+    /// The argument vector for removing a label, without running it.
+    public static func removeLabelArguments(_ label: String, from ids: [String]) -> [String] {
+        ["label", "remove"] + ids.sorted() + ["--label", label, "--json"]
+    }
+
     /// The argument vector for a priority change, without running it.
     ///
     /// Exposed so a test can pin the command rather than a mock's idea of it —

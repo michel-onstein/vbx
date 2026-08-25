@@ -1169,6 +1169,56 @@ public final class ProjectStore: ObservableObject {
         return failed
     }
 
+    /// Adds or removes a label across a selection, through `br`.
+    ///
+    /// One `br` invocation for the whole selection rather than one per bead:
+    /// `br label add` accepts several issues, so there is no half-applied
+    /// state to report. Returns whether it wrote.
+    ///
+    /// Gated by the same rule as every other edit
+    /// (``editingUnavailableReason(for:)``), so a closed bead refuses here as
+    /// it does for title and priority — ADR-017.
+    @discardableResult
+    public func setLabel(
+        _ label: String, on ids: Set<Issue.ID>, present: Bool
+    ) async -> Bool {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canEditBeads, let workspace = workspaceDirectory else { return false }
+        guard !trimmed.isEmpty, !ids.isEmpty else { return false }
+        if let reason = editingUnavailableReason(for: ids) {
+            loadError = reason
+            return false
+        }
+        do {
+            if present {
+                try await writer.addLabel(trimmed, to: Array(ids), in: workspace)
+            } else {
+                try await writer.removeLabel(trimmed, from: Array(ids), in: workspace)
+            }
+            await reload(force: true)
+            return true
+        } catch {
+            loadError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// How much of `ids` already carries `label`.
+    ///
+    /// Three answers, not two: across a selection a label may be on some beads
+    /// and not others, and a checkmark that rounded that to on or off would
+    /// misreport what a click is about to do.
+    public func labelPresence(_ label: String, on ids: Set<Issue.ID>) -> LabelPresence {
+        let byID = issuesByID
+        let present = ids.filter { byID[$0]?.labels.contains(label) == true }
+        if present.isEmpty { return .none }
+        return present.count == ids.count ? .all : .some
+    }
+
+    public enum LabelPresence: Sendable, Equatable {
+        case none, some, all
+    }
+
     /// Renames a bead, through `br`.
     ///
     /// An unchanged or empty title is refused rather than written. Empty
