@@ -12,8 +12,10 @@ struct HistoryView: View {
     @EnvironmentObject var store: ProjectStore
     @State private var tab: Tab = .commits
     @State private var selectedCommit: String?
+    /// The diff on screen — non-nil is what presents it. A companion flag
+    /// would present the sheet from a body that had not yet seen the patch,
+    /// which opens an empty window. See ``SidebarRecipesSection/editing``.
     @State private var patch: CommitPatch?
-    @State private var showingPatch = false
     @State private var causality: CausalityResult?
     @State private var filePath: String = ""
     @State private var fileBeads: FileBeadLookup?
@@ -80,7 +82,7 @@ struct HistoryView: View {
             case .orphans: orphansTab
             }
         }
-        .sheet(isPresented: $showingPatch) { patchSheet }
+        .sheet(item: $patch) { patchSheet($0) }
     }
 
     private var header: some View {
@@ -505,18 +507,17 @@ struct HistoryView: View {
 
     private func showPatch(sha: String, path: String? = nil) async {
         patch = await store.patch(sha: sha, path: path)
-        showingPatch = patch != nil
     }
 
-    private var patchSheet: some View {
+    private func patchSheet(_ patch: CommitPatch) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(patch?.sha.prefix(7) ?? "").font(.headline.monospaced())
-                if let path = patch?.path, !path.isEmpty {
-                    Text(path).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(patch.sha.prefix(7)).font(.headline.monospaced())
+                if !patch.path.isEmpty {
+                    Text(patch.path).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Done") { showingPatch = false }
+                Button("Done") { self.patch = nil }
                     .keyboardShortcut(.defaultAction)
             }
             .padding(12)
@@ -524,7 +525,7 @@ struct HistoryView: View {
 
             ScrollView([.horizontal, .vertical]) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(patch?.lines ?? []) { line in
+                    ForEach(patch.lines) { line in
                         Text(line.text.isEmpty ? " " : line.text)
                             .font(.caption.monospaced())
                             .foregroundStyle(colour(for: line.kind))
