@@ -51,6 +51,39 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-24 — The toolbar's filter menu is gone (vbx-bcj)
+
+It was the *third* copy of one setting. The sidebar's Filters section shows all
+four with a count each — strictly more than a menu showing one value behind a
+disclosure — and the View menu already carried `Filter: Open/Ready/Closed/All`
+as commands.
+
+That last fact is what settled the bead's open question. It asked whether a
+collapsed sidebar would be left with no filter control, and named that as the
+real argument against removing this. The answer turned out to already exist in
+`VBXCommands`: the menu bar is always present, collapsed sidebar or not. Nothing
+had to be built, but the test now asserts those commands exist — without them
+this change really would be removing the last reachable control for someone who
+works with the sidebar hidden, and that should fail loudly rather than be
+rediscovered.
+
+`showsFilterAndSort` became `showsSort`, because it now gates one control and a
+comment describing a picker that no longer exists is how the next person is
+misled.
+
+The new assertions read the *source*, which is unusual here and deliberate: a
+toolbar is window chrome, an `NSHostingView` of `ContentView` never builds one,
+and a render-based check would pass whether or not the picker was there. What
+can be checked honestly is that the declaration is gone and the two replacements
+are declared.
+
+Tests: `Toolbar sort` — the control follows the ordered surfaces, the eight
+payload views hide it, every surface stays classified, the toolbar declares no
+filter picker, both remaining routes exist, and the sidebar's rows still drive
+the query. 515 passing.
+
+---
+
 ## 2026-08-24 — Beads now say which repository they came from (vbx-pjf)
 
 `br` stamps `source_repo` with the basename of the directory it runs in, and

@@ -64,20 +64,24 @@ public enum ViewSurface: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Whether the toolbar's Filter picker and Sort menu belong on this
-    /// surface.
+    /// Whether the toolbar's Sort menu belongs on this surface.
     ///
-    /// Both controls write to ``ProjectStore/query``, which is read in exactly
+    /// Named for one control because it now gates one. It gated the Filter
+    /// picker too until that was removed: the sidebar's Filters section shows
+    /// all four filters with counts, and the View menu carries them as
+    /// commands, so the toolbar copy was the third way to set one value.
+    ///
+    /// The control writes to ``ProjectStore/query``, which is read in exactly
     /// one place — `visibleIssues`. A surface that renders an engine payload of
-    /// its own never consults it, so the controls sit there answering nothing:
-    /// changing either one produces no visible effect at all. They are hidden
-    /// rather than disabled, because a disabled control still claims the view
-    /// has an ordering that happens to be unavailable, and these views have no
-    /// bead ordering to begin with.
+    /// its own never consults it, so the control sits there answering nothing:
+    /// changing it produces no visible effect at all. It is hidden rather than
+    /// disabled, because a disabled control still claims the view has an
+    /// ordering that happens to be unavailable, and these views have no bead
+    /// ordering to begin with.
     ///
     /// This is a question about the toolbar, not a claim about the data: it is
     /// deliberately not derived from whether the view reads `visibleIssues`, so
-    /// a surface can be left showing the controls while what it should do is
+    /// a surface can be left showing the control while what it should do is
     /// still being decided.
     ///
     /// ``history`` was the one such case, and the answer was to drop them. It
@@ -88,7 +92,7 @@ public enum ViewSurface: String, CaseIterable, Identifiable, Sendable {
     /// has asked for, and inventing one to justify a control already on screen
     /// is the wrong way round. If a real need appears it arrives as its own
     /// request, with its own idea of what filtering a history means.
-    public var showsFilterAndSort: Bool {
+    public var showsSort: Bool {
         switch self {
         case .list, .board, .graph, .tree: true
         case .insights, .plan, .labels, .flow, .attention, .alerts, .sprint, .history: false
