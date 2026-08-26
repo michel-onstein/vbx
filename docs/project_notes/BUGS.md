@@ -1195,3 +1195,61 @@ missing part.
 
 **The general rule:** a sheet that shows a value takes that value as its item. A
 flag beside the value presents a window built before the value arrived.
+
+---
+
+## 2026-08-26 — The packaging test cut a real release
+
+**Symptom:** `python3 scripts/test-packaging.py` reported `docs/RELEASES.md is
+out of date` — a check about a file nobody had edited. Regenerating it added a
+release called **99.0.0**.
+
+**Cause:** the run had cut one. `test_release_instructions_are_runnable` ended
+with
+
+```python
+# With a well-formed tag it must still refuse here — either the tree is
+# dirty or signing is unconfigured.
+result = subprocess.run([str(RELEASE), "--tag", "99.0.0"], ...)
+check("a release is refused before building when preflight fails", ...)
+```
+
+That comment is an assumption about the machine, not about the script. On a
+machine with signing configured and a clean tree — which is what a checkout
+looks like right after committing, and exactly when the verify block gets run —
+neither condition holds and `release.sh` does what it was asked to: an annotated
+`99.0.0` tag, a universal Developer ID build, a **notarization submission to
+Apple**, a stapled `vbx-99.0.0.dmg` and a rendered cask. The tag then rendered
+into `docs/RELEASES.md`, and the notes check two checks later reported it. The
+failure was a downstream symptom of the test having released.
+
+A second defect underneath: `release.sh` left the tag behind. The tag has to
+exist before the build — the version is read out of git — so every failure after
+that point aborts with the tag in place. Left there it spends the version: the
+next attempt is refused with "already exists; a published version is never
+re-cut" for a version nothing was ever published under, and being a local tag it
+is invisible until someone pushes tags.
+
+**Fix:** two, because either alone leaves a hole.
+
+- The check now runs with `VBX_SIGNING_CONFIG=/nonexistent/signing.env`, the
+  same way every `package-app.sh` test in the file already did. What makes it
+  refuse is now a fact about the run rather than about the machine.
+- `release.sh` removes a tag *it* created when the release does not finish,
+  including on `INT`/`TERM` — an interrupt during the notary wait is the likely
+  way to hit this. A tag that was already there is somebody's release and is
+  never touched.
+
+**Prevention:** the refusal check now also asserts that no `99.0.0` tag exists
+afterwards — a release that is refused leaves nothing behind, which is the
+assertion that would have caught this on the first run. The take-back is tested
+in a throwaway repo where the real `release.sh` runs against stub neighbours: a
+signing check that passes, a version script, and a build that exits 1. That is
+the only way to reach the window without cutting a release, since the tag
+legitimately precedes the build. Both directions are covered — the tag it
+created is gone, and a tag it did not create survives.
+
+**The part worth remembering:** a test that asserts something is *refused* has
+to make the refusal happen. Relying on the environment to refuse means the test
+passes for the wrong reason on one machine and performs the operation on
+another — and the more configured the machine, the more the test does.
