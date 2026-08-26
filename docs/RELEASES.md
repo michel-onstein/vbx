@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.1.16 — 2026-08-26
+
+### Fixes
+
+- Open the recipe editor with its form already in it ([#70](https://github.com/michel-onstein/vbx/pull/70))
+
 ## 0.1.15 — 2026-08-25
 
 ### Fixes
