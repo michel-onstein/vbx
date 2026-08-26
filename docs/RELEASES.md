@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.1.18 — 2026-08-26
+
+### Fixes
+
+- Track loading git correlation eagerly, and a commit-count column ([#71](https://github.com/michel-onstein/vbx/pull/71))
+
 ## 0.1.17 — 2026-08-26
 
 ### Fixes
