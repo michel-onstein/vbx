@@ -174,6 +174,14 @@ them.
   — the recents list, the current directory, a restored window's path — is
   skipped when it does not probe openable, so a launch with nothing to open
   lands in the neutral empty state. Only an explicit choice reports a failure.
+- **`br update --description-file` is a silent no-op.** It prints the issue as
+  JSON and exits 0, and the description is unchanged — measured on `vbx-g3q`,
+  where the file on disk held the new text and the record kept the old. Only
+  `-d/--description` actually writes. That matters because the reason to reach
+  for the file form is a long markdown body, which is exactly the case where
+  losing the write is least likely to be noticed. Pass the text as an argv
+  element instead — from a script, not through the shell, so quoting cannot
+  mangle it. (`br create --description-file` *does* work; it is only `update`.)
 - **`br` stamps `source_repo` with the directory it runs in, so every bead
   created in a worktree is stamped wrong.** That rule and this repo's worktree
   discipline are in direct conflict, and the worktree rule is the right one — 30
