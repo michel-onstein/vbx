@@ -1398,3 +1398,13 @@ the scorer and vbx did not. That is now fixed, and nine commands compare byte
 for byte.
 
 Tests: 104 → 304 Swift, plus a substantially expanded Go suite.
+
+## 2026-08-24 — The recipe editor opened empty
+
+Clicking **New recipe…** opened a dialog that stayed blank for about twenty
+seconds. The sheet was presented by a flag written beside the recipe it edits,
+and SwiftUI built its content from a body that had not yet seen the recipe — so
+it opened at 100×80 with an `EmptyView` inside and waited for an unrelated
+redraw. Now `sheet(item:)`, here and for `HistoryView`'s patch sheet, which had
+the same shape. `RecipeEditorPresentationTests` clicks the real row and asserts
+the sheet's size. See BUGS.md, 2026-08-24.

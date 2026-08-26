@@ -1,11 +1,16 @@
 import Foundation
 
 /// One commit's unified diff.
-public struct CommitPatch: Codable, Sendable, Hashable {
+public struct CommitPatch: Codable, Sendable, Hashable, Identifiable {
     public var sha: String
     public var path: String
     public var patch: String
     public var bytes: Int
+
+    /// A diff is identified by what it is a diff of — which is what lets the
+    /// patch sheet be driven by the patch itself rather than by a flag beside
+    /// it. Computed, so it is not part of the wire format.
+    public var id: String { "\(sha):\(path)" }
 
     private enum CodingKeys: String, CodingKey { case sha, path, patch, bytes }
 

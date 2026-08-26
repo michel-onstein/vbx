@@ -1158,3 +1158,40 @@ assuming it worked is how this went unnoticed for so long:
   *every* object to report the expected `minos`. Checking only the first would
   have passed while the rest were wrong — the archive holds objects from two
   different tools, and a flag reaching one need not reach the others.
+
+---
+
+## 2026-08-24 — The recipe editor opened empty and filled in twenty seconds later
+
+**Symptom:** clicking **New recipe…** in the sidebar opened a dialog with
+nothing in it. The form appeared about twenty seconds later. Against the demo
+fixture it never appeared at all.
+
+**Cause:** the sheet was driven by a flag beside the value it edits —
+`editing` plus `isEditorPresented`, both written by the button — and read back
+with `sheet(isPresented:) { if let editing { … } }`. SwiftUI builds the sheet's
+content from the view as it stood *before* that write landed, so `editing` was
+still nil and the sheet's body was `EmptyView`. The window opened at 100×80 with
+nothing in it and stayed that way until some unrelated change re-ran the
+sidebar's body — a file-watch tick, a metric arriving. Twenty seconds is how
+long that took in a live workspace; in one nothing else is touching, forever.
+
+Not a slow layout, which is where the timing pointed. The editor lays out in
+0.04 s, measured. The delay was entirely the wait for a redraw nothing had asked
+for.
+
+**Fix:** `sheet(item: $editing)`. One piece of state, and the content is handed
+the value that triggered the presentation, so there is nothing left to be stale.
+`HistoryView`'s patch sheet had the same shape — `patch` fetched, then
+`showingPatch` set — and is now `sheet(item: $patch)`; `CommitPatch` became
+`Identifiable` by `sha:path` to carry it.
+
+**Prevention:** `RecipeEditorPresentationTests` hosts the real sidebar section
+in an on-screen window, clicks the row through the list's own row views, and
+asserts the attached sheet's *size*. The editor asks for 520×620; the broken
+version opens at 100×80, which is what an empty body asks for. A test that only
+asserted a sheet appeared would have passed throughout — the sheet was never the
+missing part.
+
+**The general rule:** a sheet that shows a value takes that value as its item. A
+flag beside the value presents a window built before the value arrived.
