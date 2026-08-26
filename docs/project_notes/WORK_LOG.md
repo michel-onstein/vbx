@@ -1408,3 +1408,14 @@ it opened at 100×80 with an `EmptyView` inside and waited for an unrelated
 redraw. Now `sheet(item:)`, here and for `HistoryView`'s patch sheet, which had
 the same shape. `RecipeEditorPresentationTests` clicks the real row and asserts
 the sheet's size. See BUGS.md, 2026-08-24.
+
+## 2026-08-26 — The packaging test cut a real release
+
+`test-packaging.py` ended its release-script section by running `release.sh
+--tag 99.0.0` and assuming the environment would refuse it. On a configured
+machine with a clean tree it did not: every verify run built, signed, notarized
+and tagged a fake 99.0.0. The check now points at a signing config that does not
+exist, so the refusal is a property of the run, and asserts no tag is left
+behind. `release.sh` also takes back a tag it created when the release does not
+finish, so a failed or interrupted release no longer spends the version. See
+BUGS.md, 2026-08-26.
