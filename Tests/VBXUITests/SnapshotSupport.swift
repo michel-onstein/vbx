@@ -364,7 +364,9 @@ enum Fixture {
     /// write makes exactly one bead dirty.
     ///
     /// Returns the store and the directory, which the caller removes when done.
-    static func committedStore() async throws -> (store: ProjectStore, directory: URL) {
+    static func committedStore(
+        eagerHistory: Bool = false
+    ) async throws -> (store: ProjectStore, directory: URL) {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("vbx-git-\(UUID().uuidString)")
         try FileManager.default.copyItem(
@@ -394,6 +396,10 @@ enum Fixture {
         try git(["commit", "-qm", "fixture"])
 
         let store = ProjectStore()
+        // Off unless the test's subject is the walk itself: every store the
+        // suite opens would otherwise start one, and dozens of concurrent git
+        // walks is contention the harness pays for and learns nothing from.
+        store.loadsHistoryEagerly = eagerHistory
         await store.open(path: directory.path)
         return (store, directory)
     }
