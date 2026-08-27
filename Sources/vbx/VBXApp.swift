@@ -236,7 +236,10 @@ struct VBXCommands: Commands {
         }
 
         CommandMenu("View") {
-            ForEach(ViewSurface.allCases) { surface in
+            // The same list the toolbar and the sidebar read, so a command
+            // cannot switch to a surface neither of them offers. Without a
+            // store there is nothing open and nothing to hide.
+            ForEach(store?.availableSurfaces ?? ViewSurface.allCases) { surface in
                 Button(surface.displayName) { store?.surface = surface }
                     .keyboardShortcut(surface.keyEquivalent, modifiers: .command)
                     .disabled(store == nil)

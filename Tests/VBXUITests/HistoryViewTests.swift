@@ -140,6 +140,24 @@ struct HistoryViewTests {
         #expect(patch.bytes > 0)
     }
 
+    @Test("A patch identifies what it is a diff of")
+    func patchIdentity() {
+        // The patch sheet is presented by the patch itself rather than by a
+        // flag beside it — a flag is set in the same update that fetched the
+        // patch, and the sheet is then built from a body that has not seen it
+        // yet, which opens an empty window. That makes this identity part of
+        // the presentation: two diffs of the same commit differ by path, and
+        // asking for the same diff twice must not re-present. See the recipe
+        // editor's sheet, and BUGS.md, 2026-08-24.
+        let whole = CommitPatch(sha: "abc1234", patch: "@@ -1 +1 @@")
+        let file = CommitPatch(sha: "abc1234", path: "src/loader.go", patch: "@@ -1 +1 @@")
+        let other = CommitPatch(sha: "def5678", path: "src/loader.go", patch: "@@ -1 +1 @@")
+
+        #expect(whole.id != file.id)
+        #expect(file.id != other.id)
+        #expect(file.id == CommitPatch(sha: "abc1234", path: "src/loader.go", patch: "").id)
+    }
+
     @Test("The timeline spans a single-instant history without dividing by zero")
     func timelineHandlesSingleInstant() {
         // A bead created and closed in one commit has a zero-width window.

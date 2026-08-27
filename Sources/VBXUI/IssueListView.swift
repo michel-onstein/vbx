@@ -54,13 +54,19 @@ struct IssueListView: View {
         // column — 4pt each side of 10 leaves 2pt, which clips the glyph.
         //
         // The trailing overhang is what actually puts the mark *next to* the
-        // id. Measured in a real table: the gutter's cell is x=16…26 and the id
-        // cell starts at 43, because an inset-style table puts 17pt of
-        // `intercellSpacing` between every pair of columns. Halving the column
-        // moved the glyph 10pt; the remaining distance is that gap, which
-        // belongs to the table and cannot be narrowed for one column without
-        // narrowing all of them. -13 lets the one glyph sit in it, ending about
-        // 4pt short of the id cell so the two never touch.
+        // id. Measured in a real table: the gutter's cell is x=6…16 and the id
+        // cell starts at 33, because the table puts 17pt of `intercellSpacing`
+        // between every pair of columns. Halving the column moved the glyph
+        // 10pt; the remaining distance is that gap, which belongs to the table
+        // and cannot be narrowed for one column without narrowing all of them.
+        // -13 lets the one glyph sit in it, ending about 4pt short of the id
+        // cell so the two never touch.
+        //
+        // The 17pt is not the row style's doing, though it was once written
+        // here as if it were: it measures 17 under `.inset`, `.plain` and
+        // `.fullWidth` alike. What the style moves is where the row starts —
+        // 16pt, 8pt and 6pt — which is why these numbers are 10pt lower than
+        // they used to be while the spacing between them is untouched.
         BeadColumnSpec(
             id: Self.dirtyMarkID, title: "", width: 10, minWidth: 10, maxWidth: 10,
             isProtected: true, contentAlignment: .trailing, contentInset: 1,
@@ -102,9 +108,24 @@ struct IssueListView: View {
         BeadColumnSpec(
             id: SortColumn.pageRank.rawValue, title: "PageRank", sort: .pageRank,
             width: 86, minWidth: 76, maxWidth: 120),
+        // Declared always, including for a workspace with no repository, where
+        // it renders as absent with a reason.
+        //
+        // `vbx-cbw` asked for it to be *hidden* there, by analogy with History
+        // (`vbx-x8x`). Two things argue the other way inside the table. The
+        // established rule here is that an unavailable metric is shown as
+        // absent and says why — PageRank does exactly that before Phase 2 —
+        // whereas a column that comes and goes is a thing the header menu and
+        // the stored layout have no concept of. And `sanitize` prunes stored
+        // widths for columns it does not know about, deliberately and with a
+        // test, so a column that disappeared would take the user's chosen width
+        // with it and not give it back.
+        BeadColumnSpec(
+            id: SortColumn.commits.rawValue, title: "Commits", sort: .commits,
+            width: 78, minWidth: 70, maxWidth: 110),
         BeadColumnSpec(
             id: SortColumn.labels.rawValue, title: "Labels", sort: .labels,
-            width: 140, minWidth: 80, maxWidth: 4000),
+            width: 140, minWidth: 80, maxWidth: 4000, editing: .labels),
         BeadColumnSpec(
             id: SortColumn.created.rawValue, title: "Created", sort: .created,
             width: 100, minWidth: 80, maxWidth: 140),
@@ -131,7 +152,9 @@ struct IssueListView: View {
 
     private var rows: [IssueRow] {
         let metrics = store.metrics
-        return store.visibleIssues.map { IssueRow(issue: $0, metrics: metrics) }
+        return store.visibleIssues.map {
+            IssueRow(issue: $0, metrics: metrics, commitCount: store.commitCount(for: $0.id))
+        }
     }
 
     var body: some View {
@@ -144,15 +167,21 @@ struct IssueListView: View {
             // Refused rather than applied, so a metric with no values cannot
             // become an order with nothing on screen to explain it.
             canSort: { column in
-                !(column.requiresPhase2 && !store.metrics.hasPhase2Values)
+                if column.requiresPhase2, !store.metrics.hasPhase2Values { return false }
+                // Ordering by counts nobody has read yet would sort by zeros
+                // and put the list in an order the screen cannot explain — the
+                // same refusal PageRank gets before Phase 2.
+                if column.requiresHistory, !store.historyLoaded { return false }
+                return true
             },
             content: { spec, row in cellContent(spec, row) },
             editableText: { _, row in row.issue.title },
             commitText: { _, id, text in
                 Task { await store.setTitle(text, for: id) }
             },
-            valueMenu: { spec, ids in priorityMenu(spec, ids) },
+            valueMenu: { spec, ids in valueMenu(spec, ids) },
             rowMenu: { ids in rowMenu(for: ids) },
+            editRefusal: { id in store.editingUnavailableReason(for: [id]) },
             uncommittedReason: { id in store.dirtyBeads.reason(for: id) }
         )
         // Shows where columns were hidden, and brings them back on a
@@ -216,7 +245,7 @@ struct IssueListView: View {
                 .monospacedDigit()
                 .foregroundStyle(row.issue.priority <= 1 ? .primary : .secondary)
                 .help(
-                    store.editingUnavailableReason
+                    store.editingUnavailableReason(for: [row.id])
                         ?? "Double-click to change the priority")
 
         case "type":
@@ -259,6 +288,13 @@ struct IssueListView: View {
                 status: store.metrics.status?.pageRank,
                 format: { String(format: "%.4f", $0) })
 
+        case SortColumn.commits.rawValue:
+            CommitCountCell(
+                count: row.commitCount,
+                reason: store.hasGitRepository
+                    ? "Reading commits from git…"
+                    : "This workspace is not in a git repository")
+
         case SortColumn.labels.rawValue:
             // Identity is the position, not the label: a bead carrying the
             // same label twice is bad data, but it must not collide here and
@@ -266,10 +302,21 @@ struct IssueListView: View {
             HStack(spacing: 4) {
                 ForEach(Array(row.issue.labels.enumerated()), id: \.offset) { _, label in
                     LabelPill(label: label, isFiltered: store.query.labels.contains(label))
-                        .onTapGesture(count: 2) { store.toggleLabelFilter(label) }
                 }
             }
-            .help(row.issue.labels.joined(separator: ", "))
+            // Double-clicking a pill used to toggle that label as a *filter*.
+            // The cell's double-click now edits the labels, as it does for
+            // Title and P, and one gesture cannot mean both things.
+            //
+            // Filtering by label keeps two homes, both of which show more than
+            // the gesture did: the sidebar's Labels section, with a count each,
+            // and the Labels surface, which lists all of them rather than only
+            // the ones a visible row happens to carry. The gesture was also the
+            // least reliable of the three — a SwiftUI gesture on hosted content
+            // inside a table is exactly what ADR-014 records as not working.
+            .help(
+                store.editingUnavailableReason(for: [row.id])
+                    ?? "Double-click to edit labels")
 
         case SortColumn.created.rawValue:
             Text(
@@ -323,12 +370,99 @@ struct IssueListView: View {
 
     // MARK: - Menus
 
-    /// The priority editor: a menu at the cell, for a closed set of values.
-    private func priorityMenu(_ spec: BeadColumnSpec, _ ids: Set<Issue.ID>) -> NSMenu? {
+    /// The menu for whichever column was double-clicked.
+    private func valueMenu(_ spec: BeadColumnSpec, _ ids: Set<Issue.ID>) -> NSMenu? {
+        switch spec.editing {
+        case .labels: labelMenu(ids)
+        default: priorityMenu(ids)
+        }
+    }
+
+    /// The label editor: every label the workspace uses, each one toggling.
+    ///
+    /// A menu rather than a token field. The common case is applying a label
+    /// the workspace already has, which is one click here; creating one is
+    /// rarer and gets an item of its own. A token field would be better at free
+    /// text and is a second editing mechanism to build and keep — an
+    /// `NSTokenField` in a table cell is its own project.
+    private func labelMenu(_ ids: Set<Issue.ID>) -> NSMenu? {
         guard !ids.isEmpty else { return nil }
         let menu = NSMenu()
         menu.autoenablesItems = false
-        if let reason = store.editingUnavailableReason {
+
+        // The same gate as every other edit, so a closed bead refuses here for
+        // the same reason and in the same words. See ADR-017.
+        if let reason = store.editingUnavailableReason(for: ids) {
+            let item = NSMenuItem(title: reason, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            return menu
+        }
+
+        for entry in store.labelCounts {
+            let presence = store.labelPresence(entry.label, on: ids)
+            let item = MenuAction.item(entry.label) {
+                // Toggling a partly-applied label *applies* it to the rest
+                // rather than clearing it: the click after a mixed checkmark is
+                // far more often "make these all the same" than "take it off
+                // the ones that have it".
+                Task { await store.setLabel(entry.label, on: ids, present: presence != .all) }
+            }
+            // Three states, because across a selection a label may be on some
+            // beads and not others, and a checkmark rounding that to on or off
+            // would misreport what the click is about to do.
+            switch presence {
+            case .all: item.state = .on
+            case .some: item.state = .mixed
+            case .none: item.state = .off
+            }
+            menu.addItem(item)
+        }
+
+        if !store.labelCounts.isEmpty { menu.addItem(.separator()) }
+        menu.addItem(
+            MenuAction.item("New Label…") {
+                guard let label = Self.askForLabel() else { return }
+                Task { await store.setLabel(label, on: ids, present: true) }
+            })
+        return menu
+    }
+
+    /// Asks for a label to create. Nil when cancelled, or when nothing was
+    /// typed — creating an empty label is not a thing to do quietly.
+    ///
+    /// An alert rather than an inline field: a text field inside a menu item is
+    /// not a control AppKit gives you.
+    static func askForLabel() -> String? {
+        let alert = NSAlert()
+        alert.messageText = "New Label"
+        alert.informativeText = "A label exists by being used; there is nothing to create first."
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.placeholderString = "backend"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The priority editor: a menu at the cell, for a closed set of values.
+    ///
+    /// Takes no column, because it is the priority menu wherever it is opened
+    /// from. The parameter it used to take was never read — `rowMenu` passed
+    /// `specs[1]`, which stopped being the priority column when the uncommitted
+    /// gutter was added in front of it, and nothing noticed precisely because
+    /// nothing read it.
+    private func priorityMenu(_ ids: Set<Issue.ID>) -> NSMenu? {
+        guard !ids.isEmpty else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        // The selection's reason, not just the app-wide one: a closed bead in
+        // the selection refuses the command, and the menu says which and how
+        // many rather than presenting values that would do nothing.
+        if let reason = store.editingUnavailableReason(for: ids) {
             // A disabled menu with no explanation is the state this app
             // deliberately avoids elsewhere; say why rather than just refuse.
             let item = NSMenuItem(title: reason, action: nil, keyEquivalent: "")
@@ -377,7 +511,7 @@ struct IssueListView: View {
         let priority = NSMenuItem(
             title: ids.count == 1 ? "Priority" : "Priority of \(ids.count) Beads",
             action: nil, keyEquivalent: "")
-        priority.submenu = priorityMenu(Self.specs[1], ids)
+        priority.submenu = priorityMenu(ids)
         priority.isEnabled = store.canEditBeads
         menu.addItem(priority)
 
@@ -455,6 +589,9 @@ struct IssueRow: Identifiable {
     let blocks: Int
     let blockedBy: Int
     let pageRank: Double?
+    /// Commits the engine attributed to this bead, or nil when the correlation
+    /// report has not been read — which is not the same as none.
+    let commitCount: Int?
 
     var id: Issue.ID { issue.id }
     var priority: Int { issue.priority }
@@ -471,12 +608,16 @@ struct IssueRow: Identifiable {
     /// refuses the sort outright until Phase 2 lands, so this is never the
     /// ordering the user actually sees.
     var pageRankKey: Double { pageRank ?? 0 }
+    /// The same arrangement for commits: absent sorts as zero, and the binding
+    /// refuses the ordering until the walk has landed.
+    var commitsKey: Int { commitCount ?? 0 }
 
-    init(issue: Issue, metrics: GraphMetrics) {
+    init(issue: Issue, metrics: GraphMetrics, commitCount: Int? = nil) {
         self.issue = issue
         self.blocks = metrics.blocks(issue.id)
         self.blockedBy = metrics.blockedBy(issue.id)
         self.pageRank = metrics.pageRank?[issue.id]
+        self.commitCount = commitCount
     }
 
     /// The comparator that renders `column` in the given direction.
@@ -492,6 +633,7 @@ struct IssueRow: Identifiable {
         case .blocks: return KeyPathComparator(\IssueRow.blocks, order: order)
         case .blockedBy: return KeyPathComparator(\IssueRow.blockedBy, order: order)
         case .pageRank: return KeyPathComparator(\IssueRow.pageRankKey, order: order)
+        case .commits: return KeyPathComparator(\IssueRow.commitsKey, order: order)
         case .labels: return KeyPathComparator(\IssueRow.labelsKey, order: order)
         case .created: return KeyPathComparator(\IssueRow.createdKey, order: order)
         case .updated: return KeyPathComparator(\IssueRow.updatedKey, order: order)
@@ -511,6 +653,7 @@ struct IssueRow: Identifiable {
         case \IssueRow.blocks: .blocks
         case \IssueRow.blockedBy: .blockedBy
         case \IssueRow.pageRankKey: .pageRank
+        case \IssueRow.commitsKey: .commits
         case \IssueRow.labelsKey: .labels
         case \IssueRow.createdKey: .created
         case \IssueRow.updatedKey: .updated
@@ -519,7 +662,6 @@ struct IssueRow: Identifiable {
     }
 }
 
-/// Renders a Phase-2 value, or *why* there isn't one. Never shows a bare 0.
 /// One character saying how a bead differs from the last commit.
 ///
 /// `+` added, `*` modified. There is no `-`: a deleted bead has no row to draw
@@ -557,6 +699,39 @@ struct DirtyMarkCell: View {
     }
 }
 
+/// How many commits are attributed to a bead.
+///
+/// **Absent is not zero**, and the two must not look alike: a column that
+/// rendered nought for both would tell someone their work is uncorrelated when
+/// in fact nothing has been read yet.
+///
+/// So zero is spelled `0` here rather than taking the house em dash that
+/// `IssueRow.countLabel` gives a zero elsewhere. In this column the dash has to
+/// mean *unknown*, and one glyph cannot mean both. The tooltip says which kind
+/// of unknown it is — a walk still running, or a workspace with no repository
+/// to walk.
+struct CommitCountCell: View {
+    let count: Int?
+    /// Why there is no number, shown when there is none.
+    let reason: String
+
+    var body: some View {
+        if let count {
+            Text("\(count)")
+                .monospacedDigit()
+                // Zero is a real answer and a quiet one: the walk ran and
+                // attributed nothing to this bead.
+                .foregroundStyle(count > 0 ? .primary : .tertiary)
+                .help(count == 1 ? "1 commit" : "\(count) commits")
+        } else {
+            Text("—")
+                .foregroundStyle(.tertiary)
+                .help(reason)
+        }
+    }
+}
+
+/// Renders a Phase-2 value, or *why* there isn't one. Never shows a bare 0.
 struct MetricCell: View {
     let value: Double?
     let status: MetricStatusEntry?

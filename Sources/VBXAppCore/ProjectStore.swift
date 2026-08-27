@@ -64,20 +64,24 @@ public enum ViewSurface: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Whether the toolbar's Filter picker and Sort menu belong on this
-    /// surface.
+    /// Whether the toolbar's Sort menu belongs on this surface.
     ///
-    /// Both controls write to ``ProjectStore/query``, which is read in exactly
+    /// Named for one control because it now gates one. It gated the Filter
+    /// picker too until that was removed: the sidebar's Filters section shows
+    /// all four filters with counts, and the View menu carries them as
+    /// commands, so the toolbar copy was the third way to set one value.
+    ///
+    /// The control writes to ``ProjectStore/query``, which is read in exactly
     /// one place — `visibleIssues`. A surface that renders an engine payload of
-    /// its own never consults it, so the controls sit there answering nothing:
-    /// changing either one produces no visible effect at all. They are hidden
-    /// rather than disabled, because a disabled control still claims the view
-    /// has an ordering that happens to be unavailable, and these views have no
-    /// bead ordering to begin with.
+    /// its own never consults it, so the control sits there answering nothing:
+    /// changing it produces no visible effect at all. It is hidden rather than
+    /// disabled, because a disabled control still claims the view has an
+    /// ordering that happens to be unavailable, and these views have no bead
+    /// ordering to begin with.
     ///
     /// This is a question about the toolbar, not a claim about the data: it is
     /// deliberately not derived from whether the view reads `visibleIssues`, so
-    /// a surface can be left showing the controls while what it should do is
+    /// a surface can be left showing the control while what it should do is
     /// still being decided.
     ///
     /// ``history`` was the one such case, and the answer was to drop them. It
@@ -88,7 +92,7 @@ public enum ViewSurface: String, CaseIterable, Identifiable, Sendable {
     /// has asked for, and inventing one to justify a control already on screen
     /// is the wrong way round. If a real need appears it arrives as its own
     /// request, with its own idea of what filtering a history means.
-    public var showsFilterAndSort: Bool {
+    public var showsSort: Bool {
         switch self {
         case .list, .board, .graph, .tree: true
         case .insights, .plan, .labels, .flow, .attention, .alerts, .sprint, .history: false
@@ -225,6 +229,23 @@ public final class ProjectStore: ObservableObject {
     @Published public private(set) var hotspots: FileHotspots = .empty
     @Published public private(set) var feedback: CorrelationFeedbackReport = .empty
     @Published public private(set) var historyLoaded = false
+
+    /// Whether this store walks git of its own accord.
+    ///
+    /// True in the app: the report is wanted before anything asks for it. The
+    /// test suite turns it off for the stores whose subject is something else,
+    /// the same bargain ``skipPhase2`` strikes — dozens of stores opening at
+    /// once, each starting a git walk, is contention the harness pays for and
+    /// learns nothing from. The History view's own `loadHistory()` is not gated
+    /// by this, so a view that asks still gets an answer.
+    @Published public var loadsHistoryEagerly = true
+
+    /// The walk in flight, so opening another workspace can cancel it.
+    private var historyTask: Task<Void, Never>?
+
+    /// Bumped by every open. A walk carries the generation it started under and
+    /// publishes nothing if that is no longer the current one.
+    private var historyGeneration = 0
     @Published public private(set) var historyLoading = false
     /// Why history is unavailable — most often "not a git repository".
     @Published public private(set) var historyError: String?
@@ -333,7 +354,8 @@ public final class ProjectStore: ObservableObject {
             return searchResults.rankedIDs.compactMap { byID[$0] }
         }
         guard let recipeIDs else {
-            return query.apply(to: issues, actionable: actionable, metrics: metrics)
+            return query.apply(
+                to: issues, actionable: actionable, metrics: metrics, commits: commitCounts)
         }
         let byID = issuesByID
         let selected = recipeIDs.compactMap { byID[$0] }
@@ -644,6 +666,11 @@ public final class ProjectStore: ObservableObject {
         // workspace, so this is what says whether the filters below belong to
         // the workspace being left or the one being opened.
         let previousSource = info?.source
+        // Before anything else: a walk started for the previous workspace must
+        // not publish into this one, and cancelling is not enough on its own
+        // because it may already be past its last cancellation point.
+        historyGeneration &+= 1
+        historyTask?.cancel()
 
         do {
             let info = try await engine.open(path: path, skipPhase2: skipPhase2)
@@ -653,6 +680,12 @@ public final class ProjectStore: ObservableObject {
             // filters — or nothing at all.
             if info.source != previousSource {
                 resetWorkspaceFilters()
+                // The report describes a repository, and this is a different
+                // one. Left in place it would be the previous workspace's
+                // commits shown against these beads — and for a workspace with
+                // no repository at all, where no walk runs to overwrite it, it
+                // would simply stay.
+                resetHistory()
             }
             try await refreshAll()
             // Positions name beads, and the previous workspace's beads do not
@@ -662,6 +695,14 @@ public final class ProjectStore: ObservableObject {
             // load is not somewhere the user has been, and offering it again
             // in the menu would just reproduce the error.
             recents.record(path)
+            // A workspace with no repository does not offer History, and the
+            // user may have been on it when they opened this one. Left alone,
+            // `surface` would name a view nothing offers — hidden from every
+            // control and still rendered, which is a worse bug than the one
+            // hiding it fixes.
+            if !availableSurfaces.contains(surface) {
+                surface = .list
+            }
             // Loaded here rather than from the sidebar section that shows
             // them: that view renders before any workspace has, so its `.task`
             // ran while `isLoaded` was still false, returned early, and never
@@ -670,6 +711,10 @@ public final class ProjectStore: ObservableObject {
             await loadRecipes()
             startWatching()
             await refreshDirtyState()
+            // In the background: the report is wanted by more than the History
+            // view now, and waiting for git here would make every open wait for
+            // it.
+            startHistoryWalk(refresh: true)
             if !skipPhase2 { await computePhase2() }
         } catch {
             stopWatching()
@@ -735,6 +780,11 @@ public final class ProjectStore: ObservableObject {
             gitWatcher.start(watching: head) { [weak self] in
                 Task { @MainActor in
                     await self?.refreshDirtyState()
+                    // A commit changes which commits are attributed to which
+                    // beads, so the report describes a repository that no
+                    // longer exists. Re-walked rather than marked stale: the
+                    // whole point of this watch is that nothing has to ask.
+                    self?.startHistoryWalk(refresh: true)
                 }
             }
         }
@@ -747,16 +797,98 @@ public final class ProjectStore: ObservableObject {
         isWatching = false
     }
 
-    /// `<workspace>/.git/HEAD`, when the workspace is in a git repository.
+    /// The repository the workspace is in, or nil when it is in none.
+    ///
+    /// Walks up from the workspace rather than testing `<workspace>/.git`,
+    /// because a `.beads` directory in a *subdirectory* of a repository is in
+    /// that repository — and History works there. Testing one level would call
+    /// it "no repository" and hide a surface that would have worked, which is
+    /// the more annoying of the two possible mistakes.
+    ///
+    /// `.git` is accepted as a **file** as well as a directory: that is what it
+    /// is inside a git worktree or a submodule, where it holds a `gitdir:`
+    /// pointer. This repository's own discipline puts every session in a
+    /// worktree, so the file form is the common case here, not an exotic one.
+    ///
+    /// Synchronous and cheap — a handful of `stat` calls up a path that is
+    /// rarely deep. The alternative, asking the engine for revisions, is exact
+    /// but loaded lazily, so "no revisions yet" and "no repository" would be
+    /// the same answer until the load had run: absent read as zero, which is
+    /// the trap ADR-015 exists to avoid.
+    public var gitRepositoryRoot: String? {
+        guard let workspace = workspaceDirectory else { return nil }
+        var directory = URL(fileURLWithPath: workspace).standardizedFileURL
+        let manager = FileManager.default
+        while true {
+            let dot = directory.appendingPathComponent(".git")
+            if manager.fileExists(atPath: dot.path) { return directory.path }
+            let parent = directory.deletingLastPathComponent().standardizedFileURL
+            // `/` is its own parent; stopping on that is what ends the walk.
+            if parent.path == directory.path { return nil }
+            directory = parent
+        }
+    }
+
+    /// Whether this workspace has a repository behind it at all.
+    public var hasGitRepository: Bool { gitRepositoryRoot != nil }
+
+    /// The surfaces worth offering for this workspace.
+    ///
+    /// Read by everything that offers a surface — the toolbar picker, the
+    /// sidebar's Views section and the View menu — so the three cannot come
+    /// apart. A surface hidden in one place and present in another is worse
+    /// than one that is always offered.
+    ///
+    /// History correlates beads to commits, so without a repository it has
+    /// nothing to correlate and is left out. Nothing else is conditional yet;
+    /// time travel needs a repository too, and when its controls learn that
+    /// they should read this rather than deciding for themselves.
+    public var availableSurfaces: [ViewSurface] {
+        guard !hasGitRepository else { return ViewSurface.allCases }
+        return ViewSurface.allCases.filter { $0 != .history }
+    }
+
+    /// The `HEAD` to watch for this workspace, or nil when there is none.
     ///
     /// Watching the file rather than the directory: `FileWatchService` watches
-    /// a path's *parent*, so this ends up watching `.git`, which is what also
-    /// catches the index moving.
+    /// a path's *parent*, so this ends up watching the git directory, which is
+    /// what also catches the index moving.
+    ///
+    /// **Resolved through ``gitRepositoryRoot`` rather than by testing
+    /// `<workspace>/.git/HEAD`.** Two cases the old, one-level version missed,
+    /// and both of them matter now that more than the dirty marks depend on
+    /// this watch:
+    ///
+    /// - a workspace in a *subdirectory* of a repository, where `.git` is
+    ///   further up;
+    /// - a **git worktree**, where `.git` is a file holding a `gitdir:` pointer
+    ///   and `HEAD` lives at the far end of it. Every session in this project
+    ///   works in a worktree, so this was the case that silently did not work.
     public var gitHeadPath: String? {
-        guard let workspace = workspaceDirectory else { return nil }
-        let head = URL(fileURLWithPath: workspace)
-            .appendingPathComponent(".git")
-            .appendingPathComponent("HEAD")
+        guard let root = gitRepositoryRoot else { return nil }
+        let dot = URL(fileURLWithPath: root).appendingPathComponent(".git")
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dot.path, isDirectory: &isDirectory)
+        else { return nil }
+
+        let gitDirectory: URL
+        if isDirectory.boolValue {
+            gitDirectory = dot
+        } else {
+            // `gitdir: /path/to/repo/.git/worktrees/topic`, one line. Anything
+            // else is a `.git` file this does not understand, and guessing at
+            // it would install a watch on a path that does not exist.
+            guard let contents = try? String(contentsOf: dot, encoding: .utf8),
+                let line = contents.split(separator: "\n").first,
+                line.hasPrefix("gitdir:")
+            else { return nil }
+            let pointed = line.dropFirst("gitdir:".count)
+                .trimmingCharacters(in: .whitespaces)
+            gitDirectory = URL(fileURLWithPath: pointed)
+        }
+
+        let head = gitDirectory.appendingPathComponent("HEAD")
         return FileManager.default.fileExists(atPath: head.path) ? head.path : nil
     }
 
@@ -974,6 +1106,42 @@ public final class ProjectStore: ObservableObject {
         return nil
     }
 
+    /// Why these beads cannot be edited, or nil when they can.
+    ///
+    /// The whole-app reasons first — no `br`, or time travel — because they
+    /// apply whatever is selected. Then the per-bead one: a closed bead is a
+    /// record of what happened (see ``Issue/Status/isImmutable``).
+    ///
+    /// **A mixed selection refuses outright** rather than applying to the open
+    /// beads and skipping the closed ones. Partial success is the kind of thing
+    /// noticed a week later, when the beads that did not change look like beads
+    /// nobody got to; refusing is one rule to hold in your head, and the
+    /// selection is the user's to narrow. The reason says how many stood in the
+    /// way, so the refusal is never mysterious.
+    ///
+    /// Ids that are not in the workspace are ignored rather than treated as
+    /// immutable: a stale selection is a reason to write nothing for that id,
+    /// not to refuse the ones that are real.
+    public func editingUnavailableReason(for ids: Set<Issue.ID>) -> String? {
+        if let global = editingUnavailableReason { return global }
+        let byID = issuesByID
+        let immutable = ids.filter { byID[$0]?.status.isImmutable == true }
+        guard !immutable.isEmpty else { return nil }
+        let present = ids.filter { byID[$0] != nil }
+        if immutable.count == present.count {
+            return immutable.count == 1
+                ? "A closed bead is a record of what happened. Reopen it to edit."
+                : "All \(immutable.count) selected beads are closed. Reopen them to edit."
+        }
+        return "\(immutable.count) of \(present.count) selected beads are closed. "
+            + "Reopen them, or narrow the selection."
+    }
+
+    /// Whether these beads can be edited at all.
+    public func canEdit(_ ids: Set<Issue.ID>) -> Bool {
+        editingUnavailableReason(for: ids) == nil
+    }
+
     // MARK: - Uncommitted beads
 
     /// Which beads differ from the last commit.
@@ -1043,6 +1211,14 @@ public final class ProjectStore: ObservableObject {
     @discardableResult
     public func setPriority(_ priority: Int, for ids: Set<Issue.ID>) async -> Set<Issue.ID> {
         guard canEditBeads, let workspace = workspaceDirectory else { return ids }
+        // Refused here as well as hidden in the UI. The affordance is gated on
+        // the same rule, so reaching this with a closed bead means the view was
+        // stale — and a stale view must not be able to rewrite a record.
+        if let reason = editingUnavailableReason(for: ids) {
+            loadError = reason
+            return ids
+        }
+
         var failed: Set<Issue.ID> = []
         var lastError: String?
         for id in ids.sorted() {
@@ -1062,6 +1238,56 @@ public final class ProjectStore: ObservableObject {
         return failed
     }
 
+    /// Adds or removes a label across a selection, through `br`.
+    ///
+    /// One `br` invocation for the whole selection rather than one per bead:
+    /// `br label add` accepts several issues, so there is no half-applied
+    /// state to report. Returns whether it wrote.
+    ///
+    /// Gated by the same rule as every other edit
+    /// (``editingUnavailableReason(for:)``), so a closed bead refuses here as
+    /// it does for title and priority — ADR-017.
+    @discardableResult
+    public func setLabel(
+        _ label: String, on ids: Set<Issue.ID>, present: Bool
+    ) async -> Bool {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canEditBeads, let workspace = workspaceDirectory else { return false }
+        guard !trimmed.isEmpty, !ids.isEmpty else { return false }
+        if let reason = editingUnavailableReason(for: ids) {
+            loadError = reason
+            return false
+        }
+        do {
+            if present {
+                try await writer.addLabel(trimmed, to: Array(ids), in: workspace)
+            } else {
+                try await writer.removeLabel(trimmed, from: Array(ids), in: workspace)
+            }
+            await reload(force: true)
+            return true
+        } catch {
+            loadError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// How much of `ids` already carries `label`.
+    ///
+    /// Three answers, not two: across a selection a label may be on some beads
+    /// and not others, and a checkmark that rounded that to on or off would
+    /// misreport what a click is about to do.
+    public func labelPresence(_ label: String, on ids: Set<Issue.ID>) -> LabelPresence {
+        let byID = issuesByID
+        let present = ids.filter { byID[$0]?.labels.contains(label) == true }
+        if present.isEmpty { return .none }
+        return present.count == ids.count ? .all : .some
+    }
+
+    public enum LabelPresence: Sendable, Equatable {
+        case none, some, all
+    }
+
     /// Renames a bead, through `br`.
     ///
     /// An unchanged or empty title is refused rather than written. Empty
@@ -1072,6 +1298,12 @@ public final class ProjectStore: ObservableObject {
     public func setTitle(_ title: String, for id: Issue.ID) async -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canEditBeads, let workspace = workspaceDirectory else { return false }
+        // As above: the field editor does not open on a closed bead, so getting
+        // here with one means the view was stale.
+        if let reason = editingUnavailableReason(for: [id]) {
+            loadError = reason
+            return false
+        }
         guard !trimmed.isEmpty else { return false }
         guard trimmed != issues.first(where: { $0.id == id })?.title else { return false }
         do {
@@ -1229,11 +1461,89 @@ public final class ProjectStore: ObservableObject {
 
     // MARK: - Correlation
 
+    /// How many commits the engine attributed to each bead, or nil when that
+    /// is not known yet.
+    ///
+    /// **Nil is not empty.** A workspace whose walk has not finished, and one
+    /// with no repository at all, have no counts — which is a different fact
+    /// from a bead the walk found no commits for. Anything rendering this has
+    /// to keep them apart, or it tells the user their work is uncorrelated when
+    /// nothing has been read.
+    ///
+    /// `.count` of what the engine attributed, and nothing more: which commits
+    /// belong to a bead is the engine's judgement — explicit reference,
+    /// co-commit pattern, file overlap, temporal proximity — and re-deriving
+    /// any part of that here is the drift ADR-001 exists to prevent.
+    public var commitCounts: [String: Int]? {
+        guard historyLoaded else { return nil }
+        return history.histories.mapValues { $0.commits.count }
+    }
+
+    /// The commit count for one bead, or nil when the report is not loaded.
+    ///
+    /// A bead the report has no entry for is zero, not nil: the walk ran and
+    /// attributed nothing to it.
+    public func commitCount(for id: Issue.ID) -> Int? {
+        guard historyLoaded else { return nil }
+        return history.histories[id]?.commits.count ?? 0
+    }
+
+    /// Forgets the correlation report and everything read alongside it.
+    ///
+    /// Called when the workspace changes, for the same reason the filters and
+    /// the navigation history are: all of it describes the workspace being
+    /// left. Cancelling the walk is not enough on its own — a workspace with no
+    /// repository starts no walk, so there would be nothing to overwrite what
+    /// the previous one published.
+    private func resetHistory() {
+        history = .empty
+        orphans = .empty
+        hotspots = .empty
+        feedback = .empty
+        historyLoaded = false
+        historyError = nil
+    }
+
+    /// Starts the correlation walk in the background, for the workspace that
+    /// is open now.
+    ///
+    /// Called on open and whenever `HEAD` moves, so the report is there before
+    /// anything asks for it and does not describe a repository that has since
+    /// moved on. **Off the critical path**: the walk is the expensive thing
+    /// this app does, and an open that waited for it would be an open that
+    /// waits for git.
+    ///
+    /// A workspace with no repository is left alone — not loaded, and **not an
+    /// error**. There is nothing to walk, which is a normal state; recording a
+    /// failure would make it look like something went wrong.
+    func startHistoryWalk(refresh: Bool = false) {
+        historyTask?.cancel()
+        guard isLoaded, hasGitRepository, loadsHistoryEagerly else {
+            historyTask = nil
+            return
+        }
+        let generation = historyGeneration
+        historyTask = Task { @MainActor [weak self] in
+            await self?.loadHistory(refresh: refresh, generation: generation)
+        }
+    }
+
     /// Loads the git correlation report, once.
     ///
     /// Idempotent, so a view can call it from `.task` on every appearance
     /// without paying for a second walk. Pass `refresh` to force one.
     public func loadHistory(refresh: Bool = false) async {
+        await loadHistory(refresh: refresh, generation: historyGeneration)
+    }
+
+    /// The walk itself, tagged with the generation that asked for it.
+    ///
+    /// **Nothing is published if the workspace changed while git was being
+    /// read.** The engine is re-opened by `open(path:)`, so a walk in flight
+    /// returns whatever the engine holds *now* — without this guard, opening a
+    /// second workspace during the first one's walk publishes a report into a
+    /// store that has moved on, and the user sees another project's commits.
+    private func loadHistory(refresh: Bool, generation: Int) async {
         guard isLoaded, !historyLoading else { return }
         guard refresh || !historyLoaded else { return }
 
@@ -1242,12 +1552,15 @@ public final class ProjectStore: ObservableObject {
         defer { historyLoading = false }
 
         do {
-            history = try await engine.history(refresh: refresh)
+            let report = try await engine.history(refresh: refresh)
+            guard generation == historyGeneration else { return }
+            history = report
             // These read the same cached report, so they are cheap once the
             // walk is done.
             orphans = (try? await engine.orphanCommits()) ?? .empty
             hotspots = (try? await engine.fileHotspots()) ?? .empty
             feedback = (try? await engine.correlationFeedback()) ?? .empty
+            guard generation == historyGeneration else { return }
             historyLoaded = true
         } catch {
             // A workspace outside a git repository is a normal state, not a

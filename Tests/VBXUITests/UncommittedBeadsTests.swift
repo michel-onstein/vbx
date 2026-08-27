@@ -194,6 +194,7 @@ struct UncommittedBeadsTests {
                 commitText: { _, _, _ in },
                 valueMenu: { _, _ in nil },
                 rowMenu: { _ in nil },
+                editRefusal: { _ in nil },
                 uncommittedReason: { id in
                     marked.contains(id) ? BeadDirtyState.Mark.changed.reason : nil
                 })
@@ -249,18 +250,37 @@ struct UncommittedBeadsTests {
         let row = try #require(
             store.visibleIssues.firstIndex { $0.id == target.id }, "the bead left the list")
 
-        // Ink coverage scoped to the one cell: the pane's own text clears any
-        // whole-image threshold on its own.
-        let cell = host.convert(table.frameOfCell(atColumn: column, row: row), from: table)
-        let marked = try ViewCapture.image(of: host).inkCoverage(in: cell)
+        // Ink coverage scoped to the gutter — *and to the overhang beside it*,
+        // which is where the glyph actually is.
+        //
+        // This measured the cell alone and read 0 for every row, marked or not,
+        // because the mark had been given a negative trailing inset to sit in
+        // the spacing before the id. That put it outside the very rect this
+        // asks about. The test went red on `main` and stayed red: it looked
+        // like the gutter drawing nothing, when the gutter was drawing exactly
+        // where it had been told to.
+        //
+        // Taken from the spec rather than written as a number, so moving the
+        // mark again moves the measurement with it.
+        let spec = try #require(
+            IssueListView.specs.first { $0.id == IssueListView.dirtyMarkID })
+        let overhang = max(0, -spec.contentTrailingInset)
+        func gutterRect(row: Int) -> CGRect {
+            let cell = table.frameOfCell(atColumn: column, row: row)
+            return host.convert(
+                CGRect(x: cell.minX, y: cell.minY,
+                       width: cell.width + overhang, height: cell.height),
+                from: table)
+        }
+
+        let marked = try ViewCapture.image(of: host).inkCoverage(in: gutterRect(row: row))
 
         // A clean row in the same table is the control, so this cannot pass on
         // a gutter that draws something for every bead.
         let cleanRow = try #require(
             store.visibleIssues.firstIndex { store.dirtyBeads.mark(for: $0.id) == nil },
             "every bead is marked; nothing to compare against")
-        let cleanCell = host.convert(table.frameOfCell(atColumn: column, row: cleanRow), from: table)
-        let clean = try ViewCapture.image(of: host).inkCoverage(in: cleanCell)
+        let clean = try ViewCapture.image(of: host).inkCoverage(in: gutterRect(row: cleanRow))
 
         #expect(marked > clean, "the marked bead's gutter is no darker than a clean one")
     }
@@ -304,9 +324,14 @@ struct UncommittedBeadsTests {
     func markSitsBesideTheID() async throws {
         // Halving the column moved the glyph 10pt and no further, because what
         // actually separates it from the id is the table's own
-        // `intercellSpacing` — 17pt on an inset-style table, between every pair
-        // of columns and therefore not narrowable for one of them. The mark
-        // overhangs into that gap instead.
+        // `intercellSpacing` — 17pt, between every pair of columns and
+        // therefore not narrowable for one of them. The mark overhangs into
+        // that gap instead.
+        //
+        // Measured under every row style rather than assumed of one: the 17pt
+        // is the same for `.inset`, `.plain` and `.fullWidth`. The style moves
+        // only where the row begins, which is why switching it left this
+        // measurement alone.
         //
         // Two halves, and the second is why the overhang is safe: it draws over
         // spacing that belongs to no column, and it must not be long enough to

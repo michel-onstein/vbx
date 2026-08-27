@@ -53,6 +53,38 @@ cd "$ROOT"
 say() { echo "$@"; }
 fail() { echo "error: $*" >&2; exit 1; }
 
+# ---------------------------------------------------------------------------
+# A tag this run created, removed again if the release does not finish
+# ---------------------------------------------------------------------------
+#
+# The tag has to exist before the build: the version is read out of git, so
+# there is nothing to build until it does. That leaves a window of several
+# minutes — the universal build, then Apple's notary queue — in which a
+# failure, or a Ctrl-C, aborts with the tag already in place.
+#
+# Left behind, it spends the version. The next attempt is refused with "already
+# exists; a published version is never re-cut", which is the right rule and the
+# wrong answer: nothing was ever published under it. Worse, a local tag is
+# invisible until someone pushes tags, so the version is spent silently.
+#
+# Only a tag *this run* created is removed, and only while the release is
+# unfinished. A tag that was already there is somebody's release.
+CREATED_TAG=""
+RELEASE_COMPLETE=0
+remove_unfinished_tag() {
+  local status=$?
+  if [[ -n "$CREATED_TAG" && $RELEASE_COMPLETE -eq 0 ]]; then
+    git tag -d "$CREATED_TAG" >/dev/null 2>&1 &&
+      echo "==> Removed $CREATED_TAG: the release did not finish" >&2
+  fi
+  return $status
+}
+trap remove_unfinished_tag EXIT
+# Without these, an interrupt kills the shell without running the EXIT trap —
+# and the minutes spent waiting on the notary is exactly when one arrives.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # Derived from the remote so a fork does not publish a cask pointing at this
 # repository's releases.
 cask_repo() {
@@ -175,6 +207,9 @@ if [[ -n "$TAG" ]]; then
   fi
   say "==> Tagging $TAG"
   run git tag -a "$TAG" -m "vbx $TAG"
+  # A dry run printed the command rather than running it, so there is nothing
+  # to take back.
+  [[ $DRY_RUN -eq 1 ]] || CREATED_TAG="$TAG"
 fi
 
 # In a dry run the tag was not actually created, so the check below would fail
@@ -243,6 +278,11 @@ if command -v brew >/dev/null 2>&1 && [[ $DRY_RUN -eq 0 ]]; then
   say "==> brew style"
   brew style "$CASK" || fail "the rendered cask fails brew style"
 fi
+
+# From here the tag stands: the artefact exists, it is stapled, and the cask
+# that points at it has been rendered from the same version. What follows is
+# publishing and instructions, and neither is a reason to take the tag back.
+RELEASE_COMPLETE=1
 
 say ""
 say "==> Cask written to ${CASK#"$ROOT"/}"

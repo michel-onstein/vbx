@@ -21,6 +21,7 @@ No certificates are needed: every packaging path is exercised through
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import pathlib
@@ -41,6 +42,7 @@ CASK_TEMPLATE = ROOT / "packaging" / "homebrew" / "vbx.rb.template"
 SIGNING_SETUP = ROOT / "scripts" / "signing-setup.sh"
 BUMP = ROOT / "scripts" / "version-bump.sh"
 DOCS_BUILD = ROOT / "scripts" / "build-docs.py"
+BEADS_CHECK = ROOT / "scripts" / "beads-check.py"
 NOTES = ROOT / "scripts" / "release-notes.py"
 
 # Fabricated, and deliberately distinctive: a substring that appears nowhere
@@ -786,12 +788,130 @@ def test_release_instructions_are_runnable() -> None:
     result = subprocess.run([str(RELEASE), "--tag", "nonsense"], capture_output=True, text=True)
     check("so is a tag that is not a version at all", result.returncode == 1)
 
-    # With a well-formed tag it must still refuse here — either the tree is
-    # dirty or signing is unconfigured. What matters is that it stops before
-    # building, so neither outcome can be mistaken for a release.
-    result = subprocess.run([str(RELEASE), "--tag", "99.0.0"], capture_output=True, text=True)
+    # With a well-formed tag it must stop in preflight rather than build.
+    #
+    # Pointed at a signing config that does not exist, the same way every
+    # package-app.sh test here is, so what makes it refuse is a fact about the
+    # run and not about the machine. Without that this check *assumed* the
+    # environment would refuse — and on a machine with signing configured and a
+    # clean tree, it did not: it cut a real release. A universal build, a
+    # Developer ID signature, a notarization submission to Apple, a stapled
+    # vbx-99.0.0.dmg, and a 99.0.0 tag left in the repository, every time
+    # somebody ran the verify block. The tag then rendered into docs/RELEASES.md
+    # and failed the notes check two checks later, which is how it was noticed.
+    result = subprocess.run(
+        [str(RELEASE), "--tag", "99.0.0"], capture_output=True, text=True,
+        env={**os.environ, "VBX_SIGNING_CONFIG": "/nonexistent/signing.env"})
     check("a release is refused before building when preflight fails",
-          result.returncode != 0 and "Building" not in result.stdout)
+          result.returncode != 0 and "Building" not in result.stdout,
+          result.stdout.strip()[-160:])
+    # The assertion that would have caught it: a refused release leaves nothing
+    # behind. A tag is cheap to create and expensive to notice.
+    tags = subprocess.run(["git", "tag", "-l", "99.0.0"], cwd=ROOT,
+                          capture_output=True, text=True).stdout.strip()
+    check("...and leaves no tag behind", tags == "", f"created {tags}")
+
+
+def release_repo(directory: Path) -> None:
+    """A throwaway repo where the real release.sh runs against stub neighbours.
+
+    The interesting window in release.sh cannot be reached on the live
+    repository without cutting a release: the tag has to exist before the build,
+    so proving that a failed build takes the tag back means letting a build
+    fail. Here the build is a stub that exits 1, the signing check is a stub
+    that passes, and nothing is compiled, signed or submitted.
+
+    The script under test is the real one — this stubs its neighbours, not its
+    control flow, which is where the tag is created and taken back.
+    """
+    scripts = directory / "scripts"
+    scripts.mkdir(parents=True)
+    target = scripts / RELEASE.name
+    target.write_bytes(RELEASE.read_bytes())
+    target.chmod(0o755)
+
+    template = directory / "packaging" / "homebrew" / CASK_TEMPLATE.name
+    template.parent.mkdir(parents=True)
+    template.write_bytes(CASK_TEMPLATE.read_bytes())
+
+    stubs = {
+        # Preflight's signing check, passing: what is being tested is what
+        # happens after the tag, and an unconfigured machine never gets there.
+        "package-app.sh": "#!/usr/bin/env bash\necho 'CONFIG OK'\n",
+        # The version is whatever tag HEAD carries, which is how the real one
+        # behaves once release.sh has tagged.
+        "version.sh": (
+            "#!/usr/bin/env bash\n"
+            "[[ \"${1-}\" == --check ]] && exit 0\n"
+            "git describe --tags --exact-match HEAD 2>/dev/null || echo 0.0.0\n"
+        ),
+        # A build that fails — a compile error, a notarization that never came
+        # back, a Ctrl-C. All of them abort with the tag already created.
+        "build-app.sh": "#!/usr/bin/env bash\necho 'boom' >&2\nexit 1\n",
+    }
+    for name, body in stubs.items():
+        stub = scripts / name
+        stub.write_text(body)
+        stub.chmod(0o755)
+
+    env = {**os.environ, **GIT_ENV}
+    subprocess.run(["git", "init", "-q"], cwd=directory, check=True,
+                   capture_output=True, env=env)
+    (directory / "README.md").write_text("A scratch repository.\n")
+    subprocess.run(["git", "add", "."], cwd=directory, check=True,
+                   capture_output=True, env=env)
+    subprocess.run(["git", "commit", "-qm", "Everything"], cwd=directory, check=True,
+                   capture_output=True, env=env)
+
+
+def tags_in(directory: Path) -> list[str]:
+    out = subprocess.run(["git", "tag"], cwd=directory, capture_output=True, text=True)
+    return out.stdout.split()
+
+
+def test_a_failed_release_takes_its_tag_back() -> None:
+    """A release that does not finish must not spend the version.
+
+    The tag cannot be created any later than it is — the version is read out of
+    git, so there is nothing to build until it exists — and everything expensive
+    happens after it: a universal build, then minutes in Apple's notary queue.
+    A failure there used to leave the tag, and the next attempt was refused with
+    "already exists; a published version is never re-cut" for a version nothing
+    was ever published under.
+    """
+    print("\nA release that does not finish")
+    with tempfile.TemporaryDirectory() as raw:
+        repo = Path(raw) / "failing"
+        release_repo(repo)
+
+        result = subprocess.run(
+            [str(repo / "scripts" / "release.sh"), "--tag", "9.9.9"],
+            cwd=repo, capture_output=True, text=True, env={**os.environ, **GIT_ENV})
+        check("a failed build fails the release", result.returncode != 0)
+        check("...and the tag it created is taken back", tags_in(repo) == [],
+              f"left {tags_in(repo)}")
+        # Silence here would read as "nothing happened", and something did:
+        # the tag existed for the length of the build.
+        check("...and it says the tag was removed", "Removed 9.9.9" in result.stderr,
+              result.stderr.strip()[-160:])
+
+        # The dangerous direction. A tag that was already there is somebody's
+        # release, and preflight refusing this one is not a licence to delete it.
+        subprocess.run(["git", "tag", "-a", "1.0.0", "-m", "vbx 1.0.0"], cwd=repo,
+                       check=True, capture_output=True, env={**os.environ, **GIT_ENV})
+        result = subprocess.run(
+            [str(repo / "scripts" / "release.sh"), "--tag", "1.0.0"],
+            cwd=repo, capture_output=True, text=True, env={**os.environ, **GIT_ENV})
+        check("a tag that already exists is refused", result.returncode != 0)
+        check("...and a tag this run did not create survives", "1.0.0" in tags_in(repo))
+
+        # A dry run creates no tag, so it has none to take back and must not
+        # report one — the message is what tells a reader the difference.
+        result = subprocess.run(
+            [str(repo / "scripts" / "release.sh"), "--dry-run", "--tag", "2.0.0"],
+            cwd=repo, capture_output=True, text=True, env={**os.environ, **GIT_ENV})
+        check("a dry run creates no tag", "2.0.0" not in tags_in(repo))
+        check("...and reports removing nothing", "Removed 2.0.0" not in result.stderr)
 
 
 GIT_ENV = {
@@ -914,6 +1034,52 @@ def test_version_bump() -> None:
         run_bump(empty)
         result = run_bump(empty, "--dry-run")
         check("a run with nothing new is a no-op", "nothing to bump" in result.stdout)
+
+
+def test_beads_source_repo_check() -> None:
+    """Every bead should say it came from this repository.
+
+    `br` stamps `source_repo` with the basename of the directory it runs in, and
+    this repo's discipline is that every session works in a worktree — so the
+    two rules fight, and 30 of 54 records named a throwaway topic directory that
+    no longer exists. There is no way to set the value correctly at creation
+    time (`br create` has no flag, `.beads/config.yaml` has no key), so a
+    failing check is what replaces a rule nobody can be relied on to remember.
+    """
+    print("\nBeads source_repo")
+    result = subprocess.run(
+        [sys.executable, str(BEADS_CHECK)], cwd=ROOT, capture_output=True, text=True)
+    check("every bead is stamped with this repo", result.returncode == 0,
+          (result.stdout + result.stderr).strip())
+
+    # The canonical value comes from git, not a constant, so it is right from a
+    # worktree too — which is where nearly every bead is now created.
+    source = BEADS_CHECK.read_text()
+    check("the canonical name comes from git", "--git-common-dir" in source)
+    check("...not from a hard-coded name", '"vbx"' not in source)
+
+    # And it can fail: a check that cannot is worse than none.
+    with tempfile.TemporaryDirectory() as raw:
+        scratch = Path(raw) / "repo"
+        (scratch / ".beads").mkdir(parents=True)
+        (scratch / "scripts").mkdir()
+        target = scratch / "scripts" / BEADS_CHECK.name
+        target.write_bytes(BEADS_CHECK.read_bytes())
+        target.chmod(0o755)
+        subprocess.run(["git", "init", "-q"], cwd=scratch, check=True,
+                       capture_output=True, env={**os.environ, **GIT_ENV})
+        (scratch / ".beads" / "issues.jsonl").write_text(
+            json.dumps({
+                "id": "scr-1", "title": "from a worktree",
+                "source_repo": "some-topic-branch",
+                "source_repo_path": "/gone/some-topic-branch",
+            }) + "\n")
+        drifted = subprocess.run(
+            [sys.executable, str(target)], cwd=scratch, capture_output=True, text=True)
+        check("a foreign stamp is caught", drifted.returncode == 1,
+              (drifted.stdout + drifted.stderr).strip())
+        check("...and the offending repo is named",
+              "some-topic-branch" in drifted.stderr, drifted.stderr.strip())
 
 
 def test_docs_html_check() -> None:
@@ -1541,6 +1707,7 @@ def main() -> int:
     test_version_bump()
     test_beads_only_does_not_release()
     test_docs_html_check()
+    test_beads_source_repo_check()
     test_bump_regenerates_the_html()
     test_no_v_prefix()
     test_release_notes()
@@ -1551,6 +1718,7 @@ def main() -> int:
     test_notarization_accepts_an_api_key()
     test_signing_setup_script()
     test_release_instructions_are_runnable()
+    test_a_failed_release_takes_its_tag_back()
     test_signing_setup_portal_route()
     test_check_does_not_fail_closed_on_its_own_bugs()
     test_config_is_found_from_a_worktree()

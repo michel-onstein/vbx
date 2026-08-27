@@ -4,6 +4,69 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-08-24 — Every row started 16pt in, and a test measured where the mark used to be
+
+Two findings, one measurement session. The first was reported; the second was
+sitting red on `main` and nobody had noticed.
+
+### The row started too far in
+
+**Symptom:** reported from a real build — the gap between the uncommitted mark
+and the ID column was right, and the gap between the mark and the left edge of
+the table was too big.
+
+**Cause:** those cannot both be fixed by moving the mark. Moving it left reopens
+the gap it had just closed. What was too wide was the table's own leading
+margin, and that is set by `NSTableView.style`. Measured on the real table, as
+the first cell's `minX`:
+
+```
+.inset      16pt        .plain       8pt        .fullWidth   6pt
+```
+
+It was `.inset`.
+
+**Fix:** `.fullWidth`, which suits a table that fills its window rather than one
+in a sidebar, and starts the row 6pt in. The style moves *only* that margin —
+`intercellSpacing` measures 17pt under all three, so every gap between columns
+is unchanged, and the mark still stops 4pt short of the id exactly as it did.
+
+**A claim that was wrong, and is now corrected in place:** two comments said the
+17pt spacing was "because an inset-style table" put it there. It is not the
+style's doing — 17pt under `.inset`, `.plain` and `.fullWidth` alike. The
+comments said so confidently enough that the next person would have believed
+them while changing the style.
+
+**Prevention:** `The row starts near the table's leading edge` asserts the first
+cell's `minX` is 8 or less, and that the gap before the id still equals the
+table's own `intercellSpacing` — so the margin cannot be bought out of the
+spacing beside it. Confirmed to fail at exactly 16.0pt under `.inset`. It
+asserts the outcome rather than the enum: a future style with a small inset
+would be just as correct.
+
+### And the test that had gone red
+
+**Symptom:** `The gutter draws a mark in the real table after a real write`
+failed on a **pristine checkout of `main`**, in 1.4s, reporting
+`(marked → 0.0) > (clean → 0.0)` — no ink in the gutter for any row, marked or
+clean.
+
+**Cause:** not flakiness, and not the style change — it fails identically under
+`.inset`. The mark had been given a negative trailing inset so it could sit in
+the spacing before the id, which put it **outside the gutter cell**. The test
+measures ink inside that cell, so it measures the one place the glyph was
+deliberately told not to be. Its sibling, `The mark sits next to the ID`, was
+written for the overhang and measures zones relative to the id cell, so it kept
+passing — which is why a red suite looked like one flaky test rather than a
+stale assertion.
+
+**Fix:** the measured rect is the cell **plus the overhang**, taken from
+`contentTrailingInset` rather than written as a number, so moving the mark again
+moves the measurement with it. The clean-row control is measured the same way
+and still discriminates.
+
+---
+
 ## 2026-08-23 — A development certificate signed a release, and every check passed it
 
 **Symptom:** the first release ever cut got as far as Apple and no further. The
@@ -1095,3 +1158,98 @@ assuming it worked is how this went unnoticed for so long:
   *every* object to report the expected `minos`. Checking only the first would
   have passed while the rest were wrong — the archive holds objects from two
   different tools, and a flag reaching one need not reach the others.
+
+---
+
+## 2026-08-24 — The recipe editor opened empty and filled in twenty seconds later
+
+**Symptom:** clicking **New recipe…** in the sidebar opened a dialog with
+nothing in it. The form appeared about twenty seconds later. Against the demo
+fixture it never appeared at all.
+
+**Cause:** the sheet was driven by a flag beside the value it edits —
+`editing` plus `isEditorPresented`, both written by the button — and read back
+with `sheet(isPresented:) { if let editing { … } }`. SwiftUI builds the sheet's
+content from the view as it stood *before* that write landed, so `editing` was
+still nil and the sheet's body was `EmptyView`. The window opened at 100×80 with
+nothing in it and stayed that way until some unrelated change re-ran the
+sidebar's body — a file-watch tick, a metric arriving. Twenty seconds is how
+long that took in a live workspace; in one nothing else is touching, forever.
+
+Not a slow layout, which is where the timing pointed. The editor lays out in
+0.04 s, measured. The delay was entirely the wait for a redraw nothing had asked
+for.
+
+**Fix:** `sheet(item: $editing)`. One piece of state, and the content is handed
+the value that triggered the presentation, so there is nothing left to be stale.
+`HistoryView`'s patch sheet had the same shape — `patch` fetched, then
+`showingPatch` set — and is now `sheet(item: $patch)`; `CommitPatch` became
+`Identifiable` by `sha:path` to carry it.
+
+**Prevention:** `RecipeEditorPresentationTests` hosts the real sidebar section
+in an on-screen window, clicks the row through the list's own row views, and
+asserts the attached sheet's *size*. The editor asks for 520×620; the broken
+version opens at 100×80, which is what an empty body asks for. A test that only
+asserted a sheet appeared would have passed throughout — the sheet was never the
+missing part.
+
+**The general rule:** a sheet that shows a value takes that value as its item. A
+flag beside the value presents a window built before the value arrived.
+
+---
+
+## 2026-08-26 — The packaging test cut a real release
+
+**Symptom:** `python3 scripts/test-packaging.py` reported `docs/RELEASES.md is
+out of date` — a check about a file nobody had edited. Regenerating it added a
+release called **99.0.0**.
+
+**Cause:** the run had cut one. `test_release_instructions_are_runnable` ended
+with
+
+```python
+# With a well-formed tag it must still refuse here — either the tree is
+# dirty or signing is unconfigured.
+result = subprocess.run([str(RELEASE), "--tag", "99.0.0"], ...)
+check("a release is refused before building when preflight fails", ...)
+```
+
+That comment is an assumption about the machine, not about the script. On a
+machine with signing configured and a clean tree — which is what a checkout
+looks like right after committing, and exactly when the verify block gets run —
+neither condition holds and `release.sh` does what it was asked to: an annotated
+`99.0.0` tag, a universal Developer ID build, a **notarization submission to
+Apple**, a stapled `vbx-99.0.0.dmg` and a rendered cask. The tag then rendered
+into `docs/RELEASES.md`, and the notes check two checks later reported it. The
+failure was a downstream symptom of the test having released.
+
+A second defect underneath: `release.sh` left the tag behind. The tag has to
+exist before the build — the version is read out of git — so every failure after
+that point aborts with the tag in place. Left there it spends the version: the
+next attempt is refused with "already exists; a published version is never
+re-cut" for a version nothing was ever published under, and being a local tag it
+is invisible until someone pushes tags.
+
+**Fix:** two, because either alone leaves a hole.
+
+- The check now runs with `VBX_SIGNING_CONFIG=/nonexistent/signing.env`, the
+  same way every `package-app.sh` test in the file already did. What makes it
+  refuse is now a fact about the run rather than about the machine.
+- `release.sh` removes a tag *it* created when the release does not finish,
+  including on `INT`/`TERM` — an interrupt during the notary wait is the likely
+  way to hit this. A tag that was already there is somebody's release and is
+  never touched.
+
+**Prevention:** the refusal check now also asserts that no `99.0.0` tag exists
+afterwards — a release that is refused leaves nothing behind, which is the
+assertion that would have caught this on the first run. The take-back is tested
+in a throwaway repo where the real `release.sh` runs against stub neighbours: a
+signing check that passes, a version script, and a build that exits 1. That is
+the only way to reach the window without cutting a release, since the tag
+legitimately precedes the build. Both directions are covered — the tag it
+created is gone, and a tag it did not create survives.
+
+**The part worth remembering:** a test that asserts something is *refused* has
+to make the refusal happen. Relying on the environment to refuse means the test
+passes for the wrong reason on one machine and performs the operation on
+another — and the more configured the machine, the more the test does.

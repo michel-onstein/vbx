@@ -20,6 +20,31 @@ public enum IssueStatus: RawRepresentable, Codable, Sendable, Hashable {
     case tombstone
     case unknown(String)
 
+    /// Whether a bead in this status is a record of what happened rather than
+    /// work in progress.
+    ///
+    /// **Editing one rewrites history instead of tracking it**, so vbx does not
+    /// offer the edit. The rule is a function of status and nothing else: the
+    /// escape hatch for a bead closed by mistake is to reopen it, after which
+    /// it is editable again because it is no longer closed. Nothing extra is
+    /// stored, and no separate lock can fall out of step with the status.
+    ///
+    /// A tombstone is here for the same reason and more so — it is the marker
+    /// left by a delete, and the record it stands for is gone.
+    ///
+    /// **`br` does not enforce this** (checked against a scratch workspace:
+    /// `br update` retitles and re-prioritises a closed issue and exits 0), so
+    /// this is vbx's own rule. Gating the UI therefore does not make a closed
+    /// bead immutable everywhere — a terminal `br update` still rewrites one.
+    /// Said out loud rather than implied, because a rule enforced in one
+    /// surface only is a rule people will be surprised by in another.
+    public var isImmutable: Bool {
+        switch self {
+        case .closed, .tombstone: true
+        default: false
+        }
+    }
+
     public init(rawValue: String) {
         switch rawValue {
         case "open": self = .open

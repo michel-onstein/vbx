@@ -7,6 +7,72 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.1.20 — 2026-08-27
+
+### Fixes
+
+- Show how many commits are attributed to each bead ([#75](https://github.com/michel-onstein/vbx/pull/75))
+
+## 0.1.19 — 2026-08-27
+
+### Fixes
+
+- Walk git on open, and keep the correlation report current ([#74](https://github.com/michel-onstein/vbx/pull/74))
+
+## 0.1.18 — 2026-08-26
+
+### Fixes
+
+- Track loading git correlation eagerly, and a commit-count column ([#71](https://github.com/michel-onstein/vbx/pull/71))
+
+## 0.1.17 — 2026-08-26
+
+### Fixes
+
+- Stop the packaging test from cutting a real release ([#72](https://github.com/michel-onstein/vbx/pull/72))
+
+## 0.1.16 — 2026-08-26
+
+### Fixes
+
+- Open the recipe editor with its form already in it ([#70](https://github.com/michel-onstein/vbx/pull/70))
+
+## 0.1.15 — 2026-08-25
+
+### Fixes
+
+- Edit a bead's labels from the Labels cell ([#69](https://github.com/michel-onstein/vbx/pull/69))
+
+## 0.1.14 — 2026-08-25
+
+### Fixes
+
+- Offer History only where there is a repository to read ([#68](https://github.com/michel-onstein/vbx/pull/68))
+
+## 0.1.13 — 2026-08-25
+
+### Fixes
+
+- Drop the toolbar's filter menu, which was the third copy of it ([#67](https://github.com/michel-onstein/vbx/pull/67))
+
+## 0.1.12 — 2026-08-24
+
+### Fixes
+
+- Start the row nearer the table's leading edge ([#65](https://github.com/michel-onstein/vbx/pull/65))
+
+## 0.1.11 — 2026-08-24
+
+### Fixes
+
+- Stamp every bead with this repository, and check that it stays that way ([#64](https://github.com/michel-onstein/vbx/pull/64))
+
+## 0.1.10 — 2026-08-24
+
+### Fixes
+
+- Refuse edits to closed beads, which are records rather than work ([#63](https://github.com/michel-onstein/vbx/pull/63))
+
 ## 0.1.9 — 2026-08-24
 
 ### Fixes

@@ -5,6 +5,28 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-08-24 — The table's leading margin, measured rather than nudged
+
+"Too much spacing between the status character and the left side of the table",
+with the gap to the ID column reported as good. Those constrain each other: the
+mark's distance from the id was already right, so the mark could not move — the
+row had to.
+
+How far in a row starts is `NSTableView.style`, and the three candidates were
+measured on the real table rather than guessed at: 16pt for `.inset`, 8pt for
+`.plain`, 6pt for `.fullWidth`, with `intercellSpacing` a constant 17pt across
+all three. So the change moves the outer margin and nothing else, and the 4pt
+between the mark and the id survives untouched. `.fullWidth` for a table that
+fills its window.
+
+The measurement also disproved a comment that had been sitting in two files
+claiming the 17pt gap came from the inset style. It does not, and the comment
+was confident enough to mislead someone changing exactly what was changed here.
+
+Found on the way: `swift test` was **already red on `main`** — the gutter's
+"draws a mark in the real table" test measures ink inside the gutter cell, and
+the mark had been moved outside that cell on purpose. Repaired here, because
+there is no green verify to ship against otherwise. See BUGS.md.
 ## 2026-08-24 — Pinch and two-finger scroll on the graph (vbx-vnl)
 
 The graph zoomed only from its two buttons and panned only by holding the mouse
@@ -15,7 +37,7 @@ is no scroll gesture at all, and `ScrollView` cannot be the answer because the
 camera is a transform *inside* the canvas rather than a scrolled subview. So the
 scroll half is an `NSEvent` local monitor behind a view that returns `nil` from
 `hitTest(_:)` — the mouse stays entirely SwiftUI's, which after ADR-014 is worth
-insisting on. ADR-018 records why a monitor rather than a view that takes the
+insisting on. ADR-019 records why a monitor rather than a view that takes the
 event.
 
 The camera became a value type in the same change, which is the part that made
@@ -56,6 +78,309 @@ Worth keeping: the two preflight bugs failed closed and this one failed open,
 and the open one was much more expensive — it is only caught after a universal
 build and a round trip to Apple, by Apple. Running the whole path deliberately,
 before it mattered, is what turned a silent failure into a caught one.
+
+---
+
+## 2026-08-26 — A Commits column, and a silent default it uncovered (vbx-cbw)
+
+`histories[id].commits.count`, which is `.count` of what the engine attributed
+and nothing more — which commits belong to a bead is the engine's judgement, and
+re-deriving any of it here is the drift ADR-001 exists to prevent.
+
+**Absent is not zero**, and the column is built around keeping them apart.
+`commitCount(for:)` returns nil until the walk lands and zero for a bead the
+walk attributed nothing to. The cell spells zero as `0` rather than taking the
+house em dash `IssueRow.countLabel` gives a zero elsewhere: in this column the
+dash has to mean *unknown*, and one glyph cannot mean both. The tooltip says
+which kind of unknown — a walk still running, or a workspace with no repository.
+
+Sorting is refused until the counts exist (`SortColumn.requiresHistory`,
+mirroring `requiresPhase2`), because ordering by values nobody has read yet
+sorts by zeros and leaves nothing on screen to explain the order.
+
+**Deviation from the bead, deliberately.** It asked for the column to be
+*hidden* where there is no repository, by analogy with History (`vbx-x8x`). Two
+things argue the other way inside the table: the established rule here is that
+an unavailable metric is shown as absent and says why — PageRank does exactly
+that before Phase 2 — and `sanitize` prunes stored widths for columns it does
+not know about, deliberately and with a test, so a column that came and went
+would take the user's chosen width with it and never give it back.
+
+**The silent default it uncovered.** `SortMode.ascending` had a `default: false`
+catch-all. `commitsAscending` matched it, so the new ordering sorted descending
+while claiming to ascend — caught only because the test asserted the actual
+order rather than that sorting "worked". The switch is exhaustive now, so the
+next case has to be classified or the build stops. That is the second silent
+catch-all this area has produced (see `rowMenu`'s unread `specs[1]` parameter
+in `vbx-dot`), and both were harmless-looking until they weren't.
+
+Tests: `Commit count column` — the count is the report's, unloaded is nil,
+loaded-with-nothing is zero, the cell draws zero and unknown differently
+(rendered, against an opaque ground, after a layout pass — the first version
+measured three blank images and "passed" every comparison), the column follows
+the identifier contract, sorting is refused while unknown, and the ordering runs
+both ways. 544 passing, green twice.
+
+**Not visually confirmed in a running app.** The build launches, but the window
+restores a different workspace and the column sits beyond the inspector's edge;
+after two attempts I stopped rather than spend more on the screenshot. The
+rendering assertion is what stands behind it.
+
+---
+
+## 2026-08-26 — The correlation report loads on open, and stays current (vbx-g3q)
+
+`loadHistory()` had exactly two kinds of caller, both in `HistoryView`, so the
+report existed only after someone visited that view — and `historyLoaded` was
+never invalidated, so commits landing while the workspace was open left it
+describing the repository as it was.
+
+Now `startHistoryWalk()` runs on open and again whenever `HEAD` moves, in the
+background: the walk is the expensive thing this app does, and an open that
+waited for it would be an open that waits for git.
+
+**The `HEAD` watch was fixed first, because everything else rests on it.**
+`gitHeadPath` tested `<workspace>/.git/HEAD`, one level, so it missed a
+workspace below the repository root *and* every git worktree — where `.git` is a
+file holding a `gitdir:` pointer. It now resolves through `gitRepositoryRoot`
+and follows the pointer. Until today that only made dirty marks slow to clear;
+building "keep the report current" on the same watch would have shipped a
+feature that silently did nothing in exactly the checkouts this project is
+developed in. A `.git` file that is *not* a `gitdir:` pointer installs no watch
+rather than guessing.
+
+**Two bugs the tests found, not the design.**
+
+- A walk that finishes after the workspace changed would publish into the store
+  that had moved on. Every open bumps a generation; a walk carries the one it
+  started under and publishes nothing if that is no longer current.
+- Cancelling was not enough. A workspace with **no repository** starts no walk,
+  so there was nothing to overwrite what the previous one published: opening a
+  bare workspace left the last repository's commits on screen. `resetHistory()`
+  now clears the report on a workspace change, for the same reason the filters
+  and the navigation history are cleared.
+
+**No repository is not an error.** The walk is skipped and `historyError` stays
+nil. That distinction is what `vbx-cbw`'s column stands on: not-loaded,
+loaded-with-nothing and no-repository have to be three different answers.
+
+**A cost the suite made visible.** Every store the tests open would now start a
+walk, and dozens at once is contention the harness pays for and learns nothing
+from — so `loadsHistoryEagerly` exists, defaulting to true and turned off by the
+fixtures, the same bargain `skipPhase2` already strikes. The dedicated suite
+opts back in. The wait budget in those tests is deliberately generous: in a run
+where the walk was still in flight at ten seconds, the test's own setup had
+taken ~65 — a tight budget there measures the machine's load, not the feature.
+
+Tests: `Eager history` — the report loads without the History view, a
+repository-less workspace is neither loaded nor an error, the three states are
+distinguishable, `HEAD` resolves to where git actually keeps it, a `gitdir:`
+pointer is followed, an unreadable `.git` file installs no watch, and a stale
+walk publishes nothing. 537 passing, green three runs in a row.
+
+---
+
+## 2026-08-24 — Labels are editable from the list (vbx-dot)
+
+Double-clicking the Labels cell now opens a menu of the workspace's labels, each
+one toggling, with `New Label…` at the bottom. The write is `br label add` /
+`br label remove`, one invocation for the whole selection — `br` takes several
+issue ids, so there is no half-applied state to report.
+
+**The editor is a menu, not a token field.** The common case is applying a label
+the workspace already has, which is one click; creating one is rarer and gets an
+item of its own. A token field is better at free text and is a second editing
+mechanism to build and keep — an `NSTokenField` in a table cell is its own
+project.
+
+**Presence has three answers.** Across a selection a label may be on some beads
+and not others, so the checkmark is on, off, or mixed. Clicking a mixed one
+*applies* the label to the rest rather than clearing it: the click after a mixed
+checkmark is far more often "make these the same" than "take it off the ones
+that have it".
+
+**The double-click conflict, resolved.** A pill's double-click used to toggle
+that label as a *filter*, and the cell's double-click now edits — one gesture
+cannot mean both. Filtering keeps two homes, both showing more than the gesture
+did: the sidebar's Labels section with counts, and the Labels surface with all
+of them rather than only those a visible row carries. The gesture was also the
+least reliable of the three, being exactly what ADR-014 records as not working —
+a SwiftUI gesture on hosted content inside a table.
+
+Removing it left `toggleLabelFilter` with no caller in Sources. Deleting it
+would have been the clean-break move and would have been wrong: it does
+something the sidebar's rows did not, namely clear an active recipe, because a
+recipe owns the filter wholesale and one the user has since edited by hand is no
+longer the recipe's. The sidebar now routes through it, which removes an
+inconsistency rather than the function.
+
+**A latent bug found on the way.** `rowMenu` built its priority submenu with
+`priorityMenu(Self.specs[1], ids)` — and `specs[1]` stopped being the priority
+column when the uncommitted gutter was added in front of it. It was harmless
+only because the parameter was never read. The parameter is gone, which is what
+makes it stay harmless.
+
+Tests: `Label editing` — the argument vectors are pinned (the ids are
+positional and the label is an option, the reverse of `update`), a label round
+trips through `br`, one invocation covers a selection, presence is three-way, a
+closed bead refuses through ADR-017's gate, an empty label is not written, and
+filtering keeps its homes. `Table columns` had its editable-column list updated,
+deliberately. 528 passing.
+
+---
+
+## 2026-08-24 — History is only offered where there is a repository (vbx-x8x)
+
+History correlates beads to commits. A workspace outside a git repository has
+none, so the surface had nothing to show and was offered anyway.
+
+`ProjectStore.availableSurfaces` is the list, and all *three* places that offer
+a surface now read it — the toolbar picker, the sidebar's Views section, and the
+View menu in `VBXCommands`. The bead named two; the menu was the third, and a
+command that switches to a surface neither control offers would strand the user
+on a view they cannot leave by the route they arrived.
+
+**How "is there a repository" is answered.** The bead weighed `gitHeadPath`
+against `store.revisions` and neither is right:
+
+- `gitHeadPath` tests `<workspace>/.git/HEAD`, one level only, so it answers
+  "no" for a `.beads` directory in a *subdirectory* of a repository — where
+  History works. Hiding a surface that would have worked is the more annoying of
+  the two mistakes.
+- `revisions` is exact but lazily loaded, so "not loaded yet" and "no
+  repository" would be the same answer: absent read as zero, the trap ADR-015
+  exists to avoid.
+
+So `gitRepositoryRoot` walks up from the workspace looking for `.git`, and
+accepts it as a **file** as well as a directory — which is what it is inside a
+worktree or a submodule. That is not an exotic case here: this repo's own
+discipline puts every session in a worktree.
+
+**The selected surface falls back.** Opening a repository-less workspace while
+on History leaves `surface` naming a view nothing offers — hidden from every
+control and still rendered, which is worse than what was being fixed. It moves
+to `.list`, and only in that case: an open must not quietly move the user off
+the view they chose.
+
+**A limitation this uncovered but did not change.** `gitHeadPath` still tests
+one level, so ADR-015's `HEAD` watch does not fire in a worktree, where `.git`
+is a file — meaning dirty marks there do not clear on commit until something
+else forces a reload. Pre-existing, out of scope for this bead, and worth fixing
+where the watch lives rather than here.
+
+Tests: `History needs a repository` — hidden without one, offered with one, a
+workspace one level down still counts, a `.git` file counts as much as a
+directory, the selected surface falls back, and a valid one is left alone. 521
+passing.
+
+---
+
+## 2026-08-24 — The toolbar's filter menu is gone (vbx-bcj)
+
+It was the *third* copy of one setting. The sidebar's Filters section shows all
+four with a count each — strictly more than a menu showing one value behind a
+disclosure — and the View menu already carried `Filter: Open/Ready/Closed/All`
+as commands.
+
+That last fact is what settled the bead's open question. It asked whether a
+collapsed sidebar would be left with no filter control, and named that as the
+real argument against removing this. The answer turned out to already exist in
+`VBXCommands`: the menu bar is always present, collapsed sidebar or not. Nothing
+had to be built, but the test now asserts those commands exist — without them
+this change really would be removing the last reachable control for someone who
+works with the sidebar hidden, and that should fail loudly rather than be
+rediscovered.
+
+`showsFilterAndSort` became `showsSort`, because it now gates one control and a
+comment describing a picker that no longer exists is how the next person is
+misled.
+
+The new assertions read the *source*, which is unusual here and deliberate: a
+toolbar is window chrome, an `NSHostingView` of `ContentView` never builds one,
+and a render-based check would pass whether or not the picker was there. What
+can be checked honestly is that the declaration is gone and the two replacements
+are declared.
+
+Tests: `Toolbar sort` — the control follows the ordered surfaces, the eight
+payload views hide it, every surface stays classified, the toolbar declares no
+filter picker, both remaining routes exist, and the sidebar's rows still drive
+the query. 515 passing.
+
+---
+
+## 2026-08-24 — Beads now say which repository they came from (vbx-pjf)
+
+`br` stamps `source_repo` with the basename of the directory it runs in, and
+this repo's discipline is that every session works in a worktree. The two rules
+fight, and the worktree rule is the right one — so 30 of 54 records carried a
+throwaway topic name and 29 named a path that no longer existed, 19 of them the
+pre-rename `bvx` checkout.
+
+Nothing reads the field today, and the ADR says so rather than inflating the
+problem: `RepoInfo.owns(_:)` matches by id prefix and `--robot-repos` reports
+this workspace as single-repo. The cost is latent, in a field `br`'s own help
+calls the canonical location "for cross-machine sync awareness".
+
+Rewrote all 30 through `br update` — a per-record diff, 31 lines changed, not
+the whole-file rewrite that would mean clobbering another session. The 19 `bvx`
+records became `vbx`, which is a decision rather than a cleanup: they *were*
+filed in a directory of that name, but the rename was a rename of this same
+project, and two names for one repository is the phantom-repository problem in
+miniature.
+
+`scripts/beads-check.py` guards it from here, in the verify block. The canonical
+name comes from git — the common git directory is shared by every worktree and
+its parent is the primary checkout — so it is right from wherever it runs, which
+matters because it will nearly always run from a worktree.
+
+**A check rather than a convention, deliberately.** The value cannot be set
+correctly at creation: `br create` has no `--source-repo` flag and
+`.beads/config.yaml` holds only `issue_prefix`. That leaves "remember to run
+`br update` after every `br create`" — the same class of rule that produced the
+mess. A failing check makes forgetting a build failure with a one-line answer.
+The real fix is upstream in `beads_rust`.
+
+Tests: `test_beads_source_repo_check` — the export is clean, the canonical name
+comes from git rather than a constant, and a scratch repo carrying a foreign
+stamp is caught with the offending repository named.
+
+---
+
+## 2026-08-24 — Closed beads stopped accepting edits (vbx-78c)
+
+The bead's open question first, because it decided the shape of everything else:
+**does `br` already refuse a write to a closed issue?** No. Against a scratch
+workspace, `br update --title` and `br update --priority` both rewrote a closed
+bead and exited 0. So this is vbx's own rule, not vbx agreeing with the engine,
+and ADR-017 says so out loud — a terminal `br update` still rewrites a closed
+bead, and pretending otherwise would be worse than the gap.
+
+`IssueStatus.isImmutable` is the whole rule: `closed` and `tombstone`. The
+affordances consult it before opening — the field editor does not open, the
+priority menu shows its reason instead of values — and `setTitle`/`setPriority`
+check it again, because a gate is not a rule if the thing behind it still says
+yes.
+
+**Mixed selection: refuse as a whole**, naming the count. Applying to the open
+beads and skipping the closed ones is a partial success that surfaces a week
+later, when the beads that did not change look like beads nobody got to.
+
+**An unknown status stays editable.** The status enum is open on purpose, and
+refusing an edit is the more surprising of the two failures — nobody would
+report it, they would assume the bead was closed.
+
+The write-path test was nearly a test of nothing: CLAUDE.md warns that writes
+against the fixture used to fail for unrelated reasons, so a refusal test could
+pass while proving only that the fixture is unwritable. Removing the guard and
+re-running settled it — `br` wrote the closed bead and its priority went 0 → 3,
+which is both the discrimination check and the direct evidence for the ADR's
+central claim.
+
+Tests: `Immutable statuses` in core (closed and tombstone, nothing else, unknown
+stays editable) and `Immutable closed beads` in the UI suite — the refusal names
+Reopen, an open bead is untouched, a mixed selection counts what stopped it, a
+stale id does not refuse for the others, the write itself refuses through `br`,
+and the tooltip precedence. 512 passing.
 
 ---
 
@@ -1202,3 +1527,24 @@ the scorer and vbx did not. That is now fixed, and nine commands compare byte
 for byte.
 
 Tests: 104 → 304 Swift, plus a substantially expanded Go suite.
+
+## 2026-08-24 — The recipe editor opened empty
+
+Clicking **New recipe…** opened a dialog that stayed blank for about twenty
+seconds. The sheet was presented by a flag written beside the recipe it edits,
+and SwiftUI built its content from a body that had not yet seen the recipe — so
+it opened at 100×80 with an `EmptyView` inside and waited for an unrelated
+redraw. Now `sheet(item:)`, here and for `HistoryView`'s patch sheet, which had
+the same shape. `RecipeEditorPresentationTests` clicks the real row and asserts
+the sheet's size. See BUGS.md, 2026-08-24.
+
+## 2026-08-26 — The packaging test cut a real release
+
+`test-packaging.py` ended its release-script section by running `release.sh
+--tag 99.0.0` and assuming the environment would refuse it. On a configured
+machine with a clean tree it did not: every verify run built, signed, notarized
+and tagged a fake 99.0.0. The check now points at a signing config that does not
+exist, so the refusal is a property of the run, and asserts no tag is left
+behind. `release.sh` also takes back a tag it created when the release does not
+finish, so a failed or interrupted release no longer spends the version. See
+BUGS.md, 2026-08-26.

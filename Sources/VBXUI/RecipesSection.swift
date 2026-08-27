@@ -8,8 +8,17 @@ import SwiftUI
 /// is — so it sits beside the filters rather than inside them.
 struct SidebarRecipesSection: View {
     @EnvironmentObject var store: ProjectStore
+    /// What the editor is editing — and, by being non-nil, that it is open.
+    ///
+    /// One piece of state, not a value plus a flag: `sheet(isPresented:)`
+    /// captures its content closure from the view as it stood *before* the
+    /// button's write landed, so a companion `editing` still reads nil when the
+    /// sheet is built and the window opens empty. It stays empty until some
+    /// unrelated change re-runs this body — around twenty seconds in a live
+    /// app, and forever in one nothing else is touching. `sheet(item:)` hands
+    /// the content the value that triggered it, so there is nothing to be stale.
+    /// See BUGS.md, 2026-08-24.
     @State private var editing: Recipe?
-    @State private var isEditorPresented = false
 
     var body: some View {
         Section("Recipes") {
@@ -34,7 +43,6 @@ struct SidebarRecipesSection: View {
                 // A new recipe starts from whatever is on screen, which is
                 // usually why someone wants to save one.
                 editing = Recipe(name: "", description: "")
-                isEditorPresented = true
             } label: {
                 HStack {
                     Label("New recipe…", systemImage: "plus")
@@ -45,11 +53,9 @@ struct SidebarRecipesSection: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
         }
-        .sheet(isPresented: $isEditorPresented) {
-            if let editing {
-                RecipeEditor(recipe: editing) { saved in
-                    Task { await store.saveRecipe(saved) }
-                }
+        .sheet(item: $editing) { recipe in
+            RecipeEditor(recipe: recipe) { saved in
+                Task { await store.saveRecipe(saved) }
             }
         }
     }
@@ -86,7 +92,6 @@ struct SidebarRecipesSection: View {
                 var copy = entry.recipe
                 if entry.isBuiltin { copy.name = "\(entry.recipe.name)-copy" }
                 editing = copy
-                isEditorPresented = true
             }
             if !entry.isBuiltin {
                 Button("Delete", role: .destructive) {

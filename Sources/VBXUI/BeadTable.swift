@@ -56,6 +56,13 @@ struct BeadTable: NSViewRepresentable {
     /// The row context menu, for the ids AppKit's selection rules produce.
     let rowMenu: (Set<Issue.ID>) -> NSMenu?
 
+    /// Why this bead cannot be edited, or nil when it can.
+    ///
+    /// Consulted *before* the editor opens rather than at the write: by the
+    /// time a title has been typed and Return pressed, an edit that vanishes
+    /// with an error is worse than one that was never offered.
+    let editRefusal: (Issue.ID) -> String?
+
     /// Why a row is marked as uncommitted, or nil when it is not.
     ///
     /// A reason rather than a Bool, because the mark alone says nothing: the
@@ -67,7 +74,21 @@ struct BeadTable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let table = NSTableView()
-        table.style = .inset
+        // `.fullWidth`, because the style decides how far in the row starts and
+        // `.inset` starts it too far. Measured on the real table, first cell's
+        // `minX`:
+        //
+        //     .inset      16pt      .plain       8pt      .fullWidth   6pt
+        //
+        // The choice moves only that margin. `intercellSpacing` is 17pt under
+        // all three, so every gap *between* columns is unchanged — including
+        // the one the uncommitted mark overhangs into, which stays 4pt short of
+        // the id exactly as it was. The row simply begins nearer the edge.
+        //
+        // Full width rather than plain because this table fills its window
+        // rather than sitting in a sidebar, so the stripes and the selection
+        // should run edge to edge; the 2pt it also saves is incidental.
+        table.style = .fullWidth
         table.usesAlternatingRowBackgroundColors = true
         table.allowsMultipleSelection = true
         table.allowsColumnReordering = true
@@ -231,7 +252,25 @@ struct BeadTable: NSViewRepresentable {
             tableColumn: NSTableColumn?, row: Int, mouseLocation: NSPoint
         ) -> String {
             guard row >= 0, row < parent.rows.count else { return "" }
-            return parent.uncommittedReason(parent.rows[row].id) ?? ""
+            let column = tableColumn.flatMap { self.spec(for: $0) }
+            return Self.tooltip(
+                editRefusal: parent.editRefusal(parent.rows[row].id),
+                columnEdits: column?.editing != nil,
+                uncommittedReason: parent.uncommittedReason(parent.rows[row].id))
+        }
+
+        /// Which of the two things a cell has to say takes the tooltip.
+        ///
+        /// A refusal wins, and only over a column that would otherwise have
+        /// accepted an edit: it explains an affordance that just did nothing,
+        /// which is the more urgent question, and on a column that never edits
+        /// it would be answering a question nobody asked. The uncommitted
+        /// reason is what every other cell says.
+        static func tooltip(
+            editRefusal: String?, columnEdits: Bool, uncommittedReason: String?
+        ) -> String {
+            if columnEdits, let editRefusal { return editRefusal }
+            return uncommittedReason ?? editRefusal ?? ""
         }
 
         func tableView(
@@ -420,12 +459,20 @@ struct BeadTable: NSViewRepresentable {
             let column = table.tableColumns[columnIndex]
             guard let spec = spec(for: column), let editing = spec.editing else { return }
 
+            // Not offered rather than refused later. The cell's tooltip carries
+            // the reason, so the double-click doing nothing is explainable
+            // without a dialog interrupting a double-click.
+            if parent.editRefusal(parent.rows[row].id) != nil {
+                NSSound.beep()
+                return
+            }
+
             switch editing {
             case .text:
                 // The field editor, which is what makes this feel like every
                 // other editable table on the system.
                 table.editColumn(columnIndex, row: row, with: nil, select: true)
-            case .priority:
+            case .priority, .labels:
                 guard let menu = parent.valueMenu(spec, targetIDs()) else { return }
                 let rect = table.frameOfCell(atColumn: columnIndex, row: row)
                 menu.popUp(

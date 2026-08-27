@@ -27,7 +27,7 @@ private struct SidebarViewsSection: View {
 
     var body: some View {
         Section("Views") {
-            ForEach(ViewSurface.allCases) { surface in
+            ForEach(store.availableSurfaces) { surface in
                 Button {
                     store.surface = surface
                 } label: {
@@ -118,11 +118,15 @@ private struct LabelRow: View {
 
     var body: some View {
         Button {
-            if isOn {
-                store.query.labels.remove(label)
-            } else {
-                store.query.labels.insert(label)
-            }
+            // Through the store rather than writing `query.labels` here: the
+            // toggle also clears an active recipe, because a recipe owns the
+            // filter wholesale and one the user has since edited by hand is no
+            // longer the recipe's. Writing the set directly skipped that, so
+            // the sidebar left the sidebar claiming a recipe that no longer
+            // described the screen. It was the pill's gesture that used this
+            // before; the pill now edits labels instead (vbx-dot), and the
+            // behaviour belongs with the control that remains.
+            store.toggleLabelFilter(label)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: isOn ? "checkmark.square.fill" : "square")

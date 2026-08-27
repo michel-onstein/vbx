@@ -17,7 +17,7 @@ box, the README title.
 | [FEATURE_PARITY.md](docs/FEATURE_PARITY.md) | — | Every bv capability mapped to a vbx surface and delivery phase | Living |
 | [RELEASES.md](docs/RELEASES.md) | ADR-013 | User-facing changes per release — generated from the git tags, never edited | Generated |
 | [project_notes/BUGS.md](docs/project_notes/BUGS.md) | — | Bug log with the regression test locking each fix in | Living |
-| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…018 | Architectural decisions and their trade-offs | Living |
+| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…019 | Architectural decisions and their trade-offs | Living |
 | [project_notes/KEY_FACTS.md](docs/project_notes/KEY_FACTS.md) | — | Toolchain, commands, layout, gotchas | Living |
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
@@ -112,7 +112,7 @@ them.
   gestures go through the one value — a click that lands on the node that *was*
   under the cursor is what a second copy of the transform looks like. Zoom is
   clamped in one place, so the percentage readout means the same thing whichever
-  input produced it. See ADR-018.
+  input produced it. See ADR-019.
 - **SwiftUI has no scroll gesture, and a view that hit-tests to get one takes
   every click with it.** Two-finger scrolling over the graph arrives through an
   `NSEvent` local monitor scoped to the catcher's window and bounds, behind a
@@ -186,6 +186,26 @@ them.
   — the recents list, the current directory, a restored window's path — is
   skipped when it does not probe openable, so a launch with nothing to open
   lands in the neutral empty state. Only an explicit choice reports a failure.
+- **`br update --description-file` is a silent no-op.** It prints the issue as
+  JSON and exits 0, and the description is unchanged — measured on `vbx-g3q`,
+  where the file on disk held the new text and the record kept the old. Only
+  `-d/--description` actually writes. That matters because the reason to reach
+  for the file form is a long markdown body, which is exactly the case where
+  losing the write is least likely to be noticed. Pass the text as an argv
+  element instead — from a script, not through the shell, so quoting cannot
+  mangle it. (`br create --description-file` *does* work; it is only `update`.)
+- **`br` stamps `source_repo` with the directory it runs in, so every bead
+  created in a worktree is stamped wrong.** That rule and this repo's worktree
+  discipline are in direct conflict, and the worktree rule is the right one — 30
+  of 54 records named a topic directory that had since been deleted, and 29
+  named a path that no longer existed. Nothing reads the field today
+  (`RepoInfo.owns(_:)` matches by id prefix), so the cost is latent: `br`'s help
+  calls `source_repo_path` the canonical location "for cross-machine sync
+  awareness". There is nothing to configure — `br create` has no
+  `--source-repo` flag and `.beads/config.yaml` holds only `issue_prefix` — so
+  **after `br create`, run `python3 scripts/beads-check.py --fix`**. The check
+  is in the verify block, which is what makes forgetting a build failure instead
+  of silent drift. The real fix is upstream in `beads_rust`. See ADR-018.
 - **Triage includes a bounded git-history walk**, because bv's does and it
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable
@@ -200,6 +220,7 @@ python3 scripts/build-notices.py --check  # every dependency is acknowledged
 python3 scripts/test-packaging.py   # signing, redaction, universal, version, cask
 python3 scripts/release-notes.py --check  # docs/RELEASES.md matches the tags
 python3 scripts/build-docs.py --check     # docs/html matches docs/*.md
+python3 scripts/beads-check.py            # every bead is stamped with this repo
 swift test                          # Swift suite
 cd Engine/bridge && go test ./...   # Go suite
 gofmt -l Engine/bridge              # must print nothing

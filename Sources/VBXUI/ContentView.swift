@@ -122,7 +122,7 @@ public struct ContentView: View {
 
         ToolbarItem(placement: .navigation) {
             Picker("View", selection: $store.surface) {
-                ForEach(ViewSurface.allCases) { surface in
+                ForEach(store.availableSurfaces) { surface in
                     Label(surface.displayName, systemImage: surface.symbolName).tag(surface)
                 }
             }
@@ -135,23 +135,18 @@ public struct ContentView: View {
             .background { SegmentTooltips(tooltips: Self.surfaceTooltips) }
         }
 
-        // Both of these drive `query`, which only `visibleIssues` reads, so on
-        // a surface that renders its own engine payload they are a control
-        // wired to nothing. See ``ViewSurface/showsFilterAndSort``.
+        // Drives `query`, which only `visibleIssues` reads, so on a surface
+        // that renders its own engine payload this is a control wired to
+        // nothing. See ``ViewSurface/showsSort``.
+        //
+        // There is no filter control here. The sidebar's Filters section shows
+        // all four with a count each — strictly more than this menu did, which
+        // showed one value behind a disclosure — and the View menu carries
+        // `Filter: …` commands, which is what answers the sidebar being
+        // collapsed. A third copy of one setting is three places to look and
+        // three to keep in step.
         ToolbarItem {
-            if store.surface.showsFilterAndSort {
-                Picker("Filter", selection: $store.query.filter) {
-                    ForEach(IssueFilter.allCases) { filter in
-                        Text(filter.displayName).tag(filter)
-                    }
-                }
-                .pickerStyle(.menu)
-                .help("Filter beads")
-            }
-        }
-
-        ToolbarItem {
-            if store.surface.showsFilterAndSort {
+            if store.surface.showsSort {
                 Menu {
                     // The named orderings only. Every column ordering is
                     // reachable from its header, and listing all of them here
