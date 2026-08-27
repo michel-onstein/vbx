@@ -51,6 +51,58 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-26 — The correlation report loads on open, and stays current (vbx-g3q)
+
+`loadHistory()` had exactly two kinds of caller, both in `HistoryView`, so the
+report existed only after someone visited that view — and `historyLoaded` was
+never invalidated, so commits landing while the workspace was open left it
+describing the repository as it was.
+
+Now `startHistoryWalk()` runs on open and again whenever `HEAD` moves, in the
+background: the walk is the expensive thing this app does, and an open that
+waited for it would be an open that waits for git.
+
+**The `HEAD` watch was fixed first, because everything else rests on it.**
+`gitHeadPath` tested `<workspace>/.git/HEAD`, one level, so it missed a
+workspace below the repository root *and* every git worktree — where `.git` is a
+file holding a `gitdir:` pointer. It now resolves through `gitRepositoryRoot`
+and follows the pointer. Until today that only made dirty marks slow to clear;
+building "keep the report current" on the same watch would have shipped a
+feature that silently did nothing in exactly the checkouts this project is
+developed in. A `.git` file that is *not* a `gitdir:` pointer installs no watch
+rather than guessing.
+
+**Two bugs the tests found, not the design.**
+
+- A walk that finishes after the workspace changed would publish into the store
+  that had moved on. Every open bumps a generation; a walk carries the one it
+  started under and publishes nothing if that is no longer current.
+- Cancelling was not enough. A workspace with **no repository** starts no walk,
+  so there was nothing to overwrite what the previous one published: opening a
+  bare workspace left the last repository's commits on screen. `resetHistory()`
+  now clears the report on a workspace change, for the same reason the filters
+  and the navigation history are cleared.
+
+**No repository is not an error.** The walk is skipped and `historyError` stays
+nil. That distinction is what `vbx-cbw`'s column stands on: not-loaded,
+loaded-with-nothing and no-repository have to be three different answers.
+
+**A cost the suite made visible.** Every store the tests open would now start a
+walk, and dozens at once is contention the harness pays for and learns nothing
+from — so `loadsHistoryEagerly` exists, defaulting to true and turned off by the
+fixtures, the same bargain `skipPhase2` already strikes. The dedicated suite
+opts back in. The wait budget in those tests is deliberately generous: in a run
+where the walk was still in flight at ten seconds, the test's own setup had
+taken ~65 — a tight budget there measures the machine's load, not the feature.
+
+Tests: `Eager history` — the report loads without the History view, a
+repository-less workspace is neither loaded nor an error, the three states are
+distinguishable, `HEAD` resolves to where git actually keeps it, a `gitdir:`
+pointer is followed, an unreadable `.git` file installs no watch, and a stale
+walk publishes nothing. 537 passing, green three runs in a row.
+
+---
+
 ## 2026-08-24 — Labels are editable from the list (vbx-dot)
 
 Double-clicking the Labels cell now opens a menu of the workspace's labels, each
