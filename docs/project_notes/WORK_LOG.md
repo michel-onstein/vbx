@@ -51,6 +51,53 @@ before it mattered, is what turned a silent failure into a caught one.
 
 ---
 
+## 2026-08-26 — A Commits column, and a silent default it uncovered (vbx-cbw)
+
+`histories[id].commits.count`, which is `.count` of what the engine attributed
+and nothing more — which commits belong to a bead is the engine's judgement, and
+re-deriving any of it here is the drift ADR-001 exists to prevent.
+
+**Absent is not zero**, and the column is built around keeping them apart.
+`commitCount(for:)` returns nil until the walk lands and zero for a bead the
+walk attributed nothing to. The cell spells zero as `0` rather than taking the
+house em dash `IssueRow.countLabel` gives a zero elsewhere: in this column the
+dash has to mean *unknown*, and one glyph cannot mean both. The tooltip says
+which kind of unknown — a walk still running, or a workspace with no repository.
+
+Sorting is refused until the counts exist (`SortColumn.requiresHistory`,
+mirroring `requiresPhase2`), because ordering by values nobody has read yet
+sorts by zeros and leaves nothing on screen to explain the order.
+
+**Deviation from the bead, deliberately.** It asked for the column to be
+*hidden* where there is no repository, by analogy with History (`vbx-x8x`). Two
+things argue the other way inside the table: the established rule here is that
+an unavailable metric is shown as absent and says why — PageRank does exactly
+that before Phase 2 — and `sanitize` prunes stored widths for columns it does
+not know about, deliberately and with a test, so a column that came and went
+would take the user's chosen width with it and never give it back.
+
+**The silent default it uncovered.** `SortMode.ascending` had a `default: false`
+catch-all. `commitsAscending` matched it, so the new ordering sorted descending
+while claiming to ascend — caught only because the test asserted the actual
+order rather than that sorting "worked". The switch is exhaustive now, so the
+next case has to be classified or the build stops. That is the second silent
+catch-all this area has produced (see `rowMenu`'s unread `specs[1]` parameter
+in `vbx-dot`), and both were harmless-looking until they weren't.
+
+Tests: `Commit count column` — the count is the report's, unloaded is nil,
+loaded-with-nothing is zero, the cell draws zero and unknown differently
+(rendered, against an opaque ground, after a layout pass — the first version
+measured three blank images and "passed" every comparison), the column follows
+the identifier contract, sorting is refused while unknown, and the ordering runs
+both ways. 544 passing, green twice.
+
+**Not visually confirmed in a running app.** The build launches, but the window
+restores a different workspace and the column sits beyond the inspector's edge;
+after two attempts I stopped rather than spend more on the screenshot. The
+rendering assertion is what stands behind it.
+
+---
+
 ## 2026-08-26 — The correlation report loads on open, and stays current (vbx-g3q)
 
 `loadHistory()` had exactly two kinds of caller, both in `HistoryView`, so the

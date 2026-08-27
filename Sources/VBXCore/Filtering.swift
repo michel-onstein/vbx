@@ -52,6 +52,8 @@ public enum SortColumn: String, CaseIterable, Sendable, Identifiable {
     case blocks
     case blockedBy
     case pageRank
+    /// How many commits the engine attributed to a bead.
+    case commits
     case labels
     case created
     case updated
@@ -64,13 +66,21 @@ public enum SortColumn: String, CaseIterable, Sendable, Identifiable {
     /// is Phase 1 and therefore ready the moment the workspace opens.
     public var requiresPhase2: Bool { self == .pageRank }
 
+    /// True when ordering by this column needs the git correlation report.
+    ///
+    /// The same shape as ``requiresPhase2`` and for the same reason: until the
+    /// walk has finished, every bead's count is *unknown*, and ordering by it
+    /// would silently sort by zeros — putting beads in an order the screen
+    /// cannot explain.
+    public var requiresHistory: Bool { self == .commits }
+
     /// The direction a first click on this column's header applies.
     ///
     /// Counts and scores read most usefully largest-first; names and dates
     /// smallest-first.
     public var defaultAscending: Bool {
         switch self {
-        case .blocks, .blockedBy, .pageRank, .created, .updated: false
+        case .blocks, .blockedBy, .pageRank, .commits, .created, .updated: false
         case .id, .title, .status, .priority, .labels: true
         }
     }
@@ -99,6 +109,8 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
     case blocksAscending
     case blockedByDescending
     case blockedByAscending
+    case commitsDescending
+    case commitsAscending
     case labelsAscending
     case labelsDescending
     case createdAscending
@@ -136,6 +148,8 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
         case .blocksAscending: "Blocks ↑"
         case .blockedByDescending: "Blocked by ↓"
         case .blockedByAscending: "Blocked by ↑"
+        case .commitsDescending: "Commits ↓"
+        case .commitsAscending: "Commits ↑"
         case .labelsAscending: "Labels ↑"
         case .labelsDescending: "Labels ↓"
         case .createdAscending: "Created ↑"
@@ -159,6 +173,7 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
         case .blocksAscending, .blocksDescending: .blocks
         case .blockedByAscending, .blockedByDescending: .blockedBy
         case .impact, .impactAscending: .pageRank
+        case .commitsAscending, .commitsDescending: .commits
         case .labelsAscending, .labelsDescending: .labels
         case .createdAscending, .createdDescending: .created
         case .updated, .updatedAscending: .updated
@@ -167,13 +182,21 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
 
     /// Which way this ordering runs. `.default` reports ascending because its
     /// leading key, priority, ascends.
+    /// Exhaustive on purpose, with no catch-all.
+    ///
+    /// It had one, falling through to descending, and it cost exactly what a
+    /// silent default costs: `commitsAscending` was added, matched the
+    /// catch-all, and sorted descending while claiming to ascend. A new case
+    /// now has to be classified here or the build stops.
     public var ascending: Bool {
         switch self {
         case .default, .idAscending, .titleAscending, .statusAscending, .priority,
-            .blocksAscending, .blockedByAscending, .labelsAscending, .createdAscending,
-            .updatedAscending, .impactAscending:
+            .blocksAscending, .blockedByAscending, .commitsAscending, .labelsAscending,
+            .createdAscending, .updatedAscending, .impactAscending:
             true
-        default:
+        case .idDescending, .titleDescending, .statusDescending, .priorityDescending,
+            .blocksDescending, .blockedByDescending, .commitsDescending, .labelsDescending,
+            .createdDescending, .updated, .impact:
             false
         }
     }
@@ -188,6 +211,7 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
         case .blocks: ascending ? .blocksAscending : .blocksDescending
         case .blockedBy: ascending ? .blockedByAscending : .blockedByDescending
         case .pageRank: ascending ? .impactAscending : .impact
+        case .commits: ascending ? .commitsAscending : .commitsDescending
         case .labels: ascending ? .labelsAscending : .labelsDescending
         case .created: ascending ? .createdAscending : .createdDescending
         case .updated: ascending ? .updatedAscending : .updated
@@ -197,6 +221,10 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
     /// True when this ordering needs Phase-2 metrics, so the UI can keep it
     /// inert until they land rather than sorting by silent zeros.
     public var requiresPhase2: Bool { column?.requiresPhase2 ?? false }
+
+    /// True when this ordering needs the correlation report, so the UI can keep
+    /// it inert until the walk lands rather than sorting by silent zeros.
+    public var requiresHistory: Bool { column?.requiresHistory ?? false }
 
     /// The ordering to use once `hidden` columns are off screen.
     ///
@@ -242,11 +270,12 @@ public struct IssueQuery: Sendable {
     public func apply(
         to issues: [Issue],
         actionable: Set<String> = [],
-        metrics: GraphMetrics? = nil
+        metrics: GraphMetrics? = nil,
+        commits: [String: Int]? = nil
     ) -> [Issue] {
         var result = issues.filter { matches($0, actionable: actionable) }
         result = Self.rank(result, query: searchText)
-        return sorted(result, metrics: metrics)
+        return sorted(result, metrics: metrics, commits: commits)
     }
 
     private func matches(_ issue: Issue, actionable: Set<String>) -> Bool {
@@ -264,7 +293,9 @@ public struct IssueQuery: Sendable {
         return true
     }
 
-    private func sorted(_ issues: [Issue], metrics: GraphMetrics?) -> [Issue] {
+    private func sorted(
+        _ issues: [Issue], metrics: GraphMetrics?, commits: [String: Int]? = nil
+    ) -> [Issue] {
         // A search query imposes its own relevance order; re-sorting would
         // discard it.
         guard searchText.isEmpty else { return issues }
@@ -299,6 +330,13 @@ public struct IssueQuery: Sendable {
             return order(issues, ascending) { metrics?.blockedBy($0.id) ?? 0 }
         case .pageRank:
             return order(issues, ascending) { metrics?.pageRank?[$0.id] ?? 0 }
+        case .commits:
+            // Absent sorts as zero *for the comparator only*. The UI refuses
+            // the ordering outright until the walk has landed
+            // (``SortColumn/requiresHistory``), so this is never the order
+            // anyone actually sees with the counts unknown — the same
+            // arrangement PageRank has.
+            return order(issues, ascending) { commits?[$0.id] ?? 0 }
         case .labels:
             return order(issues, ascending) { $0.labels.joined(separator: ",").lowercased() }
         case .created:

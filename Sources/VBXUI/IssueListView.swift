@@ -108,6 +108,21 @@ struct IssueListView: View {
         BeadColumnSpec(
             id: SortColumn.pageRank.rawValue, title: "PageRank", sort: .pageRank,
             width: 86, minWidth: 76, maxWidth: 120),
+        // Declared always, including for a workspace with no repository, where
+        // it renders as absent with a reason.
+        //
+        // `vbx-cbw` asked for it to be *hidden* there, by analogy with History
+        // (`vbx-x8x`). Two things argue the other way inside the table. The
+        // established rule here is that an unavailable metric is shown as
+        // absent and says why — PageRank does exactly that before Phase 2 —
+        // whereas a column that comes and goes is a thing the header menu and
+        // the stored layout have no concept of. And `sanitize` prunes stored
+        // widths for columns it does not know about, deliberately and with a
+        // test, so a column that disappeared would take the user's chosen width
+        // with it and not give it back.
+        BeadColumnSpec(
+            id: SortColumn.commits.rawValue, title: "Commits", sort: .commits,
+            width: 78, minWidth: 70, maxWidth: 110),
         BeadColumnSpec(
             id: SortColumn.labels.rawValue, title: "Labels", sort: .labels,
             width: 140, minWidth: 80, maxWidth: 4000, editing: .labels),
@@ -137,7 +152,9 @@ struct IssueListView: View {
 
     private var rows: [IssueRow] {
         let metrics = store.metrics
-        return store.visibleIssues.map { IssueRow(issue: $0, metrics: metrics) }
+        return store.visibleIssues.map {
+            IssueRow(issue: $0, metrics: metrics, commitCount: store.commitCount(for: $0.id))
+        }
     }
 
     var body: some View {
@@ -150,7 +167,12 @@ struct IssueListView: View {
             // Refused rather than applied, so a metric with no values cannot
             // become an order with nothing on screen to explain it.
             canSort: { column in
-                !(column.requiresPhase2 && !store.metrics.hasPhase2Values)
+                if column.requiresPhase2, !store.metrics.hasPhase2Values { return false }
+                // Ordering by counts nobody has read yet would sort by zeros
+                // and put the list in an order the screen cannot explain — the
+                // same refusal PageRank gets before Phase 2.
+                if column.requiresHistory, !store.historyLoaded { return false }
+                return true
             },
             content: { spec, row in cellContent(spec, row) },
             editableText: { _, row in row.issue.title },
@@ -265,6 +287,13 @@ struct IssueListView: View {
                 value: row.pageRank,
                 status: store.metrics.status?.pageRank,
                 format: { String(format: "%.4f", $0) })
+
+        case SortColumn.commits.rawValue:
+            CommitCountCell(
+                count: row.commitCount,
+                reason: store.hasGitRepository
+                    ? "Reading commits from git…"
+                    : "This workspace is not in a git repository")
 
         case SortColumn.labels.rawValue:
             // Identity is the position, not the label: a bead carrying the
@@ -560,6 +589,9 @@ struct IssueRow: Identifiable {
     let blocks: Int
     let blockedBy: Int
     let pageRank: Double?
+    /// Commits the engine attributed to this bead, or nil when the correlation
+    /// report has not been read — which is not the same as none.
+    let commitCount: Int?
 
     var id: Issue.ID { issue.id }
     var priority: Int { issue.priority }
@@ -576,12 +608,16 @@ struct IssueRow: Identifiable {
     /// refuses the sort outright until Phase 2 lands, so this is never the
     /// ordering the user actually sees.
     var pageRankKey: Double { pageRank ?? 0 }
+    /// The same arrangement for commits: absent sorts as zero, and the binding
+    /// refuses the ordering until the walk has landed.
+    var commitsKey: Int { commitCount ?? 0 }
 
-    init(issue: Issue, metrics: GraphMetrics) {
+    init(issue: Issue, metrics: GraphMetrics, commitCount: Int? = nil) {
         self.issue = issue
         self.blocks = metrics.blocks(issue.id)
         self.blockedBy = metrics.blockedBy(issue.id)
         self.pageRank = metrics.pageRank?[issue.id]
+        self.commitCount = commitCount
     }
 
     /// The comparator that renders `column` in the given direction.
@@ -597,6 +633,7 @@ struct IssueRow: Identifiable {
         case .blocks: return KeyPathComparator(\IssueRow.blocks, order: order)
         case .blockedBy: return KeyPathComparator(\IssueRow.blockedBy, order: order)
         case .pageRank: return KeyPathComparator(\IssueRow.pageRankKey, order: order)
+        case .commits: return KeyPathComparator(\IssueRow.commitsKey, order: order)
         case .labels: return KeyPathComparator(\IssueRow.labelsKey, order: order)
         case .created: return KeyPathComparator(\IssueRow.createdKey, order: order)
         case .updated: return KeyPathComparator(\IssueRow.updatedKey, order: order)
@@ -616,6 +653,7 @@ struct IssueRow: Identifiable {
         case \IssueRow.blocks: .blocks
         case \IssueRow.blockedBy: .blockedBy
         case \IssueRow.pageRankKey: .pageRank
+        case \IssueRow.commitsKey: .commits
         case \IssueRow.labelsKey: .labels
         case \IssueRow.createdKey: .created
         case \IssueRow.updatedKey: .updated
@@ -624,7 +662,6 @@ struct IssueRow: Identifiable {
     }
 }
 
-/// Renders a Phase-2 value, or *why* there isn't one. Never shows a bare 0.
 /// One character saying how a bead differs from the last commit.
 ///
 /// `+` added, `*` modified. There is no `-`: a deleted bead has no row to draw
@@ -662,6 +699,39 @@ struct DirtyMarkCell: View {
     }
 }
 
+/// How many commits are attributed to a bead.
+///
+/// **Absent is not zero**, and the two must not look alike: a column that
+/// rendered nought for both would tell someone their work is uncorrelated when
+/// in fact nothing has been read yet.
+///
+/// So zero is spelled `0` here rather than taking the house em dash that
+/// `IssueRow.countLabel` gives a zero elsewhere. In this column the dash has to
+/// mean *unknown*, and one glyph cannot mean both. The tooltip says which kind
+/// of unknown it is — a walk still running, or a workspace with no repository
+/// to walk.
+struct CommitCountCell: View {
+    let count: Int?
+    /// Why there is no number, shown when there is none.
+    let reason: String
+
+    var body: some View {
+        if let count {
+            Text("\(count)")
+                .monospacedDigit()
+                // Zero is a real answer and a quiet one: the walk ran and
+                // attributed nothing to this bead.
+                .foregroundStyle(count > 0 ? .primary : .tertiary)
+                .help(count == 1 ? "1 commit" : "\(count) commits")
+        } else {
+            Text("—")
+                .foregroundStyle(.tertiary)
+                .help(reason)
+        }
+    }
+}
+
+/// Renders a Phase-2 value, or *why* there isn't one. Never shows a bare 0.
 struct MetricCell: View {
     let value: Double?
     let status: MetricStatusEntry?

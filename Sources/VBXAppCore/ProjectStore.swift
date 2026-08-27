@@ -354,7 +354,8 @@ public final class ProjectStore: ObservableObject {
             return searchResults.rankedIDs.compactMap { byID[$0] }
         }
         guard let recipeIDs else {
-            return query.apply(to: issues, actionable: actionable, metrics: metrics)
+            return query.apply(
+                to: issues, actionable: actionable, metrics: metrics, commits: commitCounts)
         }
         let byID = issuesByID
         let selected = recipeIDs.compactMap { byID[$0] }
@@ -1459,6 +1460,33 @@ public final class ProjectStore: ObservableObject {
     }
 
     // MARK: - Correlation
+
+    /// How many commits the engine attributed to each bead, or nil when that
+    /// is not known yet.
+    ///
+    /// **Nil is not empty.** A workspace whose walk has not finished, and one
+    /// with no repository at all, have no counts — which is a different fact
+    /// from a bead the walk found no commits for. Anything rendering this has
+    /// to keep them apart, or it tells the user their work is uncorrelated when
+    /// nothing has been read.
+    ///
+    /// `.count` of what the engine attributed, and nothing more: which commits
+    /// belong to a bead is the engine's judgement — explicit reference,
+    /// co-commit pattern, file overlap, temporal proximity — and re-deriving
+    /// any part of that here is the drift ADR-001 exists to prevent.
+    public var commitCounts: [String: Int]? {
+        guard historyLoaded else { return nil }
+        return history.histories.mapValues { $0.commits.count }
+    }
+
+    /// The commit count for one bead, or nil when the report is not loaded.
+    ///
+    /// A bead the report has no entry for is zero, not nil: the walk ran and
+    /// attributed nothing to it.
+    public func commitCount(for id: Issue.ID) -> Int? {
+        guard historyLoaded else { return nil }
+        return history.histories[id]?.commits.count ?? 0
+    }
 
     /// Forgets the correlation report and everything read alongside it.
     ///
