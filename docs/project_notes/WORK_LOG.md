@@ -27,6 +27,36 @@ Found on the way: `swift test` was **already red on `main`** — the gutter's
 "draws a mark in the real table" test measures ink inside the gutter cell, and
 the mark had been moved outside that cell on purpose. Repaired here, because
 there is no green verify to ship against otherwise. See BUGS.md.
+## 2026-08-24 — Pinch and two-finger scroll on the graph (vbx-vnl)
+
+The graph zoomed only from its two buttons and panned only by holding the mouse
+down. Asked for the trackpad gestures a canvas is expected to have.
+
+SwiftUI supplies half. `MagnifyGesture` is a real pinch over a `Canvas`; there
+is no scroll gesture at all, and `ScrollView` cannot be the answer because the
+camera is a transform *inside* the canvas rather than a scrolled subview. So the
+scroll half is an `NSEvent` local monitor behind a view that returns `nil` from
+`hitTest(_:)` — the mouse stays entirely SwiftUI's, which after ADR-014 is worth
+insisting on. ADR-019 records why a monitor rather than a view that takes the
+event.
+
+The camera became a value type in the same change, which is the part that made
+any of this assertable: a pinch cannot be delivered headlessly, so the
+arithmetic has to be reachable without one. Ten assertions came out of it,
+including one that surprised me — a synthesised `CGEvent` scroll posted to the
+process arrives with **no window**, so the monitor's own scoping rejects it. That
+closed the door on testing delivery, and the honest thing was to write that down
+in the ADR rather than assert something weaker and call it covered. What *is*
+covered either side of the gap: the anchored zoom, the clamping, the pan, a
+scroll event's deltas in both units, and — with the catcher hosted for real —
+that its rectangle actually covers the graph, the failure mode being an overlay
+that ends up zero-sized and looks exactly like a gesture macOS never sent.
+
+Two things fell out of doing it properly. Hit-testing now goes through the same
+camera as the drawing, where it had been a second copy of the transform. And the
+buttons anchor on the middle of the pane: leaving the offset alone had slid the
+graph off the pane, so zooming in twice needed a drag afterwards to find the
+nodes again.
 
 ---
 
@@ -48,6 +78,105 @@ Worth keeping: the two preflight bugs failed closed and this one failed open,
 and the open one was much more expensive — it is only caught after a universal
 build and a round trip to Apple, by Apple. Running the whole path deliberately,
 before it mattered, is what turned a silent failure into a caught one.
+
+---
+
+## 2026-08-26 — A Commits column, and a silent default it uncovered (vbx-cbw)
+
+`histories[id].commits.count`, which is `.count` of what the engine attributed
+and nothing more — which commits belong to a bead is the engine's judgement, and
+re-deriving any of it here is the drift ADR-001 exists to prevent.
+
+**Absent is not zero**, and the column is built around keeping them apart.
+`commitCount(for:)` returns nil until the walk lands and zero for a bead the
+walk attributed nothing to. The cell spells zero as `0` rather than taking the
+house em dash `IssueRow.countLabel` gives a zero elsewhere: in this column the
+dash has to mean *unknown*, and one glyph cannot mean both. The tooltip says
+which kind of unknown — a walk still running, or a workspace with no repository.
+
+Sorting is refused until the counts exist (`SortColumn.requiresHistory`,
+mirroring `requiresPhase2`), because ordering by values nobody has read yet
+sorts by zeros and leaves nothing on screen to explain the order.
+
+**Deviation from the bead, deliberately.** It asked for the column to be
+*hidden* where there is no repository, by analogy with History (`vbx-x8x`). Two
+things argue the other way inside the table: the established rule here is that
+an unavailable metric is shown as absent and says why — PageRank does exactly
+that before Phase 2 — and `sanitize` prunes stored widths for columns it does
+not know about, deliberately and with a test, so a column that came and went
+would take the user's chosen width with it and never give it back.
+
+**The silent default it uncovered.** `SortMode.ascending` had a `default: false`
+catch-all. `commitsAscending` matched it, so the new ordering sorted descending
+while claiming to ascend — caught only because the test asserted the actual
+order rather than that sorting "worked". The switch is exhaustive now, so the
+next case has to be classified or the build stops. That is the second silent
+catch-all this area has produced (see `rowMenu`'s unread `specs[1]` parameter
+in `vbx-dot`), and both were harmless-looking until they weren't.
+
+Tests: `Commit count column` — the count is the report's, unloaded is nil,
+loaded-with-nothing is zero, the cell draws zero and unknown differently
+(rendered, against an opaque ground, after a layout pass — the first version
+measured three blank images and "passed" every comparison), the column follows
+the identifier contract, sorting is refused while unknown, and the ordering runs
+both ways. 544 passing, green twice.
+
+**Not visually confirmed in a running app.** The build launches, but the window
+restores a different workspace and the column sits beyond the inspector's edge;
+after two attempts I stopped rather than spend more on the screenshot. The
+rendering assertion is what stands behind it.
+
+---
+
+## 2026-08-26 — The correlation report loads on open, and stays current (vbx-g3q)
+
+`loadHistory()` had exactly two kinds of caller, both in `HistoryView`, so the
+report existed only after someone visited that view — and `historyLoaded` was
+never invalidated, so commits landing while the workspace was open left it
+describing the repository as it was.
+
+Now `startHistoryWalk()` runs on open and again whenever `HEAD` moves, in the
+background: the walk is the expensive thing this app does, and an open that
+waited for it would be an open that waits for git.
+
+**The `HEAD` watch was fixed first, because everything else rests on it.**
+`gitHeadPath` tested `<workspace>/.git/HEAD`, one level, so it missed a
+workspace below the repository root *and* every git worktree — where `.git` is a
+file holding a `gitdir:` pointer. It now resolves through `gitRepositoryRoot`
+and follows the pointer. Until today that only made dirty marks slow to clear;
+building "keep the report current" on the same watch would have shipped a
+feature that silently did nothing in exactly the checkouts this project is
+developed in. A `.git` file that is *not* a `gitdir:` pointer installs no watch
+rather than guessing.
+
+**Two bugs the tests found, not the design.**
+
+- A walk that finishes after the workspace changed would publish into the store
+  that had moved on. Every open bumps a generation; a walk carries the one it
+  started under and publishes nothing if that is no longer current.
+- Cancelling was not enough. A workspace with **no repository** starts no walk,
+  so there was nothing to overwrite what the previous one published: opening a
+  bare workspace left the last repository's commits on screen. `resetHistory()`
+  now clears the report on a workspace change, for the same reason the filters
+  and the navigation history are cleared.
+
+**No repository is not an error.** The walk is skipped and `historyError` stays
+nil. That distinction is what `vbx-cbw`'s column stands on: not-loaded,
+loaded-with-nothing and no-repository have to be three different answers.
+
+**A cost the suite made visible.** Every store the tests open would now start a
+walk, and dozens at once is contention the harness pays for and learns nothing
+from — so `loadsHistoryEagerly` exists, defaulting to true and turned off by the
+fixtures, the same bargain `skipPhase2` already strikes. The dedicated suite
+opts back in. The wait budget in those tests is deliberately generous: in a run
+where the walk was still in flight at ten seconds, the test's own setup had
+taken ~65 — a tight budget there measures the machine's load, not the feature.
+
+Tests: `Eager history` — the report loads without the History view, a
+repository-less workspace is neither loaded nor an error, the three states are
+distinguishable, `HEAD` resolves to where git actually keeps it, a `gitdir:`
+pointer is followed, an unreadable `.git` file installs no watch, and a stale
+walk publishes nothing. 537 passing, green three runs in a row.
 
 ---
 

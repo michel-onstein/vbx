@@ -931,3 +931,75 @@ check turns it into something the build says out loud, with a one-line answer.
   modified since their last real change. Accepted: the alternative is editing
   the export by hand, behind `br`'s back, which is how the database and the
   JSONL come apart.
+## ADR-019 — The graph's camera is a value, and the trackpad reaches it through a monitor
+
+**Date:** 2026-08-24 · **Status:** Accepted
+
+**Context.** The graph could be zoomed only with two buttons and panned only by
+holding the mouse down and dragging. On a laptop that is the wrong shape for the
+gesture: a pinch is how a canvas is zoomed on macOS and two fingers are how it
+is moved, and neither reached the graph.
+
+SwiftUI supplies exactly half of what is needed. `MagnifyGesture` is a pinch and
+works over a `Canvas`. There is **no** scroll gesture — `ScrollView` is the only
+route to a two-finger scroll, and it is the wrong one here: the camera is a
+transform applied inside the `Canvas`, so wrapping the canvas would hand the
+offset to a container that knows nothing about the zoom, and hit-testing would
+have to be reconciled with a scrolled clip view.
+
+**Decision, part one: the camera is a value type.** ``GraphCamera`` holds the
+scale and the offset and owns every operation on them, including the arithmetic
+that keeps a point fixed while the scale changes. Drawing, hit-testing, the
+buttons and both gestures all go through it.
+
+This is what makes any of it assertable. A pinch cannot be delivered to a
+headless test, so if the camera lived as two `@State` numbers mutated inside
+gesture closures there would be nothing to test but pixels. As a value, the
+anchored zoom, the clamping and the pan are ordinary assertions.
+
+**Decision, part two: two-finger scrolling arrives through a local event
+monitor.** ``GraphScrollCatcher`` is an `NSViewRepresentable` whose view returns
+`nil` from `hitTest(_:)` — it never takes a click — and whose coordinator holds
+an `NSEvent` local monitor for `.scrollWheel`, scoped to events whose window is
+this view's window and whose location falls inside its bounds.
+
+The obvious alternative is an `NSView` that hit-tests and implements
+`scrollWheel(with:)`. A scroll event is delivered to the view under the pointer,
+so that view must be in the hit-testing path — and then it also receives every
+click, taking selection, hover and the drag-pan away from SwiftUI and putting
+them on the responder chain to be forwarded by hand. ADR-014 is the record of
+what it costs to fight that. A monitor sees the event before delivery without
+being in the hit-testing path at all, which is why the mouse still belongs
+entirely to SwiftUI.
+
+**Consequences.**
+
+- **The buttons now zoom about the middle of the pane**, where before they
+  changed the scale and left the offset alone — which slid the graph across the
+  pane and off it, so zooming in twice needed a drag afterwards to find the
+  nodes again. The buttons and the pinch are the same operation with a different
+  anchor, and one range clamps both, so the percentage readout means the same
+  thing whichever produced it.
+- **A pinch at either end of the range is a no-op**, not a recentre. Clamping
+  the scale while still moving the offset would drift the graph a little on
+  every event of a gesture that has visibly stopped scaling.
+- **Both continuous gestures apply increments**, not a value recomputed from a
+  camera captured when the gesture started. A pinch and a drag can run at once
+  on a trackpad; two gestures each recomputing from their own baseline discard
+  each other's work, and the graph jumps between two cameras while both hands
+  are moving.
+- **A mouse wheel pans too**, at 16 points per line. Wheel events report a count
+  of lines rather than a distance, and unscaled a notch moves the graph by a
+  point — which reads as a dead wheel rather than as a unit mistake.
+- **Consumed, not observed.** A scroll over the graph returns `nil` from the
+  monitor so nothing enclosing the graph scrolls as well.
+- **Still not testable: delivery.** Whether macOS routes a real pinch or scroll
+  to this view is not something a test process can answer. A synthesised
+  `CGEvent` scroll posted to the process arrives with **no window**, so the
+  monitor's own scoping rejects it — measured, not assumed. What is asserted is
+  either side of the gap: the camera arithmetic, the reading of a scroll event's
+  deltas (from a synthesised event, both units), and — with the catcher hosted
+  for real in a window — that its rectangle covers the graph and that a point
+  outside it is refused. The failure this last one guards is an overlay that
+  ends up zero-sized, which is indistinguishable from a gesture the system never
+  delivered.

@@ -229,6 +229,23 @@ public final class ProjectStore: ObservableObject {
     @Published public private(set) var hotspots: FileHotspots = .empty
     @Published public private(set) var feedback: CorrelationFeedbackReport = .empty
     @Published public private(set) var historyLoaded = false
+
+    /// Whether this store walks git of its own accord.
+    ///
+    /// True in the app: the report is wanted before anything asks for it. The
+    /// test suite turns it off for the stores whose subject is something else,
+    /// the same bargain ``skipPhase2`` strikes — dozens of stores opening at
+    /// once, each starting a git walk, is contention the harness pays for and
+    /// learns nothing from. The History view's own `loadHistory()` is not gated
+    /// by this, so a view that asks still gets an answer.
+    @Published public var loadsHistoryEagerly = true
+
+    /// The walk in flight, so opening another workspace can cancel it.
+    private var historyTask: Task<Void, Never>?
+
+    /// Bumped by every open. A walk carries the generation it started under and
+    /// publishes nothing if that is no longer the current one.
+    private var historyGeneration = 0
     @Published public private(set) var historyLoading = false
     /// Why history is unavailable — most often "not a git repository".
     @Published public private(set) var historyError: String?
@@ -344,7 +361,8 @@ public final class ProjectStore: ObservableObject {
             return searchResults.rankedIDs.compactMap { byID[$0] }
         }
         guard let recipeIDs else {
-            return query.apply(to: issues, actionable: actionable, metrics: metrics)
+            return query.apply(
+                to: issues, actionable: actionable, metrics: metrics, commits: commitCounts)
         }
         let byID = issuesByID
         let selected = recipeIDs.compactMap { byID[$0] }
@@ -655,6 +673,11 @@ public final class ProjectStore: ObservableObject {
         // workspace, so this is what says whether the filters below belong to
         // the workspace being left or the one being opened.
         let previousSource = info?.source
+        // Before anything else: a walk started for the previous workspace must
+        // not publish into this one, and cancelling is not enough on its own
+        // because it may already be past its last cancellation point.
+        historyGeneration &+= 1
+        historyTask?.cancel()
 
         do {
             let info = try await engine.open(path: path, skipPhase2: skipPhase2)
@@ -664,6 +687,12 @@ public final class ProjectStore: ObservableObject {
             // filters — or nothing at all.
             if info.source != previousSource {
                 resetWorkspaceFilters()
+                // The report describes a repository, and this is a different
+                // one. Left in place it would be the previous workspace's
+                // commits shown against these beads — and for a workspace with
+                // no repository at all, where no walk runs to overwrite it, it
+                // would simply stay.
+                resetHistory()
             }
             try await refreshAll()
             // Positions name beads, and the previous workspace's beads do not
@@ -689,6 +718,10 @@ public final class ProjectStore: ObservableObject {
             await loadRecipes()
             startWatching()
             await refreshDirtyState()
+            // In the background: the report is wanted by more than the History
+            // view now, and waiting for git here would make every open wait for
+            // it.
+            startHistoryWalk(refresh: true)
             if !skipPhase2 { await computePhase2() }
         } catch {
             stopWatching()
@@ -767,6 +800,11 @@ public final class ProjectStore: ObservableObject {
             gitWatcher.start(watching: head) { [weak self] in
                 Task { @MainActor in
                     await self?.refreshDirtyState()
+                    // A commit changes which commits are attributed to which
+                    // beads, so the report describes a repository that no
+                    // longer exists. Re-walked rather than marked stale: the
+                    // whole point of this watch is that nothing has to ask.
+                    self?.startHistoryWalk(refresh: true)
                 }
             }
         } else {
@@ -835,16 +873,47 @@ public final class ProjectStore: ObservableObject {
         return ViewSurface.allCases.filter { $0 != .history }
     }
 
-    /// `<workspace>/.git/HEAD`, when the workspace is in a git repository.
+    /// The `HEAD` to watch for this workspace, or nil when there is none.
     ///
     /// Watching the file rather than the directory: `FileWatchService` watches
-    /// a path's *parent*, so this ends up watching `.git`, which is what also
-    /// catches the index moving.
+    /// a path's *parent*, so this ends up watching the git directory, which is
+    /// what also catches the index moving.
+    ///
+    /// **Resolved through ``gitRepositoryRoot`` rather than by testing
+    /// `<workspace>/.git/HEAD`.** Two cases the old, one-level version missed,
+    /// and both of them matter now that more than the dirty marks depend on
+    /// this watch:
+    ///
+    /// - a workspace in a *subdirectory* of a repository, where `.git` is
+    ///   further up;
+    /// - a **git worktree**, where `.git` is a file holding a `gitdir:` pointer
+    ///   and `HEAD` lives at the far end of it. Every session in this project
+    ///   works in a worktree, so this was the case that silently did not work.
     public var gitHeadPath: String? {
-        guard let workspace = workspaceDirectory else { return nil }
-        let head = URL(fileURLWithPath: workspace)
-            .appendingPathComponent(".git")
-            .appendingPathComponent("HEAD")
+        guard let root = gitRepositoryRoot else { return nil }
+        let dot = URL(fileURLWithPath: root).appendingPathComponent(".git")
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dot.path, isDirectory: &isDirectory)
+        else { return nil }
+
+        let gitDirectory: URL
+        if isDirectory.boolValue {
+            gitDirectory = dot
+        } else {
+            // `gitdir: /path/to/repo/.git/worktrees/topic`, one line. Anything
+            // else is a `.git` file this does not understand, and guessing at
+            // it would install a watch on a path that does not exist.
+            guard let contents = try? String(contentsOf: dot, encoding: .utf8),
+                let line = contents.split(separator: "\n").first,
+                line.hasPrefix("gitdir:")
+            else { return nil }
+            let pointed = line.dropFirst("gitdir:".count)
+                .trimmingCharacters(in: .whitespaces)
+            gitDirectory = URL(fileURLWithPath: pointed)
+        }
+
+        let head = gitDirectory.appendingPathComponent("HEAD")
         return FileManager.default.fileExists(atPath: head.path) ? head.path : nil
     }
 
@@ -1417,11 +1486,89 @@ public final class ProjectStore: ObservableObject {
 
     // MARK: - Correlation
 
+    /// How many commits the engine attributed to each bead, or nil when that
+    /// is not known yet.
+    ///
+    /// **Nil is not empty.** A workspace whose walk has not finished, and one
+    /// with no repository at all, have no counts — which is a different fact
+    /// from a bead the walk found no commits for. Anything rendering this has
+    /// to keep them apart, or it tells the user their work is uncorrelated when
+    /// nothing has been read.
+    ///
+    /// `.count` of what the engine attributed, and nothing more: which commits
+    /// belong to a bead is the engine's judgement — explicit reference,
+    /// co-commit pattern, file overlap, temporal proximity — and re-deriving
+    /// any part of that here is the drift ADR-001 exists to prevent.
+    public var commitCounts: [String: Int]? {
+        guard historyLoaded else { return nil }
+        return history.histories.mapValues { $0.commits.count }
+    }
+
+    /// The commit count for one bead, or nil when the report is not loaded.
+    ///
+    /// A bead the report has no entry for is zero, not nil: the walk ran and
+    /// attributed nothing to it.
+    public func commitCount(for id: Issue.ID) -> Int? {
+        guard historyLoaded else { return nil }
+        return history.histories[id]?.commits.count ?? 0
+    }
+
+    /// Forgets the correlation report and everything read alongside it.
+    ///
+    /// Called when the workspace changes, for the same reason the filters and
+    /// the navigation history are: all of it describes the workspace being
+    /// left. Cancelling the walk is not enough on its own — a workspace with no
+    /// repository starts no walk, so there would be nothing to overwrite what
+    /// the previous one published.
+    private func resetHistory() {
+        history = .empty
+        orphans = .empty
+        hotspots = .empty
+        feedback = .empty
+        historyLoaded = false
+        historyError = nil
+    }
+
+    /// Starts the correlation walk in the background, for the workspace that
+    /// is open now.
+    ///
+    /// Called on open and whenever `HEAD` moves, so the report is there before
+    /// anything asks for it and does not describe a repository that has since
+    /// moved on. **Off the critical path**: the walk is the expensive thing
+    /// this app does, and an open that waited for it would be an open that
+    /// waits for git.
+    ///
+    /// A workspace with no repository is left alone — not loaded, and **not an
+    /// error**. There is nothing to walk, which is a normal state; recording a
+    /// failure would make it look like something went wrong.
+    func startHistoryWalk(refresh: Bool = false) {
+        historyTask?.cancel()
+        guard isLoaded, hasGitRepository, loadsHistoryEagerly else {
+            historyTask = nil
+            return
+        }
+        let generation = historyGeneration
+        historyTask = Task { @MainActor [weak self] in
+            await self?.loadHistory(refresh: refresh, generation: generation)
+        }
+    }
+
     /// Loads the git correlation report, once.
     ///
     /// Idempotent, so a view can call it from `.task` on every appearance
     /// without paying for a second walk. Pass `refresh` to force one.
     public func loadHistory(refresh: Bool = false) async {
+        await loadHistory(refresh: refresh, generation: historyGeneration)
+    }
+
+    /// The walk itself, tagged with the generation that asked for it.
+    ///
+    /// **Nothing is published if the workspace changed while git was being
+    /// read.** The engine is re-opened by `open(path:)`, so a walk in flight
+    /// returns whatever the engine holds *now* — without this guard, opening a
+    /// second workspace during the first one's walk publishes a report into a
+    /// store that has moved on, and the user sees another project's commits.
+    private func loadHistory(refresh: Bool, generation: Int) async {
         guard isLoaded, !historyLoading else { return }
         guard refresh || !historyLoaded else { return }
 
@@ -1430,12 +1577,15 @@ public final class ProjectStore: ObservableObject {
         defer { historyLoading = false }
 
         do {
-            history = try await engine.history(refresh: refresh)
+            let report = try await engine.history(refresh: refresh)
+            guard generation == historyGeneration else { return }
+            history = report
             // These read the same cached report, so they are cheap once the
             // walk is done.
             orphans = (try? await engine.orphanCommits()) ?? .empty
             hotspots = (try? await engine.fileHotspots()) ?? .empty
             feedback = (try? await engine.correlationFeedback()) ?? .empty
+            guard generation == historyGeneration else { return }
             historyLoaded = true
         } catch {
             // A workspace outside a git repository is a normal state, not a
