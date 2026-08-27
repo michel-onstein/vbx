@@ -323,6 +323,13 @@ public final class ProjectStore: ObservableObject {
     /// existing watch would never fire, and the list would keep marking rows
     /// that are now committed.
     private let gitWatcher = FileWatchService()
+
+    /// Whether the repository watch is running.
+    ///
+    /// Exposed because the interesting case is it being *off*: a workspace in
+    /// no repository must not leave the previous workspace's `.git` watch
+    /// running, and nothing observable from outside says so otherwise.
+    var isWatchingGit: Bool { gitWatcher.isWatching }
     private let notifier = AlertNotifier()
     private let spotlight = SpotlightIndexer()
     private var triageNeedsRefresh = false
@@ -766,8 +773,21 @@ public final class ProjectStore: ObservableObject {
     // MARK: - Watching
 
     /// Starts live reload for the currently open workspace.
+    ///
+    /// Aimed at whatever is open *now*, every time. It used to return early
+    /// while a watch was already running, which is right for the workspace it
+    /// was started on and wrong for the next one: opening a second workspace
+    /// left the stream on the first, so nothing written to the open one ever
+    /// arrived. Everything else looked correct — loaded, listed, and reporting
+    /// that it was watching — which is why it read as "vbx does not pick up
+    /// external changes" rather than as anything to do with switching
+    /// workspaces. Opening the demo and then a real workspace is enough to
+    /// reach it. See vbx-d9p.
+    ///
+    /// Restarting is cheap, and `FileWatchService.start` stops its own stream
+    /// first, so this is safe to call again for the same source.
     public func startWatching() {
-        guard let source = info?.source, !isWatching else { return }
+        guard let source = info?.source else { return }
         watcher.start(watching: source) { [weak self] in
             Task { @MainActor in
                 await self?.reload()
@@ -787,6 +807,11 @@ public final class ProjectStore: ObservableObject {
                     self?.startHistoryWalk(refresh: true)
                 }
             }
+        } else {
+            // The workspace being opened is in no repository. Left running,
+            // the previous workspace's `.git` watch would go on recomputing
+            // this one's dirty state against a repository it is not in.
+            gitWatcher.stop()
         }
         isWatching = watcher.isWatching
     }

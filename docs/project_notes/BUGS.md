@@ -1253,3 +1253,58 @@ created is gone, and a tag it did not create survives.
 to make the refusal happen. Relying on the environment to refuse means the test
 passes for the wrong reason on one machine and performs the operation on
 another — and the more configured the machine, the more the test does.
+
+---
+
+## 2026-08-26 — The watch stayed on the workspace you left
+
+**Symptom:** beads changed outside vbx — a `br` run in a terminal, a `git pull`
+— did not reach an open window. Only a manual refresh caught up. Filed as
+vbx-d9p.
+
+**Cause:** `startWatching()` opened with
+
+```swift
+guard let source = info?.source, !isWatching else { return }
+```
+
+`!isWatching` is right for the workspace the watch was started on and wrong for
+the next one. `open(path:)` never stops the previous watch, so opening a second
+workspace hit the early return and left the FSEvents stream aimed at the
+*first* one. The window then showed workspace B while vbx watched — and
+reloaded — workspace A.
+
+Everything else looked correct, which is why it read as "vbx doesn't pick up
+external changes" rather than as anything to do with switching workspaces: the
+new workspace was loaded, listed, and `isWatching` was `true`. It was, at the
+wrong path.
+
+File ▸ Open… is enough to reach it: `presentOpenPanel()` calls `open(path:)` on
+the same store. Opening the demo workspace and then a real one is the same
+path, which is most of the ways anyone arrives here.
+
+**Fix:** drop `!isWatching` and aim the watch at whatever is open now. Cheap,
+and `FileWatchService.start` stops its own stream first, so calling it again
+for the same source is safe. The `.git` watch gets the matching treatment: a
+workspace in no repository stops the previous one's, or that watch goes on
+recomputing this workspace's dirty state against a repository it is not in.
+
+**Prevention:** three tests in `ExternalChangeTests`. The interesting one is the
+second: both halves of this were already tested and both passed — the watcher
+fires on a real write (`WatchTests`), and `reload()` picks up a real change
+(`WatchTests`). Nothing covered the join, and nothing covered it *after a second
+open*. A test that opens one workspace, opens another, writes to the second and
+waits fails on the old code and passes on the new.
+
+**Confirmed in the running app, not only in tests.** Instrumented, the old build
+prints `startWatching called source=…/ws-b/… isWatching=true` and never arms —
+then a write to ws-b produces no event at all, while a write to ws-a, which is
+no longer on screen, still reloads. The new build arms on ws-b and the write
+arrives. Worth the trouble: the first attempt to reproduce it in the app used
+the `vbx://` URL scheme, which opens a *new window with a fresh store* and so
+never reaches the guard — it looked fixed on a build that was not.
+
+**The part worth remembering:** an idempotence guard has to be keyed on *what*
+the work is for, not on whether some work is already running. `!isWatching`
+answers "is a watch running", and the question was "is a watch running on this
+workspace".

@@ -1548,3 +1548,12 @@ exist, so the refusal is a property of the run, and asserts no tag is left
 behind. `release.sh` also takes back a tag it created when the release does not
 finish, so a failed or interrupted release no longer spends the version. See
 BUGS.md, 2026-08-26.
+
+## 2026-08-26 — vbx-d9p: external bead changes reach an open window
+
+`startWatching()` returned early while any watch was running, so opening a
+second workspace left the FSEvents stream on the first — the window showed one
+workspace and vbx watched another. Dropped the guard, and stopped the `.git`
+watch when the new workspace is in no repository. Three tests cover the join
+the existing watcher and reload tests each half-covered, and the before/after
+was confirmed in the running app. See BUGS.md, 2026-08-26.
