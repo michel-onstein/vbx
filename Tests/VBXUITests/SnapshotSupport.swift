@@ -367,10 +367,7 @@ enum Fixture {
     static func committedStore(
         eagerHistory: Bool = false
     ) async throws -> (store: ProjectStore, directory: URL) {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("vbx-git-\(UUID().uuidString)")
-        try FileManager.default.copyItem(
-            at: URL(fileURLWithPath: path), to: directory)
+        let directory = try copy(prefix: "vbx-git")
 
         // An identity in the environment rather than in config: it must not
         // depend on whatever the machine running the tests has set, and it must
@@ -406,14 +403,39 @@ enum Fixture {
 
     /// Returns the store and the directory, which the caller removes when done.
     static func writableStore() async throws -> (store: ProjectStore, directory: URL) {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("vbx-fixture-\(UUID().uuidString)")
-        try FileManager.default.copyItem(
-            at: URL(fileURLWithPath: path), to: directory)
+        let directory = try copy()
 
         let store = ProjectStore()
         await store.open(path: directory.path)
         await store.computePhase2()
         return (store, directory)
+    }
+
+    /// Copies a workspace to a fresh temporary directory, keeping only the
+    /// committed `issues.jsonl` and dropping `br`'s local state beside it.
+    ///
+    /// The fixture's beads are the JSONL. `.beads/beads.db` and its side
+    /// files are a cache `br` builds the first time it runs in a directory, and
+    /// one left in a checkout's `Fixtures/demo` — by anyone who ever ran `br`
+    /// there — went into every copy. When that cache did not hold the rows the
+    /// JSONL did, the copy's first `br update` answered `ISSUE_NOT_FOUND`
+    /// while `br list` in the same directory found the bead, and every test
+    /// writing through `br` failed on a clean `main`. With the cache gone, `br`
+    /// builds it from the JSONL the test is actually about. See BUGS.md,
+    /// 2026-10-01 (vbx-fcq).
+    ///
+    /// Returns the copy, which the caller removes when done.
+    static func copy(from source: String? = nil, prefix: String = "vbx-fixture") throws -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: source ?? path), to: directory)
+
+        let beads = directory.appendingPathComponent(".beads")
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: beads.path)) ?? []
+        for entry in entries where entry != "issues.jsonl" {
+            try FileManager.default.removeItem(at: beads.appendingPathComponent(entry))
+        }
+        return directory
     }
 }

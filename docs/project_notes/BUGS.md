@@ -4,6 +4,35 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — A copied fixture's first `br` write could not find any bead
+
+**Symptom:** every test that copied `Fixtures/demo` and then wrote through
+`br` failed — 24 assertions across Title editing, Priority editing and
+Uncommitted beads, red on a clean `main`. By hand, in a copy, `br update vbx-12
+--priority=1` answered `ISSUE_NOT_FOUND` while `br list` in the same directory
+listed vbx-12, and after that `br list` the same update succeeded. (vbx-fcq)
+
+**Cause:** `Fixture.writableStore()` and `committedStore()` copied the whole
+fixture directory, including any `.beads/beads.db` a checkout had picked up
+from someone running `br` there. That database is a local cache of the JSONL,
+not part of the fixture, and the copied one did not hold the JSONL's rows. A
+read imported the JSONL first; the lookup behind a write did not, and the write
+was the first command every such test issued.
+
+**Fix:** both helpers now copy through `Fixture.copy(from:prefix:)`, which keeps
+`.beads/issues.jsonl` and removes everything else in `.beads/`, so `br` builds
+its cache from the JSONL the test is about. `br` 0.6.0 also no longer
+reproduces the failure on its own — a stale, newer or corrupt `beads.db` beside
+a full JSONL all accept the write — but the fixture should not depend on that.
+
+**Prevention:** `Tests/VBXUITests/FixtureCopyTests.swift`. `copyDropsBRCache`
+plants a database, WAL and lock in a source workspace and asserts the copy
+holds only `issues.jsonl`; it fails with the removal taken out.
+`firstCommandIsAWrite` issues a `br` priority write as the first command
+against a cold copy and reads it back.
+
+---
+
 ## 2026-10-01 — `br` in `~/.local/bin` was invisible to a Finder launch
 
 **Symptom:** launched from Finder or the Dock, vbx reported `br` missing and
