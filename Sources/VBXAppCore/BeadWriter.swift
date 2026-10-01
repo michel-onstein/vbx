@@ -137,13 +137,56 @@ public final class BeadWriter: ObservableObject {
             output = try await runner([executable] + arguments, workspace)
         }
         guard output.succeeded else {
-            let message =
-                output.standardError.isEmpty
-                ? output.standardOutput : output.standardError
             throw WriteError.failed(
                 command: "br " + arguments.joined(separator: " "),
-                message: message.trimmingCharacters(in: .whitespacesAndNewlines))
+                message: Self.failureMessage(output))
         }
+    }
+
+    /// What to tell the user about a failed run.
+    ///
+    /// `br` answers a `--json` command that fails with a structured error on
+    /// **stdout** — `{"error":{"code","message","hint",…}}`, from 0.6.0 and
+    /// 0.7.4 alike — and that is the message meant for a person. Stderr is
+    /// not: `br` 0.7.4 writes its tracing log there, so a failed write can
+    /// carry two dozen `ERROR fsqlite_pager::pager: …` lines that say nothing
+    /// about what went wrong. So the JSON's `message` (and `hint`, when there
+    /// is one) wins whenever it parses; otherwise stderr, which is where
+    /// argument errors and anything pre-JSON go; otherwise stdout as it is.
+    nonisolated static func failureMessage(_ output: Output) -> String {
+        if let error = structuredError(in: output.standardOutput) {
+            guard let hint = error.hint?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !hint.isEmpty
+            else { return error.message }
+            return "\(error.message) — \(hint)"
+        }
+        let error = output.standardError.trimmingCharacters(in: .whitespacesAndNewlines)
+        return error.isEmpty
+            ? output.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) : error
+    }
+
+    /// The `error` object of `br`'s JSON failure, when stdout holds one.
+    ///
+    /// Decoded tolerantly: only `message` is required, every other field —
+    /// `code`, `retryable`, `context`, whatever a later `br` adds — is
+    /// ignored, and a `hint` that is absent or `null` is simply no hint.
+    nonisolated static func structuredError(in standardOutput: String) -> StructuredError? {
+        guard let data = standardOutput.data(using: .utf8),
+            let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data)
+        else { return nil }
+        let message = envelope.error.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return nil }
+        return StructuredError(message: message, hint: envelope.error.hint)
+    }
+
+    /// The part of `br`'s JSON error a person needs.
+    struct StructuredError: Decodable, Equatable {
+        let message: String
+        let hint: String?
+    }
+
+    private struct ErrorEnvelope: Decodable {
+        let error: StructuredError
     }
 
     /// The text `br` 0.7.4 fails with on the first write after a stock SQLite

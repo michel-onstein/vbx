@@ -4,6 +4,36 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — A failed edit showed br's log instead of br's error
+
+**Symptom:** when an edit failed under br 0.7.4, the alert read
+`ERROR fsqlite_pager::pager: group-commit callback failed …` — the first of 24
+log lines — rather than what went wrong and what to do about it. Under any br
+version, a failure with an empty stderr (an unknown id, an invalid priority)
+showed the raw JSON blob. (vbx-jmu)
+
+**Cause:** `BeadWriter` preferred stderr whenever it was non-empty. br answers a
+failed `--json` command with `{"error":{"code","message","hint",…}}` on stdout —
+0.6.0 and 0.7.4 alike, checked for an unknown id, an invalid priority, an empty
+title and a label on an unknown id — while 0.7.4 writes its tracing log to
+stderr.
+
+**Fix:** `BeadWriter.failureMessage` shows the JSON error's `message`, plus
+its `hint` after an em dash when the hint is present and not `null`. Decoding
+requires only `message`, so unknown fields and a missing hint are tolerated.
+Without a JSON error it falls back to stderr (argument errors), then stdout.
+
+**Regression test:** `jsonErrorBeatsNoisyStderr` in `BeadWriterTests.swift`
+feeds vbx-1sw's captured 0.7.4 stdout with 24 pager lines on stderr and asserts
+the message and hint are shown; `plainStderrStillShown` keeps the stderr
+fallback; `jsonErrorWithoutHint` and `structuredErrorIsTolerant` cover the
+decoding.
+
+**Prevention:** stderr is a log stream for br, not its error channel; read the
+structured error first for any new `br` call.
+
+---
+
 ## 2026-10-01 — br 0.7's database side files could be committed
 
 **Symptom:** after br 0.7, the main checkout showed

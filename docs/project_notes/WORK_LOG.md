@@ -5,6 +5,16 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — A failed edit shows br's error message and hint (vbx-jmu)
+
+`BeadWriter` now reports the `message` and `hint` from br's JSON error on stdout
+instead of stderr, which under br 0.7.4 holds two dozen pager log lines. Both br
+0.6.0 and 0.7.4 emit that JSON for an unknown id, an invalid priority and an
+empty title; a failure without it still shows stderr, then stdout. Regression
+tests in `BeadWriterTests.swift`; see BUGS.md.
+
+---
+
 ## 2026-10-01 — br 0.7's database side files are ignored (vbx-1a7)
 
 `.beads/.gitignore` now covers what br 0.7.4 (fsqlite 0.3) writes beside its
