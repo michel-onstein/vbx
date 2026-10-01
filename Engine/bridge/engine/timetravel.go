@@ -37,7 +37,7 @@ func (s *Session) decodeRevision(req []byte) (revisionRequest, error) {
 // extractor opens the object store for the current source.
 func (s *Session) extractor() (*objectStoreExtractor, error) {
 	s.mu.RLock()
-	source, issues := s.source, s.issues
+	source, issues := s.source, s.records
 	s.mu.RUnlock()
 	if source == "" {
 		return nil, fmt.Errorf("session has no source")
@@ -120,7 +120,10 @@ func (s *Session) diffSince(req []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	current, _, _ := s.snapshot()
+	// Every record, tombstones included, because the historical side is read
+	// the same way: comparing it with the analysis set would report every
+	// tombstone as removed.
+	current := s.recordSet()
 	from := analysis.NewSnapshotAt(historical, when, hash.String())
 	to := analysis.NewSnapshot(current)
 	diff := analysis.CompareSnapshots(from, to)

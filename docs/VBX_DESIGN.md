@@ -497,6 +497,10 @@ classDiagram
   `deferred`, `draft`, `pinned`, `hooked`, `review`, `closed`, `tombstone`) **plus an
   `unknown(String)` case** — beads is an evolving ecosystem and an unrecognised status must
   render, not crash.
+- A `tombstone` is decoded and kept as a record, but the engine leaves it out
+  of analysis, as `bv` 0.25 does, while `bv`'s readiness index still counts it
+  as a resolved blocker. The record set and the analysis set differ on purpose
+  (ADR-021).
 - `IssueType` likewise: the five known types get icons and sort weights; anything else is
   valid and renders with a default icon, matching `bv`'s `IsValid()` / `IsKnownType()` split
   (which exists to accommodate Gastown types like `role`, `agent`, `molecule`).

@@ -19,6 +19,14 @@ import (
 // written to be schema-tolerant in the same way bv's is: columns that a given
 // beads version does not have are simply absent from the projection rather
 // than causing the whole load to fail.
+//
+// Every row is returned, deleted ones included, as bv's LoadIssueAuthority
+// returns them: a deleted bead is a resolved blocker, and a loader that drops
+// it leaves its dependents waiting on a blocker that no longer exists. What
+// makes a row a tombstone is bv's rule too — its status, or a nonzero
+// `tombstone` column where the schema has one. `deleted_at` alone is not it;
+// bv does not read that column, and br sets both together anyway. The session
+// keeps tombstones out of analysis (see readiness.go).
 func LoadSQLite(path string) ([]model.Issue, error) {
 	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
 	if err != nil {
@@ -38,8 +46,9 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 	want := []string{
 		"id", "title", "description", "design", "acceptance_criteria", "notes",
 		"status", "priority", "issue_type", "assignee", "estimated_minutes",
-		"created_at", "updated_at", "closed_at", "due_at", "external_ref",
-		"source_repo", "compaction_level", "original_size", "deleted_at",
+		"created_at", "updated_at", "closed_at", "due_at", "defer_until",
+		"external_ref", "source_repo", "compaction_level", "original_size",
+		"tombstone",
 	}
 	var selected []string
 	for _, c := range want {
@@ -52,9 +61,6 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 	}
 
 	q := fmt.Sprintf("SELECT %s FROM issues", strings.Join(selected, ", "))
-	if cols["deleted_at"] {
-		q += " WHERE deleted_at IS NULL"
-	}
 
 	rows, err := db.Query(q)
 	if err != nil {
@@ -185,6 +191,16 @@ func assignIssueField(it *model.Issue, col, v string) {
 	case "due_at":
 		if t, ok := parseTime(v); ok {
 			it.DueDate = &t
+		}
+	case "defer_until":
+		// A future defer_until withholds the bead from the ready set, so
+		// leaving it unread made a deferred bead look ready (vbx-hjz).
+		if t, ok := parseTime(v); ok {
+			it.DeferUntil = &t
+		}
+	case "tombstone":
+		if atoiSafe(v) != 0 {
+			it.Status = model.StatusTombstone
 		}
 	}
 }

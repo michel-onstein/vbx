@@ -49,15 +49,23 @@ func findWorkspaceConfig(path string) string {
 }
 
 // loadWorkspace aggregates every repository the configuration names.
-func loadWorkspace(configPath string) ([]model.Issue, []repoLoad, []string, error) {
+//
+// bv's workspace loader drops tombstone records itself and reports their
+// namespaced ids instead; those come back as tombstoneIDs so a deleted blocker
+// still counts as resolved, exactly as bv's own workspace mode treats it.
+func loadWorkspace(configPath string) (
+	issues []model.Issue, loads []repoLoad, warnings []string, tombstoneIDs []string, err error,
+) {
 	issues, results, err := workspace.LoadAllFromConfig(context.Background(), configPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
+		return nil, nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
 	}
 
-	loads := make([]repoLoad, 0, len(results))
-	var warnings []string
+	loads = make([]repoLoad, 0, len(results))
 	for _, result := range results {
+		if result.Error == nil {
+			tombstoneIDs = append(tombstoneIDs, result.TombstoneIDs...)
+		}
 		load := repoLoad{
 			Name:       result.RepoName,
 			Prefix:     result.Prefix,
@@ -75,19 +83,20 @@ func loadWorkspace(configPath string) ([]model.Issue, []repoLoad, []string, erro
 	}
 
 	sort.SliceStable(loads, func(i, j int) bool { return loads[i].Name < loads[j].Name })
-	return issues, loads, warnings, nil
+	return issues, loads, warnings, tombstoneIDs, nil
 }
 
 // loadWorkspaceSession loads every repository the configuration names and
 // analyses them as one graph.
 func (s *Session) loadWorkspaceSession(configPath string) error {
-	issues, loads, warnings, err := loadWorkspace(configPath)
+	records, loads, warnings, tombstoneIDs, err := loadWorkspace(configPath)
 	if err != nil {
 		return err
 	}
 
-	s.bindWorkspaceOrigins(issues)
-	analyzer, stats := s.analyse(issues)
+	s.bindWorkspaceOrigins(records)
+	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
+	analyzer, stats := s.analyse(issues, readiness)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -95,7 +104,9 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 	// and it is what the watcher should follow.
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings
 	s.workspacePath, s.repoLoads = configPath, loads
-	s.issues, s.analyzer, s.stats = issues, analyzer, stats
+	s.issues, s.records, s.readiness = issues, records, readiness
+	s.tombstoneIDs = tombstoneIDs
+	s.analyzer, s.stats = analyzer, stats
 	s.complete = len(warnings) == 0
 	s.loadedAt = timeNow()
 	return nil
@@ -104,16 +115,16 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 // reloadWorkspace re-aggregates every repository, gated on the content hash
 // exactly as the single-repository path is.
 func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
-	issues, loads, warnings, err := loadWorkspace(configPath)
+	records, loads, warnings, tombstoneIDs, err := loadWorkspace(configPath)
 	if err != nil {
 		return nil, err
 	}
 
-	newHash := analysis.ComputeDataHash(issues)
+	newHash := analysis.ComputeDataHash(readinessInput(records, tombstoneIDs))
 	s.mu.RLock()
 	var oldHash string
 	if s.analyzer != nil {
-		oldHash = s.analyzer.DataHash()
+		oldHash = analysis.ComputeDataHash(readinessInput(s.records, s.tombstoneIDs))
 	}
 	s.mu.RUnlock()
 
@@ -125,13 +136,16 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 		return withChangedFlag(payload, false)
 	}
 
-	s.bindWorkspaceOrigins(issues)
-	analyzer, stats := s.analyse(issues)
+	s.bindWorkspaceOrigins(records)
+	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
+	analyzer, stats := s.analyse(issues, readiness)
 
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings
 	s.workspacePath, s.repoLoads = configPath, loads
-	s.issues, s.analyzer, s.stats = issues, analyzer, stats
+	s.issues, s.records, s.readiness = issues, records, readiness
+	s.tombstoneIDs = tombstoneIDs
+	s.analyzer, s.stats = analyzer, stats
 	s.complete = len(warnings) == 0
 	s.loadedAt = timeNow()
 	s.mu.Unlock()

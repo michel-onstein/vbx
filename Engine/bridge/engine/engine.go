@@ -46,11 +46,22 @@ type OpenConfig struct {
 type Session struct {
 	mu sync.RWMutex
 
-	config   OpenConfig
-	source   string // resolved file actually read
-	kind     string // "jsonl" | "sqlite"
-	issues   []model.Issue
-	warnings []string
+	config OpenConfig
+	source string // resolved file actually read
+	kind   string // "jsonl" | "sqlite"
+	// issues is the analysis set: every record except tombstones, which is
+	// what bv analyses. records is every decoded record, tombstones included,
+	// because decoding never drops one — it is what the `issues` payload
+	// returns. readiness is bv's dependency authority over records, so a
+	// tombstoned blocker counts as resolved. See readiness.go and ADR-021.
+	issues    []model.Issue
+	records   []model.Issue
+	readiness *model.ReadinessIndex
+	// tombstoneIDs are deleted beads a loader reported by id alone — bv's
+	// workspace loader keeps no record for them. Readiness and the reload
+	// gate both include them.
+	tombstoneIDs []string
+	warnings     []string
 	// complete is bv's claim-safety verdict on the load: every record parsed
 	// and every repository loaded. A partial load can make a blocked bead
 	// look ready, so no claim command is ever emitted from one.
@@ -199,18 +210,21 @@ func (s *Session) load() error {
 		return err
 	}
 
-	issues, complete, err := s.readSource(src, kind, &warnings)
+	records, complete, err := s.readSource(src, kind, &warnings)
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", src, err)
 	}
 
-	an, stats := s.analyse(issues)
+	issues, readiness := visibleIssues(records), readinessAuthority(records, nil)
+	an, stats := s.analyse(issues, readiness)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.source, s.kind, s.warnings = src, kind, warnings
 	s.workspacePath, s.repoLoads = "", nil
-	s.issues, s.analyzer, s.stats = issues, an, stats
+	s.issues, s.records, s.readiness = issues, records, readiness
+	s.tombstoneIDs = nil
+	s.analyzer, s.stats = an, stats
 	s.complete = complete
 	s.loadedAt = time.Now()
 	return nil
@@ -247,9 +261,15 @@ func (s *Session) readSource(src, kind string, warnings *[]string) ([]model.Issu
 // analyse builds the analyzer and starts the metrics for one issue set.
 //
 // Shared by the single-repository and workspace paths so the two cannot drift
-// apart on which metrics run.
-func (s *Session) analyse(issues []model.Issue) (*analysis.Analyzer, *analysis.GraphStats) {
+// apart on which metrics run. The graph is the visible set; readiness is the
+// full-source authority, installed before analysis starts because the
+// analyzer fixes its authority on first use — bv's RobotContext.Analyzer does
+// the same.
+func (s *Session) analyse(
+	issues []model.Issue, readiness *model.ReadinessIndex,
+) (*analysis.Analyzer, *analysis.GraphStats) {
 	an := analysis.NewAnalyzer(issues)
+	an.SetReadinessScope(readiness, nil)
 	if s.config.SkipPhase2 {
 		// Every Phase-2 metric off. Analyze() runs them synchronously, so
 		// skipping has to be expressed through the config rather than by
@@ -315,7 +335,8 @@ func (s *Session) pinClock(an *analysis.Analyzer) func() {
 func (s *Session) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.issues, s.analyzer, s.stats = nil, nil, nil
+	s.issues, s.records, s.readiness = nil, nil, nil
+	s.analyzer, s.stats = nil, nil
 }
 
 // Call dispatches one method by name. req may be nil or empty.
@@ -454,10 +475,29 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 	}
 }
 
+// snapshot returns the analysis set — tombstones excluded, as bv excludes
+// them — with its analyzer and stats. Use records() for every decoded record.
 func (s *Session) snapshot() ([]model.Issue, *analysis.Analyzer, *analysis.GraphStats) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.issues, s.analyzer, s.stats
+}
+
+// recordSet returns every decoded record, tombstones included.
+func (s *Session) recordSet() []model.Issue {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.records
+}
+
+// readinessIndex returns bv's dependency authority over the full source.
+func (s *Session) readinessIndex() *model.ReadinessIndex {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.readiness == nil {
+		return model.NewReadinessIndex(s.records)
+	}
+	return s.readiness
 }
 
 // ---- method implementations -------------------------------------------------
@@ -485,15 +525,17 @@ func (s *Session) info() ([]byte, error) {
 	return json.Marshal(infoPayload{
 		Source:    s.source,
 		Kind:      s.kind,
-		IssueCoun: len(s.issues),
+		IssueCoun: len(s.records),
 		DataHash:  hash,
 		Warnings:  w,
 		LoadedAt:  s.loadedAt.Format(time.RFC3339),
 	})
 }
 
+// issuesPayload returns every decoded record, tombstones included: the
+// analysis leaves them out, but the record is still the user's.
 func (s *Session) issuesPayload() ([]byte, error) {
-	issues, _, _ := s.snapshot()
+	issues := s.recordSet()
 	if issues == nil {
 		issues = []model.Issue{}
 	}
@@ -595,17 +637,20 @@ func (s *Session) reload() ([]byte, error) {
 		return nil, err
 	}
 
-	issues, complete, err := s.readSource(src, kind, &warnings)
+	records, complete, err := s.readSource(src, kind, &warnings)
 	if err != nil {
 		return nil, fmt.Errorf("reloading %s: %w", src, err)
 	}
 
-	newHash := analysis.ComputeDataHash(issues)
+	// The gate hashes every record, not the analysis set: a change confined
+	// to a tombstone changes nothing bv analyses but does change a record the
+	// app holds.
+	newHash := analysis.ComputeDataHash(records)
 
 	s.mu.RLock()
 	var oldHash string
 	if s.analyzer != nil {
-		oldHash = s.analyzer.DataHash()
+		oldHash = analysis.ComputeDataHash(s.records)
 	}
 	s.mu.RUnlock()
 
@@ -617,19 +662,14 @@ func (s *Session) reload() ([]byte, error) {
 		return withChangedFlag(payload, false)
 	}
 
-	an := analysis.NewAnalyzer(issues)
-	an.SeedDataHash(newHash)
-	var stats *analysis.GraphStats
-	if s.config.SkipPhase2 {
-		st := an.AnalyzeWithConfig(phase1OnlyConfig())
-		stats = &st
-	} else {
-		stats = an.AnalyzeAsync(context.Background())
-	}
+	issues, readiness := visibleIssues(records), readinessAuthority(records, nil)
+	an, stats := s.analyse(issues, readiness)
 
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = src, kind, warnings
-	s.issues, s.analyzer, s.stats = issues, an, stats
+	s.issues, s.records, s.readiness = issues, records, readiness
+	s.tombstoneIDs = nil
+	s.analyzer, s.stats = an, stats
 	s.complete = complete
 	s.loadedAt = time.Now()
 	s.mu.Unlock()
@@ -706,6 +746,7 @@ func (s *Session) triage() ([]byte, error) {
 	opts := analysis.TriageOptions{
 		WaitForPhase2: true,
 		UseFastConfig: true,
+		Readiness:     s.readinessIndex(),
 	}
 	if analyzer != nil {
 		opts.SeedDataHash = analyzer.DataHash()

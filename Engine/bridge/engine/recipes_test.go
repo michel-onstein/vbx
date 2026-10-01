@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,11 +172,21 @@ func recipeFixtureIssues() []model.Issue {
 	}
 }
 
+// apply runs a recipe the way recipe_apply does, failing the test on error.
+func apply(t *testing.T, issues []model.Issue, r *recipe.Recipe, now time.Time) []model.Issue {
+	t.Helper()
+	out, err := applyRecipeTo(issues, r, recipe.Metrics{}, now)
+	if err != nil {
+		t.Fatalf("applyRecipeTo: %v", err)
+	}
+	return out
+}
+
 func TestRecipeTagsRequireAllOfThem(t *testing.T) {
 	issues := recipeFixtureIssues()
 
 	// Both tags: only `a` carries them.
-	both := filterByRecipe(issues, &recipe.Recipe{
+	both := apply(t, issues, &recipe.Recipe{
 		Filters: recipe.FilterConfig{Tags: []string{"core", "infra"}},
 	}, time.Now())
 	if len(both) != 1 || both[0].ID != "a" {
@@ -183,7 +194,7 @@ func TestRecipeTagsRequireAllOfThem(t *testing.T) {
 	}
 
 	// One tag: `a` and `b`.
-	one := filterByRecipe(issues, &recipe.Recipe{
+	one := apply(t, issues, &recipe.Recipe{
 		Filters: recipe.FilterConfig{Tags: []string{"core"}},
 	}, time.Now())
 	if len(one) != 2 {
@@ -193,7 +204,7 @@ func TestRecipeTagsRequireAllOfThem(t *testing.T) {
 
 func TestRecipeExcludeTagsTakeAny(t *testing.T) {
 	issues := recipeFixtureIssues()
-	out := filterByRecipe(issues, &recipe.Recipe{
+	out := apply(t, issues, &recipe.Recipe{
 		Filters: recipe.FilterConfig{ExcludeTags: []string{"docs", "infra"}},
 	}, time.Now())
 	// Excluding is the mirror of including: carrying *any* forbidden tag is
@@ -205,7 +216,7 @@ func TestRecipeExcludeTagsTakeAny(t *testing.T) {
 
 func TestRecipeMatchingIsCaseInsensitive(t *testing.T) {
 	issues := recipeFixtureIssues()
-	out := filterByRecipe(issues, &recipe.Recipe{
+	out := apply(t, issues, &recipe.Recipe{
 		Filters: recipe.FilterConfig{Status: []string{"OPEN"}, Tags: []string{"CORE"}},
 	}, time.Now())
 	if len(out) != 1 || out[0].ID != "a" {
@@ -213,31 +224,78 @@ func TestRecipeMatchingIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestRecipeDateFiltersSkipUndatedBeads(t *testing.T) {
+// TestRecipeDateFiltersKeepUndatedBeads is bv 0.25's rule, which reversed
+// the one vbx's own copy kept: a bead with no timestamp is not excluded by a
+// date filter.
+func TestRecipeDateFiltersKeepUndatedBeads(t *testing.T) {
 	issues := recipeFixtureIssues()
 	now := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 
-	out := filterByRecipe(issues, &recipe.Recipe{
+	out := apply(t, issues, &recipe.Recipe{
 		Filters: recipe.FilterConfig{UpdatedAfter: "20d"},
 	}, now)
-	// `c` has no timestamps at all. An unset date is unknown, not "the
-	// beginning of time", so it is skipped rather than failing the comparison.
-	for _, issue := range out {
-		if issue.ID == "c" {
-			t.Error("an undated bead passed a date filter")
-		}
+	// a was updated 2026-01-11, before the 2026-01-12 threshold; b on the
+	// 21st; c has no timestamps at all.
+	if got := idsOf(out); len(got) != 2 || got[0] != "b" || got[1] != "c" {
+		t.Errorf("updated_after 20d selected %v, want [b c]", got)
 	}
 }
 
-func TestRecipeUnparseableDateIsIgnored(t *testing.T) {
-	issues := recipeFixtureIssues()
-	out := filterByRecipe(issues, &recipe.Recipe{
+// TestRecipeUnparseableDateIsAnError: bv 0.25 reports a malformed time filter
+// rather than skipping it, and so does recipe_apply.
+func TestRecipeUnparseableDateIsAnError(t *testing.T) {
+	_, err := applyRecipeTo(recipeFixtureIssues(), &recipe.Recipe{
+		Name:    "bad-date",
 		Filters: recipe.FilterConfig{CreatedAfter: "not-a-date"},
-	}, time.Now())
-	// Dropping the filter is right; treating the failure as the zero time
-	// would silently select everything, and as "now" would select nothing.
-	if len(out) != len(issues) {
-		t.Errorf("an unparseable date filtered the list down to %v", idsOf(out))
+	}, recipe.Metrics{}, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "created_after") {
+		t.Errorf("an unparseable date filter gave %v, want an error naming created_after", err)
+	}
+}
+
+// TestSavingAnInvalidRecipeIsRefused: bv's loader skips a recipe that fails
+// Validate, so saving one would write a recipe that silently never appears.
+func TestSavingAnInvalidRecipeIsRefused(t *testing.T) {
+	dir := newFixtureWorkspace(t)
+	s, err := Open(OpenConfig{Path: dir, SkipPhase2: true})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(s.Close)
+
+	req := []byte(`{"recipe":{"name":"bad","filters":{"created_after":"yesterday-ish"}}}`)
+	if _, err := s.Call("recipe_save", req); err == nil {
+		t.Fatal("saved a recipe with an unparseable created_after")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".bv", "recipes.yaml")); !os.IsNotExist(err) {
+		t.Errorf("a refused recipe still wrote the recipe file: %v", err)
+	}
+}
+
+// TestRecipeActionableUsesTheReadinessAuthority: a bead blocked only by a
+// tombstone is actionable, and its parent's readiness gates it — the two
+// rules the old copy of the filter got wrong in opposite directions.
+func TestRecipeActionableUsesTheReadinessAuthority(t *testing.T) {
+	records := []model.Issue{
+		{ID: "gone", Status: model.StatusTombstone},
+		{ID: "after-gone", Status: model.StatusOpen, Dependencies: []*model.Dependency{
+			{IssueID: "after-gone", DependsOnID: "gone", Type: model.DepBlocks}}},
+		{ID: "blocker", Status: model.StatusOpen},
+		{ID: "parent", Status: model.StatusOpen, Dependencies: []*model.Dependency{
+			{IssueID: "parent", DependsOnID: "blocker", Type: model.DepBlocks}}},
+		{ID: "child", Status: model.StatusOpen, Dependencies: []*model.Dependency{
+			{IssueID: "child", DependsOnID: "parent", Type: model.DepParentChild}}},
+	}
+	actionable := true
+	out, err := applyRecipeTo(visibleIssues(records), &recipe.Recipe{
+		Filters: recipe.FilterConfig{Actionable: &actionable},
+		Sort:    recipe.SortConfig{Field: "id"},
+	}, recipe.Metrics{Readiness: readinessAuthority(records, nil)}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idsOf(out); len(got) != 2 || got[0] != "after-gone" || got[1] != "blocker" {
+		t.Errorf("actionable selected %v, want [after-gone blocker]", got)
 	}
 }
 
@@ -247,13 +305,13 @@ func TestRecipeSortUsesSecondaryThenID(t *testing.T) {
 		{ID: "a", Title: "same", Priority: 1},
 		{ID: "b", Title: "same", Priority: 0},
 	}
-	sortByRecipe(issues, &recipe.Recipe{
+	issues = apply(t, issues, &recipe.Recipe{
 		Sort: recipe.SortConfig{
 			Field:     "priority",
 			Direction: "asc",
 			Secondary: &recipe.SortConfig{Field: "title", Direction: "asc"},
 		},
-	}, nil)
+	}, time.Now())
 
 	// b first on priority; a before c because the titles tie and ids break it.
 	if got := idsOf(issues); got[0] != "b" || got[1] != "a" || got[2] != "c" {
@@ -265,11 +323,21 @@ func TestRecipeSortDescending(t *testing.T) {
 	issues := []model.Issue{
 		{ID: "a", Priority: 0}, {ID: "b", Priority: 2}, {ID: "c", Priority: 1},
 	}
-	sortByRecipe(issues, &recipe.Recipe{
+	issues = apply(t, issues, &recipe.Recipe{
 		Sort: recipe.SortConfig{Field: "priority", Direction: "desc"},
-	}, nil)
+	}, time.Now())
 	if got := idsOf(issues); got[0] != "b" || got[1] != "c" || got[2] != "a" {
 		t.Errorf("descending sort produced %v", got)
+	}
+}
+
+// TestRecipeMaxItemsIsReportedNotHidden: applyRecipeTo leaves the max_items
+// cut to recipe_apply, which reports how many matched and that it truncated.
+func TestRecipeMaxItemsIsReportedNotHidden(t *testing.T) {
+	issues := recipeFixtureIssues()
+	out := apply(t, issues, &recipe.Recipe{View: recipe.ViewConfig{MaxItems: 1}}, time.Now())
+	if len(out) != len(issues) {
+		t.Errorf("applyRecipeTo cut to %d beads; the cut belongs to recipe_apply", len(out))
 	}
 }
 

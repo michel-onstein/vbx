@@ -81,3 +81,30 @@ func readinessFixtureActionableIsBvs() async {
 
     await store.close()
 }
+
+/// bv 0.25.2's triage under `--recipe blocked`: rdy-14's own blocker, the
+/// subtree it gates, both newer blocking edge types, and the missing blocker.
+private let bvBlocked: Set<String> = ["rdy-7", "rdy-8", "rdy-9", "rdy-14", "rdy-16", "rdy-17"]
+
+@MainActor
+@Test("Recipes select bv 0.25.2's ready and blocked sets")
+func readinessFixtureRecipesAreBvs() async {
+    let store = ProjectStore()
+    store.skipPhase2 = true
+    await store.open(path: readinessPath)
+
+    // The engine applies recipes with bv's own recipe.Apply over the
+    // full-source readiness authority. vbx's old copy of the filter let a
+    // blocked parent's children, a future deferral and a missing blocker
+    // through as actionable.
+    await store.applyRecipe(named: "actionable")
+    #expect(Set(store.recipeIDs ?? []) == bvReady)
+
+    await store.applyRecipe(named: "blocked")
+    #expect(Set(store.recipeIDs ?? []) == bvBlocked)
+
+    // The tombstone is out of the analysis but still a record the app holds.
+    #expect(store.issuesByID["rdy-10"]?.status == .tombstone)
+
+    await store.close()
+}

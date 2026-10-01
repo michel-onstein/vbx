@@ -24,11 +24,10 @@ import (
 // description says what it is for.
 //
 // The expectations marked "bv 0.25.2" were read from bv 0.25.2 itself over this
-// fixture at readinessClock, which is parity-check.py's PINNED_CLOCK. Where
-// vbx disagrees today the test asserts the disagreement, by name, rather than
-// skipping: vbx-hjz aligns vbx with bv's readiness model, and these are the
-// tests it flips. A failure here that reads "vbx now agrees" is that bead
-// landing, not a regression.
+// fixture at readinessClock, which is parity-check.py's PINNED_CLOCK. vbx-h22
+// first pinned where vbx disagreed; vbx-hjz aligned recipes, the SQLite loader
+// and tombstone handling with bv's readiness model, so every assertion here is
+// now agreement.
 
 // readinessClock is 2026-08-29T10:40:00Z, after every date in the fixture and
 // before rdy-5's defer_until.
@@ -78,20 +77,6 @@ func sortedIDs(ids []string) []string {
 	return out
 }
 
-func withIDs(base []string, add ...string) []string {
-	return sortedIDs(append(slices.Clone(base), add...))
-}
-
-func withoutIDs(base []string, drop ...string) []string {
-	var out []string
-	for _, id := range base {
-		if !slices.Contains(drop, id) {
-			out = append(out, id)
-		}
-	}
-	return sortedIDs(out)
-}
-
 func actionableIDs(t *testing.T, s *Session) []string {
 	t.Helper()
 	got := call[struct {
@@ -112,7 +97,7 @@ func recipeIDs(t *testing.T, s *Session, name string) []string {
 // and not the dangling reference.
 func TestReadinessFixtureLoadsEveryRecord(t *testing.T) {
 	s := openReadiness(t, readinessFixturePath(t))
-	issues, _, _ := s.snapshot()
+	issues := s.recordSet()
 	if len(issues) != 21 {
 		t.Fatalf("loaded %d beads, want all 21", len(issues))
 	}
@@ -160,62 +145,87 @@ func TestReadinessFixtureActionableMatchesBv(t *testing.T) {
 	}
 }
 
-// TestReadinessFixtureRecipesDisagreeWithBv records how vbx's recipe filter
-// (filterByRecipe, a copy outside bv's analysis package) differs from bv
-// 0.25.2. It counts only direct blocking edges to an existing open bead, so it
-// misses parent gating (rdy-16, rdy-17), a future defer_until (rdy-5) and a
-// missing blocker (rdy-9). vbx-hjz replaces it with bv's readiness model.
-func TestReadinessFixtureRecipesDisagreeWithBv(t *testing.T) {
+// TestReadinessFixtureTombstoneIsResolvedButNotAnalysed is bv 0.25.2's split:
+// the tombstone rdy-10 is out of the analysis set (bv's triage counts 20
+// beads, not 21) but still resolves rdy-11's blocking edge, and the record
+// itself is still in the issues payload, because decoding never drops one.
+func TestReadinessFixtureTombstoneIsResolvedButNotAnalysed(t *testing.T) {
 	s := openReadiness(t, readinessFixturePath(t))
 
-	vbxActionable := withIDs(bvReady, "rdy-16", "rdy-17", "rdy-5", "rdy-9")
-	if got := recipeIDs(t, s, "actionable"); !slices.Equal(got, vbxActionable) {
-		if slices.Equal(got, bvReady) {
-			t.Fatalf("the actionable recipe now agrees with bv 0.25.2 (vbx-hjz?): assert bvReady here")
-		}
-		t.Errorf("actionable recipe = %v, want today's %v (bv 0.25.2: %v)", got, vbxActionable, bvReady)
+	issues, _, _ := s.snapshot()
+	if len(issues) != 20 || slices.ContainsFunc(issues, func(i model.Issue) bool { return i.ID == "rdy-10" }) {
+		t.Errorf("analysis set has %d beads (want bv's 20, without rdy-10)", len(issues))
+	}
+	payload := call[struct {
+		Issues []model.Issue `json:"issues"`
+	}](t, s, "issues", nil)
+	if len(payload.Issues) != 21 {
+		t.Errorf("issues payload has %d records, want all 21, the tombstone included", len(payload.Issues))
+	}
+	if !s.readinessIndex().Ready("rdy-11", readinessClock) {
+		t.Error("rdy-11 is withheld; its only blocker is the tombstone rdy-10, which bv counts as resolved")
 	}
 
-	vbxBlocked := withoutIDs(bvBlocked, "rdy-16", "rdy-17", "rdy-9")
-	if got := recipeIDs(t, s, "blocked"); !slices.Equal(got, vbxBlocked) {
-		if slices.Equal(got, bvBlocked) {
-			t.Fatalf("the blocked recipe now agrees with bv 0.25.2 (vbx-hjz?): assert bvBlocked here")
-		}
-		t.Errorf("blocked recipe = %v, want today's %v (bv 0.25.2: %v)", got, vbxBlocked, bvBlocked)
+	triage := call[struct {
+		Meta struct {
+			IssueCount int `json:"issue_count"`
+		} `json:"meta"`
+	}](t, s, "triage", nil)
+	if triage.Meta.IssueCount != 20 {
+		t.Errorf("triage counts %d beads, bv 0.25.2 counts 20", triage.Meta.IssueCount)
 	}
 }
 
-// TestReadinessFixtureSQLiteLoaderGaps runs the same beads through vbx's own
-// SQLite loader, which bv's cannot replace because it is internal. Two gaps
-// show, both vbx-hjz's: defer_until is not read, so rdy-5 reads as ready; and
-// rows with deleted_at are dropped, so rdy-10's tombstone vanishes and its
-// dependent rdy-11 waits on a blocker that is now missing — withheld
-// indefinitely, where bv counts the tombstone as resolved.
-func TestReadinessFixtureSQLiteLoaderGaps(t *testing.T) {
+// TestReadinessFixtureRecipesMatchBv: recipes run through bv's recipe.Apply
+// over the full-source readiness authority, so `actionable` withholds a
+// blocked parent's subtree (rdy-16, rdy-17), a future defer_until (rdy-5) and
+// a missing blocker (rdy-9) — all of which vbx's old copy of the filter let
+// through — and `blocked` reports them.
+func TestReadinessFixtureRecipesMatchBv(t *testing.T) {
+	s := openReadiness(t, readinessFixturePath(t))
+
+	if got := recipeIDs(t, s, "actionable"); !slices.Equal(got, bvReady) {
+		t.Errorf("actionable recipe = %v\nbv 0.25.2 = %v", got, bvReady)
+	}
+	if got := recipeIDs(t, s, "blocked"); !slices.Equal(got, bvBlocked) {
+		t.Errorf("blocked recipe = %v\nbv 0.25.2 = %v", got, bvBlocked)
+	}
+}
+
+// TestReadinessFixtureSQLiteMatchesBv runs the same beads through vbx's own
+// SQLite loader, which bv's cannot replace because it is internal. It reads
+// defer_until, so rdy-5 is withheld; and it keeps the deleted row, so rdy-10
+// is a tombstone that resolves rdy-11's blocker instead of a missing bead
+// that withholds it for ever.
+func TestReadinessFixtureSQLiteMatchesBv(t *testing.T) {
 	dir := t.TempDir()
 	writeSQLiteFromJSONL(t, filepath.Join(readinessFixturePath(t), ".beads", "issues.jsonl"),
 		filepath.Join(dir, ".beads", "beads.db"))
 	s := openReadiness(t, dir)
 
-	issues, _, _ := s.snapshot()
 	byID := map[string]model.Issue{}
-	for _, issue := range issues {
+	for _, issue := range s.recordSet() {
 		byID[issue.ID] = issue
 	}
 	if byID["rdy-2"].Status != "triage" {
 		t.Errorf("custom status lost through SQLite: %q", byID["rdy-2"].Status)
 	}
-
-	if _, tombstoneLoaded := byID["rdy-10"]; tombstoneLoaded {
-		t.Error("rdy-10 (tombstone) loaded from SQLite; vbx-hjz fixes this — update the assertion")
+	if got := byID["rdy-10"].Status; got != model.StatusTombstone {
+		t.Errorf("rdy-10 through SQLite has status %q, want the tombstone kept", got)
 	}
-	if byID["rdy-5"].DeferUntil != nil {
-		t.Error("rdy-5 defer_until read from SQLite; vbx-hjz fixes this — update the assertion")
+	want, _ := time.Parse(time.RFC3339, "2099-01-01T00:00:00Z")
+	if got := byID["rdy-5"].DeferUntil; got == nil || !got.Equal(want) {
+		t.Errorf("rdy-5 defer_until through SQLite = %v, want %s", got, want)
 	}
 
-	vbxReady := withIDs(withoutIDs(bvReady, "rdy-11"), "rdy-5")
-	if got := actionableIDs(t, s); !slices.Equal(got, vbxReady) {
-		t.Errorf("SQLite actionable = %v, want today's %v (bv 0.25.2: %v)", got, vbxReady, bvReady)
+	if got := actionableIDs(t, s); !slices.Equal(got, bvReady) {
+		t.Errorf("SQLite actionable = %v\nbv 0.25.2 = %v", got, bvReady)
+	}
+	if got := recipeIDs(t, s, "actionable"); !slices.Equal(got, bvReady) {
+		t.Errorf("SQLite actionable recipe = %v\nbv 0.25.2 = %v", got, bvReady)
+	}
+	if issues, _, _ := s.snapshot(); len(issues) != 20 {
+		t.Errorf("SQLite analysis set has %d beads, want bv's 20", len(issues))
 	}
 }
 

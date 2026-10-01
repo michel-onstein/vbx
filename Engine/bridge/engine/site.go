@@ -76,7 +76,10 @@ func (s *Session) exportSite(req []byte) ([]byte, error) {
 		}
 	}
 
-	triage := analysis.ComputeTriage(issues)
+	// The full-source readiness authority, so a bead blocked only by a
+	// tombstone is as ready in the export as it is everywhere else.
+	triage := analysis.ComputeTriageWithOptions(
+		issues, analysis.TriageOptions{Readiness: s.readinessIndex()})
 	exporter := export.NewSQLiteExporter(pointers, deps, stats, &triage)
 	config := export.DefaultSQLiteExportConfig()
 	config.OutputDir = r.OutputDir

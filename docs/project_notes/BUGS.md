@@ -4,6 +4,45 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — Recipes, beads.db and tombstones disagreed with bv's readiness
+
+**Symptom:** on `Fixtures/readiness`, the `actionable` recipe selected four
+beads bv 0.25.2 withholds — rdy-16 and rdy-17 (children of a blocked parent),
+rdy-5 (`defer_until` in 2099) and rdy-9 (blocked by a bead no workspace has) —
+and `blocked` missed the same ones. Opened as a `beads.db`, rdy-5 read as ready
+and rdy-11, blocked only by the tombstone rdy-10, read as blocked. On the JSONL,
+vbx counted 21 beads where bv counts 20, which moved triage counts, the graph,
+suggestions, label health, priority confidence and the data hash. (vbx-hjz)
+
+**Cause:** three copies of logic bv 0.25 had moved on from. `filterByRecipe` was
+vbx's reproduction of bv 0.20's recipe filter, which counted only direct
+blocking edges to an existing open bead; bv 0.25 applies recipes with
+`recipe.Apply` over its `ReadinessIndex` (parent gating, deferral, missing
+blocker = unknown). `LoadSQLite` neither read `defer_until` nor kept rows with
+`deleted_at`, so the tombstone vanished and its dependent waited on a missing
+blocker. And the session analysed tombstones, which bv's loaders keep out of
+the visible set while feeding them to readiness as resolved.
+
+**Fix:** recipes go through bv's `recipe.Apply` with the session's readiness
+authority (malformed time filters are an error, and `recipe_save` refuses a
+recipe bv's loader would skip). `LoadSQLite` reads `defer_until`, keeps every
+row, and marks a tombstone by status or a nonzero `tombstone` column, as bv
+does. The session keeps every record for the app, analyses the visible set, and
+builds readiness over both — including the tombstone ids bv's workspace loader
+reports without records. See ADR-021.
+
+**Regression tests:** `TestReadinessFixtureRecipesMatchBv`,
+`TestReadinessFixtureSQLiteMatchesBv`,
+`TestReadinessFixtureTombstoneIsResolvedButNotAnalysed`,
+`TestWorkspaceTombstoneResolvesItsDependents`,
+`TestReloadSeesAChangeConfinedToATombstone`, `TestLoadSQLite` (deleted row and
+`defer_until`), `TestLoadSQLiteHonoursTheTombstoneColumn`,
+`TestRecipeActionableUsesTheReadinessAuthority`,
+`TestRecipeUnparseableDateIsAnError`, `TestSavingAnInvalidRecipeIsRefused`; in
+Swift, "Recipes select bv 0.25.2's ready and blocked sets".
+
+---
+
 ## 2026-10-01 — Label health, alerts and priority ignored the pinned clock
 
 **Symptom:** with the engine on bv v0.25.2, `parity-check.py` (which pins

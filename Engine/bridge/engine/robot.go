@@ -253,7 +253,10 @@ func (s *Session) next(req []byte) ([]byte, error) {
 	}
 
 	now := robotNow()
-	readiness := model.NewReadinessIndex(issues)
+	// The full-source authority, not one rebuilt from the visible set: a
+	// tombstoned blocker is resolved, and without its record it would read
+	// as missing and withhold its dependents.
+	readiness := s.readinessIndex()
 	opts := analysis.TriageOptions{
 		WaitForPhase2: true,
 		Readiness:     readiness,
