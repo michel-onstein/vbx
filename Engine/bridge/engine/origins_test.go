@@ -23,7 +23,14 @@ const fakeBRHelp = "--db --json --no-auto-import --no-auto-flush --claim"
 func liveTrackerWorkspace(t *testing.T) (dir, runs string) {
 	t.Helper()
 	dir = newFixtureWorkspace(t)
-	beads := filepath.Join(dir, ".beads")
+	markLiveTracker(t, filepath.Join(dir, ".beads"))
+	return dir, standInTrackers(t)
+}
+
+// markLiveTracker makes a beads directory one bv binds to `br`: metadata
+// naming a database that exists, and the export that is read.
+func markLiveTracker(t *testing.T, beads string) {
+	t.Helper()
 	metadata := `{"database":"beads.db","jsonl_export":"issues.jsonl"}`
 	if err := os.WriteFile(filepath.Join(beads, "metadata.json"), []byte(metadata), 0o644); err != nil {
 		t.Fatal(err)
@@ -31,15 +38,36 @@ func liveTrackerWorkspace(t *testing.T) (dir, runs string) {
 	if err := os.WriteFile(filepath.Join(beads, "beads.db"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
 
+// standInTrackers puts a stand-in `br` and `bd` first on PATH. Each prints the
+// help bv's capability probe wants and appends its name and arguments to the
+// returned file, which exists only once one of them has run.
+func standInTrackers(t *testing.T) (runs string) {
+	t.Helper()
 	bin := t.TempDir()
 	runs = filepath.Join(bin, "runs")
-	script := "#!/bin/sh\necho \"$@\" >> '" + runs + "'\necho '" + fakeBRHelp + "'\n"
-	if err := os.WriteFile(filepath.Join(bin, "br"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"br", "bd"} {
+		script := "#!/bin/sh\necho \"" + name + " $@\" >> '" + runs + "'\necho '" + fakeBRHelp + "'\n"
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return dir, runs
+	return runs
+}
+
+// liveTrackerMultiRepo is the two-repository workspace with `api` a `br`
+// tracker and `web` a Dolt-backed `bd` one — the second is what makes bv's
+// workspace loader refresh the export with `bd export` as well as probe.
+func liveTrackerMultiRepo(t *testing.T) (root, runs string) {
+	t.Helper()
+	root = multiRepoWorkspace(t)
+	markLiveTracker(t, filepath.Join(root, "api", ".beads"))
+	if err := os.MkdirAll(filepath.Join(root, "web", ".beads", "dolt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root, standInTrackers(t)
 }
 
 func openLive(t *testing.T, path string, live bool) *Session {
@@ -69,6 +97,60 @@ func TestTheAppNeverSpawnsTheTracker(t *testing.T) {
 	}
 }
 
+// The same rule for a multi-repository workspace. bv's workspace loader binds
+// origins inside itself, per repository, and refreshes a Dolt repository's
+// export with `bd export` — so the app cannot use it as it stands. See
+// BUGS.md, 2026-10-01.
+func TestTheAppNeverSpawnsTheTrackerForAWorkspace(t *testing.T) {
+	root, runs := liveTrackerMultiRepo(t)
+	s := openLive(t, root, false)
+	_ = call[map[string]any](t, s, "triage", nil)
+	_ = call[map[string]any](t, s, "next", nil)
+	if _, err := s.Call("reload", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(runs); err == nil {
+		recorded, _ := os.ReadFile(runs)
+		t.Fatalf("the app spawned a tracker: %q", recorded)
+	}
+	// Every bead still says why it has no actions, under its local id.
+	out := call[struct {
+		Recommendations []struct {
+			ID      string             `json:"id"`
+			Actions model.IssueActions `json:"actions"`
+		} `json:"recommendations"`
+	}](t, s, "triage", nil)
+	if len(out.Recommendations) == 0 {
+		t.Fatal("no recommendations")
+	}
+	for _, rec := range out.Recommendations {
+		if rec.Actions.UnavailableReason != appActionsUnavailable || rec.Actions.Claim != nil {
+			t.Errorf("%s: actions are %+v", rec.ID, rec.Actions)
+		}
+		if !strings.HasSuffix(rec.ID, "-"+rec.Actions.LocalID) {
+			t.Errorf("%s: local id is %q", rec.ID, rec.Actions.LocalID)
+		}
+	}
+}
+
+// Its control: vbx-cli, on the same workspace, probes the `br` tracker and
+// refreshes the Dolt export, exactly as bv's workspace loader does.
+func TestTheCLIAsksEveryWorkspaceTracker(t *testing.T) {
+	root, runs := liveTrackerMultiRepo(t)
+	_ = openLive(t, root, true)
+
+	recorded, err := os.ReadFile(runs)
+	if err != nil {
+		t.Fatalf("the CLI never ran a tracker: %v", err)
+	}
+	for _, want := range []string{"br update --help", "bd export -o"} {
+		if !strings.Contains(string(recorded), want) {
+			t.Errorf("no %q among %q", want, recorded)
+		}
+	}
+}
+
 // The control for the test above: the same workspace, opened as vbx-cli
 // opens it, does reach the tracker — so its silence is the setting, not a
 // fixture bv rejected before it got that far.
@@ -80,7 +162,7 @@ func TestTheCLIAsksTheTrackerWhatItSupports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the CLI never ran br: %v", err)
 	}
-	if !strings.Contains(string(recorded), "update --help") {
+	if !strings.Contains(string(recorded), "br update --help") {
 		t.Errorf("br ran with %q, not the capability probe", recorded)
 	}
 }

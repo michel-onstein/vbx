@@ -5,6 +5,18 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Multi-repository workspaces open without spawning a tracker (vbx-jvj)
+
+The app no longer runs `br update --help` or `bd export` when it opens or
+reloads a `.bv/workspace.yaml` workspace. Workspaces load through a port of
+bv 0.25.2's `AggregateLoader` (`workspace_loader.go`) whose origin binding and
+Dolt export refresh are the session's choice — vbx-cli keeps bv's, the app
+binds its explanatory origin per repository. `TestWorkspaceLoaderMatchesBV`
+holds the port to bv's loader on six workspace shapes. ADR-020's consequence is
+updated; see BUGS.md.
+
+---
+
 ## 2026-10-01 — Recipes, beads.db and tombstones follow bv's readiness model (vbx-hjz)
 
 Recipes are applied by bv's own `recipe.Apply`, so `actionable` and `blocked`

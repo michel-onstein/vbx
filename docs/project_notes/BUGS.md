@@ -4,6 +4,39 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — The app spawned trackers when opening a multi-repository workspace
+
+**Symptom:** opening a `.bv/workspace.yaml` workspace in the app ran
+`br update --help` for every repository with tracker metadata, and
+`bd export -o …/issues.jsonl` for every Dolt-backed one — subprocesses the App
+Sandbox forbids, each with up to a two-second timeout on every load and reload.
+vbx-ut6 had stopped this for a single repository only. (vbx-jvj)
+
+**Cause:** the workspace path called bv's `workspace.LoadAllFromConfig`, whose
+`loadSingleRepo` calls `loader.AttachIssueOrigins` and
+`loader.PrepareBeadsDirForRead(…, refreshBDExport=true, …)` unconditionally;
+v0.25.2 has no option to skip either. The app replaced the origins afterwards,
+but by then the probe had run.
+
+**Fix:** workspaces load through `workspace_loader.go`, a port of bv's
+`AggregateLoader` built on bv's exported loader and workspace functions, whose
+origin binding and bd refresh come from the session: live for vbx-cli, the
+app's explanatory origin and no refresh for the app. `bindWorkspaceOrigins` is
+gone — the app binds per repository, before namespacing, as bv does.
+
+**Regression tests:** `TestTheAppNeverSpawnsTheTrackerForAWorkspace` (stand-in
+`br` and `bd` on PATH; failed before the fix with both recorded), its control
+`TestTheCLIAsksEveryWorkspaceTracker`, `TestWorkspaceLoaderMatchesBV` (the port
+against bv's loader on six workspace shapes),
+`TestWorkspaceLoaderLiveCaseBindsATracker`,
+`TestTheAppsWorkspaceOriginsCarryLocalIDs`.
+
+**Prevention:** a bv upgrade that changes its workspace loader fails
+`TestWorkspaceLoaderMatchesBV` rather than drifting from the port. If bv gains
+an option to skip origin binding, drop the port for it.
+
+---
+
 ## 2026-10-01 — Recipes, beads.db and tombstones disagreed with bv's readiness
 
 **Symptom:** on `Fixtures/readiness`, the `actionable` recipe selected four
