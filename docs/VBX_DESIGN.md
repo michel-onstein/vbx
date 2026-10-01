@@ -559,7 +559,8 @@ cannot drift from `bv`. `vbx` adds a native folder picker when discovery finds n
 
 `FileWatchService` uses **FSEvents** rather than kqueue: it coalesces at directory level,
 survives atomic-rename writes (which is how `bd` rewrites JSONL), and is cheap. A 200 ms
-debounce matches `BV_DEBOUNCE_MS`. Network volumes are detected via `getattrlist` and fall
+debounce matches `BV_DEBOUNCE_MS`; it is a trailing-edge `Debouncer` on an injected scheduler,
+so it is tested on a virtual clock. Network volumes are detected via `getattrlist` and fall
 back to 2 s polling, mirroring `BV_FORCE_POLLING`.
 
 Reload is **hash-gated**: the engine recomputes the data hash and returns "unchanged"

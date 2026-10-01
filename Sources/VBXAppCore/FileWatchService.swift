@@ -14,8 +14,14 @@ public final class FileWatchService: @unchecked Sendable {
 
     private var stream: FSEventStreamRef?
     private let queue = DispatchQueue(label: "com.qjam.vbx.filewatch")
-    private var pendingWork: DispatchWorkItem?
+    /// Confined to `queue`; rebuilt by each `start` so it picks up `debounce`.
+    private var debouncer: Debouncer?
     private var onChange: (@Sendable () -> Void)?
+
+    /// Test hook: called on the watch queue with the time each FSEvents batch
+    /// reached the debounce, before it is scheduled. A test compares the gaps
+    /// between these to the window rather than trusting its own sleeps.
+    var onSignalForTesting: (@Sendable (DispatchTime) -> Void)?
     private var watchedPaths: [String] = []
 
     public init() {}
@@ -42,6 +48,12 @@ public final class FileWatchService: @unchecked Sendable {
 
         self.onChange = onChange
         self.watchedPaths = [directory]
+        let debouncer = Debouncer(
+            window: debounce, scheduler: QueueDebounceScheduler(queue: queue)
+        ) { [weak self] in
+            self?.onChange?()
+        }
+        queue.sync { self.debouncer = debouncer }
 
         var context = FSEventStreamContext(
             version: 0,
@@ -81,7 +93,7 @@ public final class FileWatchService: @unchecked Sendable {
 
     public func stop() {
         stopStream()
-        queue.sync { pendingWork?.cancel(); pendingWork = nil }
+        queue.sync { debouncer?.cancel(); debouncer = nil }
         onChange = nil
         watchedPaths = []
     }
@@ -96,16 +108,12 @@ public final class FileWatchService: @unchecked Sendable {
 
     /// Collapses a burst of events into a single notification. `bd` rewriting a
     /// store produces several events in quick succession; reloading once at the
-    /// end is both correct and much cheaper.
+    /// end is both correct and much cheaper. See ``Debouncer``.
     private func scheduleNotification() {
         queue.async { [weak self] in
-            guard let self else { return }
-            self.pendingWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                self?.onChange?()
-            }
-            self.pendingWork = work
-            self.queue.asyncAfter(deadline: .now() + self.debounce, execute: work)
+            guard let self, let debouncer = self.debouncer else { return }
+            self.onSignalForTesting?(.now())
+            debouncer.signal()
         }
     }
 }

@@ -865,7 +865,8 @@ cannot drift from <code>bv</code>. <code>vbx</code> adds a native folder picker 
 <h3 id="82-file-watching"><a class="toclink" href="#82-file-watching">8.2 File watching</a></h3>
 <p><code>FileWatchService</code> uses <strong>FSEvents</strong> rather than kqueue: it coalesces at directory level,
 survives atomic-rename writes (which is how <code>bd</code> rewrites JSONL), and is cheap. A 200 ms
-debounce matches <code>BV_DEBOUNCE_MS</code>. Network volumes are detected via <code>getattrlist</code> and fall
+debounce matches <code>BV_DEBOUNCE_MS</code>; it is a trailing-edge <code>Debouncer</code> on an injected scheduler,
+so it is tested on a virtual clock. Network volumes are detected via <code>getattrlist</code> and fall
 back to 2 s polling, mirroring <code>BV_FORCE_POLLING</code>.</p>
 <p>Reload is <strong>hash-gated</strong>: the engine recomputes the data hash and returns "unchanged"
 without re-analysing, so an incidental touch does not cost a re-render.</p>

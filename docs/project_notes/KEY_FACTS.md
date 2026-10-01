@@ -281,3 +281,9 @@ view snapshots for inspection.
   which copies the fixture to a temporary directory. Swift Testing runs tests
   in parallel, and two of them writing to the shared fixture interfered — see
   BUGS.md.
+- **A timing test asserts against what it measured, not what it asked for.**
+  Under a loaded full suite a 20 ms `Task.sleep` can overshoot a 150 ms window.
+  Pin timing logic on an injected scheduler (`Debouncer` and `DebouncerTests`'
+  virtual clock), and bound a real-clock test by the gaps it recorded. CPU
+  burners and SIGSTOP freezes did not reproduce the watcher flake. Forcing the
+  overshoot in the test itself did — see BUGS.md, vbx-7a2.
