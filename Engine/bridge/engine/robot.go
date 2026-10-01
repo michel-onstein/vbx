@@ -29,7 +29,7 @@ func (s *Session) robotEnvelope() (string, string) {
 	if s.analyzer != nil {
 		hash = s.analyzer.DataHash()
 	}
-	return time.Now().UTC().Format(time.RFC3339), hash
+	return robotNow().UTC().Format(time.RFC3339), hash
 }
 
 // suggest reports hygiene problems: duplicates, missing dependencies, labels
@@ -103,7 +103,9 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 		byID[issue.ID] = issue
 	}
 
+	release := s.pinClock(analyzer)
 	recommendations := analyzer.GenerateEnhancedRecommendations()
+	release()
 
 	// The filters are applied in bv's order, and each one drops a
 	// recommendation whose issue is missing rather than keeping it — an

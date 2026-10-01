@@ -213,6 +213,13 @@ them.
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable
   from a low one.
+- **Analysis reads "now" from `robotNow()`, on every call.** It honours
+  `SOURCE_DATE_EPOCH` everywhere bv 0.23+ does — label health, alerts, impact,
+  ETA, readiness — which is what lets the parity check compare exactly. The
+  session's analyzer is long-lived, so its clock is set per call through
+  `Session.pinClock`, never once at load: a clock captured at load freezes
+  every staleness figure in the app at the moment the workspace was opened.
+  Only non-analysis timestamps (load time, a deploy commit) use `time.Now()`.
 
 ## Verify before committing
 

@@ -14,11 +14,11 @@ VOLATILE_KEYS and stripped from both sides before comparing. The list is
 deliberately short and specific: dropping `data_hash` would hide exactly the
 class of bug this script exists to catch.
 
-Triage additionally reads SOURCE_DATE_EPOCH as "now", in bv and in vbx alike,
-so pinning it makes staleness deterministic on both sides. Scores elsewhere
-still move slightly with the real clock, and those are compared with a relative
-tolerance rather than rounded — rounding has boundaries, and values landing
-either side of one compare unequal however close they are.
+Every analysis reads SOURCE_DATE_EPOCH as "now" — triage, priority, label
+health, alerts and the rest, in bv 0.23+ and in vbx alike — so pinning it makes
+staleness deterministic on both sides. Floats are still compared with a
+relative tolerance rather than rounded — rounding has boundaries, and values
+landing either side of one compare unequal however close they are.
 
 *Different envelopes.* bv wraps most payloads in a header that vbx returns
 bare — `bv --robot-label-flow` yields `{generated_at, data_hash, flow, …}`
@@ -47,7 +47,7 @@ from pathlib import Path
 # tolerance wide enough to absorb that is wide enough to hide a real
 # difference. The value is after the fixture's bead dates, so staleness is a
 # real number rather than uniformly zero.
-PINNED_CLOCK = "1788000000"  # 2026-09-27T12:40:00Z
+PINNED_CLOCK = "1788000000"  # 2026-08-29T10:40:00Z
 
 # Keys whose values legitimately differ between two runs. Nothing derived from
 # the bead data belongs here.
@@ -181,11 +181,9 @@ def describe_difference(left, right, path: str = "") -> str | None:
         # boundary compare unequal however close they are, which made the
         # check intermittently fail. A relative tolerance has no boundary.
         #
-        # Some scores still move with the clock — an impact score folds in a
-        # staleness term, and bv reads the real clock for it — so the drift
-        # between two runs seconds apart is real but tiny. This tolerance is
-        # far below anything that would change a decision, and far above the
-        # observed drift.
+        # The clock is pinned on both sides, so what remains is floating-point
+        # noise from summation order. This tolerance is far below anything
+        # that would change a decision.
         if math.isclose(left, right, rel_tol=1e-6, abs_tol=1e-9):
             return None
         return f"{path or '<root>'}: {left!r} vs {right!r}"

@@ -578,7 +578,7 @@ func detectOrphans(
 	}
 
 	return correlation.OrphanReport{
-		GeneratedAt: time.Now(),
+		GeneratedAt: robotNow(),
 		GitRange:    report.GitRange,
 		DataHash:    report.DataHash,
 		Stats: correlation.OrphanReportStats{

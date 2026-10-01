@@ -61,6 +61,12 @@ type Session struct {
 	historyMu    sync.Mutex
 	history      *historyResult
 	historyLimit int
+
+	// clockMu serialises use of the analyzer's reference instant. The
+	// analyzer outlives any one call, so each call that reads its clock sets
+	// it first (see pinClock); without the lock two calls could interleave
+	// one's SetNow with the other's read.
+	clockMu sync.Mutex
 }
 
 // Open resolves a data source, loads it, and starts analysis.
@@ -227,12 +233,19 @@ func (s *Session) analyse(issues []model.Issue) (*analysis.Analyzer, *analysis.G
 // timeNow exists so the workspace path reads the same as the ordinary one.
 func timeNow() time.Time { return time.Now() }
 
-// robotNow is the clock *triage* reads.
+// robotNow is the clock every analysis reads: triage, priority impact, the
+// plan and actionable set, label health and attention, drift alerts, ETA,
+// burndown, forecast, recipes and the robot envelope.
 //
-// Deliberately not used by label health or attention: bv reads the real clock
-// there, and honouring the pin in one place but not the other would make vbx
-// disagree with bv rather than agree with it. Matching bv means matching where
-// it pins as well as that it pins.
+// bv 0.23 onward pins all of these, so vbx does too. Matching bv means matching
+// where it pins as well as that it pins: before bv 0.23 label health read the
+// wall clock, and vbx followed it there.
+//
+// It is read on every call and never captured: the app keeps one session open
+// for hours, and a "now" taken at load would freeze every staleness and
+// urgency figure at the moment the workspace was opened. Wall-clock time that
+// is not analysis — when the session loaded, a commit's timestamp — stays on
+// time.Now().
 //
 // It honours SOURCE_DATE_EPOCH, which is bv's own mechanism and exists for a
 // specific reason: staleness is measured from "now", so two runs a second
@@ -252,6 +265,19 @@ func robotNow() time.Time {
 		return time.Now()
 	}
 	return time.Unix(seconds, 0).UTC()
+}
+
+// pinClock sets the analyzer's reference instant to robotNow() for the call
+// about to use it, and returns the release for clockMu.
+//
+// The analyzer's own default is the wall clock at construction, which in a
+// long-lived session is the load time; every method that reads it (readiness,
+// the plan, recommendations, the blocker chain) must be preceded by this.
+// Do any waiting — WaitForPhase2 — before calling it, not while holding it.
+func (s *Session) pinClock(an *analysis.Analyzer) func() {
+	s.clockMu.Lock()
+	an.SetNow(robotNow())
+	return s.clockMu.Unlock
 }
 
 // Close releases session state.
@@ -776,6 +802,7 @@ func (s *Session) plan() ([]byte, error) {
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
+	defer s.pinClock(an)()
 	return json.Marshal(an.GetExecutionPlan())
 }
 
@@ -784,7 +811,8 @@ func (s *Session) impact() ([]byte, error) {
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
-	scores := an.ComputeImpactScoresFromStats(st, time.Now())
+	defer s.pinClock(an)()
+	scores := an.ComputeImpactScoresFromStats(st, an.Now())
 	return json.Marshal(map[string]any{"scores": scores})
 }
 
@@ -793,6 +821,7 @@ func (s *Session) recommendations() ([]byte, error) {
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
+	defer s.pinClock(an)()
 	return json.Marshal(map[string]any{"recommendations": an.GenerateRecommendations()})
 }
 
@@ -801,7 +830,9 @@ func (s *Session) actionable() ([]byte, error) {
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
+	release := s.pinClock(an)
 	items := an.GetActionableIssues()
+	release()
 	ids := make([]string, 0, len(items))
 	for _, it := range items {
 		ids = append(ids, it.ID)
@@ -837,6 +868,7 @@ func (s *Session) blockerChain(req []byte) ([]byte, error) {
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
+	defer s.pinClock(an)()
 	return json.Marshal(an.GetBlockerChain(r.ID))
 }
 
@@ -849,7 +881,9 @@ func (s *Session) unblocks(req []byte) ([]byte, error) {
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
+	release := s.pinClock(an)
 	ids := an.ComputeUnblocks(r.ID)
+	release()
 	if ids == nil {
 		ids = []string{}
 	}
@@ -859,7 +893,7 @@ func (s *Session) unblocks(req []byte) ([]byte, error) {
 func (s *Session) labelHealth() ([]byte, error) {
 	issues, _, st := s.snapshot()
 	cfg := analysis.DefaultLabelHealthConfig()
-	return json.Marshal(analysis.ComputeAllLabelHealth(issues, cfg, time.Now(), st))
+	return json.Marshal(analysis.ComputeAllLabelHealth(issues, cfg, robotNow(), st))
 }
 
 func (s *Session) labelFlow() ([]byte, error) {
@@ -877,7 +911,7 @@ func (s *Session) labelFlow() ([]byte, error) {
 func (s *Session) labelAttention() ([]byte, error) {
 	issues, _, _ := s.snapshot()
 	cfg := analysis.DefaultLabelHealthConfig()
-	return json.Marshal(analysis.ComputeLabelAttentionScores(issues, cfg, time.Now()))
+	return json.Marshal(analysis.ComputeLabelAttentionScores(issues, cfg, robotNow()))
 }
 
 func (s *Session) eta(req []byte) ([]byte, error) {
@@ -890,7 +924,7 @@ func (s *Session) eta(req []byte) ([]byte, error) {
 	if agents <= 0 {
 		agents = 1
 	}
-	est, err := analysis.EstimateETAForIssue(issues, st, r.ID, agents, time.Now())
+	est, err := analysis.EstimateETAForIssue(issues, st, r.ID, agents, robotNow())
 	if err != nil {
 		return nil, err
 	}

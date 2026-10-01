@@ -153,7 +153,7 @@ func (s *Session) burndown(req []byte) ([]byte, error) {
 		}
 	}
 
-	now := time.Now()
+	now := robotNow()
 	total := len(members)
 	completed := 0
 	for _, issue := range members {
@@ -325,8 +325,9 @@ func (s *Session) capacity(req []byte) ([]byte, error) {
 
 	minutes := map[string]int{}
 	totalMinutes := 0
+	now := robotNow()
 	for _, issue := range open {
-		estimate, err := analysis.EstimateETAForIssue(targets, &stats, issue.ID, 1, time.Now())
+		estimate, err := analysis.EstimateETAForIssue(targets, &stats, issue.ID, 1, now)
 		if err != nil {
 			continue
 		}

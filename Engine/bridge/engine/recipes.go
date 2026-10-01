@@ -146,7 +146,7 @@ func (s *Session) applyRecipe(req []byte) ([]byte, error) {
 	}
 
 	issues, _, stats := s.snapshot()
-	selected := filterByRecipe(issues, found, time.Now())
+	selected := filterByRecipe(issues, found, robotNow())
 	sortByRecipe(selected, found, stats)
 
 	ids := make([]string, 0, len(selected))

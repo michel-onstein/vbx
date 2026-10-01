@@ -48,6 +48,10 @@ func (s *Session) currentBaselineStats() (baseline.GraphStats, [][]string, error
 
 	stats := analysis.NewAnalyzer(issues).Analyze()
 
+	release := s.pinClock(analyzer)
+	actionable := len(analyzer.GetActionableIssues())
+	release()
+
 	var open, closed, blocked int
 	for _, issue := range issues {
 		switch issue.Status {
@@ -75,7 +79,7 @@ func (s *Session) currentBaselineStats() (baseline.GraphStats, [][]string, error
 		ClosedCount:     closed,
 		BlockedCount:    blocked,
 		CycleCount:      len(cycles),
-		ActionableCount: len(analyzer.GetActionableIssues()),
+		ActionableCount: actionable,
 	}, cycles, nil
 }
 
@@ -196,6 +200,7 @@ func (s *Session) computeDrift() (*drift.Result, bool, map[string]any, error) {
 
 	issues, _, _ := s.snapshot()
 	calculator := drift.NewCalculator(previous, current, config)
+	calculator.SetNow(robotNow())
 	calculator.SetIssues(issues)
 	return calculator.Calculate(), hasBaseline, info, nil
 }

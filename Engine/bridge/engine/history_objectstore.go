@@ -646,7 +646,7 @@ func (e *objectStoreExtractor) assemble(
 	}
 
 	return &correlation.HistoryReport{
-		GeneratedAt:     time.Now(),
+		GeneratedAt:     robotNow(),
 		DataHash:        analysis.ComputeDataHash(e.issues),
 		GitRange:        gitRange,
 		LatestCommitSHA: headSHA,

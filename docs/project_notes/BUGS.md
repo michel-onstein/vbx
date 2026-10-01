@@ -4,6 +4,38 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — Label health, alerts and priority ignored the pinned clock
+
+**Symptom:** with the engine on bv v0.25.2, `parity-check.py` (which pins
+`SOURCE_DATE_EPOCH`) reported `--robot-label-health`, `--robot-alerts` and
+`--robot-priority` as differing: vbx measured freshness, inactivity and
+staleness from the wall clock, bv from the pinned instant — 33 days apart on
+the demo. (vbx-48y)
+
+**Cause:** bv 0.23–0.24 extended `SOURCE_DATE_EPOCH` from triage to label
+health and attention, priority impact, drift alerts, ETA, burndown, forecast,
+recipes and the robot envelope, and gave the analyzer and the drift calculator
+a `SetNow`. vbx's `robotNow()` was used by triage only, by design for bv
+v0.20; the analyzer defaulted its clock to its construction time.
+
+**Fix:** every analysis site reads `robotNow()`; `drift.Calculator` gets
+`SetNow(robotNow())`; and the session's analyzer has its clock set per call by
+`Session.pinClock`, under a mutex, immediately before any method that reads it
+(plan, actionable, recommendations, blocker chain, unblocks, priority, the
+baseline's actionable count). Setting it once at load — the obvious fix — also
+passes parity, but the app holds a session for hours and would freeze every
+staleness and readiness figure at the moment the workspace was opened. Load
+time and a deploy commit's timestamp stay on the wall clock: they are not
+analysis.
+
+**Prevention:** `Engine/bridge/engine/clock_test.go` opens one session and
+calls it at two pinned instants: label-health freshness moves by exactly the
+gap, a deferral that expires between them makes the bead actionable, impact
+staleness rises, and an inactivity alert appears. All fail on the old code; the
+actionable test also fails with the clock set once at load.
+
+---
+
 ## 2026-10-01 — `waits-for` and `conditional-blocks` drawn as non-blocking
 
 **Symptom:** after the engine moved to bv v0.25.2, a bead held only by a
