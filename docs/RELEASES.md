@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.8.0 — 2026-10-01
+
+### Features
+
+- The sprint dashboard flags at-risk beads and follows mid-sprint scope changes ([#96](https://github.com/michel-onstein/vbx/pull/96))
+
 ## 0.7.0 — 2026-10-01
 
 ### Features
