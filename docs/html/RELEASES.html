@@ -193,12 +193,16 @@ pre.mermaid svg { max-width: 100%; height: auto; }
     <nav class="toc"><div class="toc">
 <ul>
 <li><a href="#releases">Releases</a><ul>
-<li><a href="#080-2026-10-01">0.8.0 — 2026-10-01</a><ul>
+<li><a href="#090-2026-10-01">0.9.0 — 2026-10-01</a><ul>
 <li><a href="#features">Features</a></li>
 </ul>
 </li>
-<li><a href="#070-2026-10-01">0.7.0 — 2026-10-01</a><ul>
+<li><a href="#080-2026-10-01">0.8.0 — 2026-10-01</a><ul>
 <li><a href="#features_1">Features</a></li>
+</ul>
+</li>
+<li><a href="#070-2026-10-01">0.7.0 — 2026-10-01</a><ul>
+<li><a href="#features_2">Features</a></li>
 </ul>
 </li>
 <li><a href="#065-2026-10-01">0.6.5 — 2026-10-01</a><ul>
@@ -222,7 +226,7 @@ pre.mermaid svg { max-width: 100%; height: auto; }
 </ul>
 </li>
 <li><a href="#060-2026-10-01">0.6.0 — 2026-10-01</a><ul>
-<li><a href="#features_2">Features</a></li>
+<li><a href="#features_3">Features</a></li>
 </ul>
 </li>
 <li><a href="#051-2026-10-01">0.5.1 — 2026-10-01</a><ul>
@@ -230,7 +234,7 @@ pre.mermaid svg { max-width: 100%; height: auto; }
 </ul>
 </li>
 <li><a href="#050-2026-10-01">0.5.0 — 2026-10-01</a><ul>
-<li><a href="#features_3">Features</a></li>
+<li><a href="#features_4">Features</a></li>
 </ul>
 </li>
 <li><a href="#041-2026-10-01">0.4.1 — 2026-10-01</a><ul>
@@ -238,11 +242,11 @@ pre.mermaid svg { max-width: 100%; height: auto; }
 </ul>
 </li>
 <li><a href="#040-2026-10-01">0.4.0 — 2026-10-01</a><ul>
-<li><a href="#features_4">Features</a></li>
+<li><a href="#features_5">Features</a></li>
 </ul>
 </li>
 <li><a href="#030-2026-10-01">0.3.0 — 2026-10-01</a><ul>
-<li><a href="#features_5">Features</a></li>
+<li><a href="#features_6">Features</a></li>
 </ul>
 </li>
 <li><a href="#026-2026-10-01">0.2.6 — 2026-10-01</a><ul>
@@ -438,13 +442,18 @@ pre.mermaid svg { max-width: 100%; height: auto; }
 edit.</strong> The engineering-facing views live elsewhere:
 <a href="project_notes/BUGS.html">BUGS.md</a> records a bug and the regression test locking
 it in, and <a href="project_notes/WORK_LOG.html">WORK_LOG.md</a> records dated work.</p>
-<h2 id="080-2026-10-01"><a class="toclink" href="#080-2026-10-01">0.8.0 — 2026-10-01</a></h2>
+<h2 id="090-2026-10-01"><a class="toclink" href="#090-2026-10-01">0.9.0 — 2026-10-01</a></h2>
 <h3 id="features"><a class="toclink" href="#features">Features</a></h3>
+<ul>
+<li>Robot output names its source and scope the way bv 0.25 does (<a href="https://github.com/michel-onstein/vbx/pull/97">#97</a>)</li>
+</ul>
+<h2 id="080-2026-10-01"><a class="toclink" href="#080-2026-10-01">0.8.0 — 2026-10-01</a></h2>
+<h3 id="features_1"><a class="toclink" href="#features_1">Features</a></h3>
 <ul>
 <li>The sprint dashboard flags at-risk beads and follows mid-sprint scope changes (<a href="https://github.com/michel-onstein/vbx/pull/96">#96</a>)</li>
 </ul>
 <h2 id="070-2026-10-01"><a class="toclink" href="#070-2026-10-01">0.7.0 — 2026-10-01</a></h2>
-<h3 id="features_1"><a class="toclink" href="#features_1">Features</a></h3>
+<h3 id="features_2"><a class="toclink" href="#features_2">Features</a></h3>
 <ul>
 <li>Edits no longer overwrite a bead someone else just changed (<a href="https://github.com/michel-onstein/vbx/pull/95">#95</a>)</li>
 </ul>
@@ -474,7 +483,7 @@ it in, and <a href="project_notes/WORK_LOG.html">WORK_LOG.md</a> records dated w
 <li>Multi-repository workspaces open in the app without running br or bd (<a href="https://github.com/michel-onstein/vbx/pull/90">#90</a>)</li>
 </ul>
 <h2 id="060-2026-10-01"><a class="toclink" href="#060-2026-10-01">0.6.0 — 2026-10-01</a></h2>
-<h3 id="features_2"><a class="toclink" href="#features_2">Features</a></h3>
+<h3 id="features_3"><a class="toclink" href="#features_3">Features</a></h3>
 <ul>
 <li>Recipes, beads.db workspaces and deleted beads follow bv 0.25's readiness rules (<a href="https://github.com/michel-onstein/vbx/pull/89">#89</a>)</li>
 </ul>
@@ -484,7 +493,7 @@ it in, and <a href="project_notes/WORK_LOG.html">WORK_LOG.md</a> records dated w
 <li>Parity is checked against bv 0.25's readiness and blocking edge cases, not only the demo (<a href="https://github.com/michel-onstein/vbx/pull/88">#88</a>)</li>
 </ul>
 <h2 id="050-2026-10-01"><a class="toclink" href="#050-2026-10-01">0.5.0 — 2026-10-01</a></h2>
-<h3 id="features_3"><a class="toclink" href="#features_3">Features</a></h3>
+<h3 id="features_4"><a class="toclink" href="#features_4">Features</a></h3>
 <ul>
 <li>vbx-cli's triage and --robot-next claim beads with br update --claim from the live tracker; the app never runs br (<a href="https://github.com/michel-onstein/vbx/pull/87">#87</a>)</li>
 </ul>
@@ -494,12 +503,12 @@ it in, and <a href="project_notes/WORK_LOG.html">WORK_LOG.md</a> records dated w
 <li>Label health, alerts and priority measure staleness from the pinned clock, read afresh on every call (<a href="https://github.com/michel-onstein/vbx/pull/86">#86</a>)</li>
 </ul>
 <h2 id="040-2026-10-01"><a class="toclink" href="#040-2026-10-01">0.4.0 — 2026-10-01</a></h2>
-<h3 id="features_4"><a class="toclink" href="#features_4">Features</a></h3>
+<h3 id="features_5"><a class="toclink" href="#features_5">Features</a></h3>
 <ul>
 <li>The graph and inspector treat waits-for and conditional-blocks as blocking, as the engine does (<a href="https://github.com/michel-onstein/vbx/pull/85">#85</a>)</li>
 </ul>
 <h2 id="030-2026-10-01"><a class="toclink" href="#030-2026-10-01">0.3.0 — 2026-10-01</a></h2>
-<h3 id="features_5"><a class="toclink" href="#features_5">Features</a></h3>
+<h3 id="features_6"><a class="toclink" href="#features_6">Features</a></h3>
 <ul>
 <li>Build the analysis engine on bv 0.25.2, so its numbers follow bv's current rules (<a href="https://github.com/michel-onstein/vbx/pull/84">#84</a>)</li>
 </ul>

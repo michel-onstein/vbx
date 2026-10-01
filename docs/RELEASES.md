@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.9.0 — 2026-10-01
+
+### Features
+
+- Robot output names its source and scope the way bv 0.25 does ([#97](https://github.com/michel-onstein/vbx/pull/97))
+
 ## 0.8.0 — 2026-10-01
 
 ### Features
