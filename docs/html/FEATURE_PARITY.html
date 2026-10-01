@@ -274,6 +274,14 @@ and design, and vbx deliberately does not copy it. Each is scoped to that
 fixture, that command and that exact path, printed as <code>declared</code> rather than
 as a match, compared normally on every JSONL fixture — and a declaration that
 stops firing fails the run.</p>
+<p>bv's <code>--label</code> is a global scope — the label's subgraph, its beads plus their
+direct dependency neighbours — so the harness also runs label-scoped commands
+over the demo. <code>--robot-graph --label</code> is compared with a known label
+(<code>engine</code>) and an unknown one. The others that do not match yet are listed as
+label-scoped skips, each naming its bead: <code>vbx-cli</code> ignores the global scope
+on triage, plan, priority, next, suggest and insights (vbx-4cz), its
+<code>--label</code> on alerts keeps every alert (vbx-jnm), and <code>--robot-capacity</code> is not
+compared at all yet (vbx-ko1).</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
 <p><strong>Mechanism legend</strong></p>

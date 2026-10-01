@@ -194,8 +194,36 @@ def test_declared_differences_are_narrow(parity) -> None:
     check("a fixture with no declarations has nothing stale", stale == [], str(stale))
 
 
+def test_label_scoped_runs(parity) -> None:
+    print("\nLabel-scoped runs (vbx-7dm)")
+    names = [entry.get("name", entry["vbx"]) for entry in parity.COMPARISONS]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    # Two runs of one command under one name would share their report line and
+    # their DECLARED_DIFFERENCES entries.
+    check("every run has its own name", duplicates == [], str(duplicates))
+
+    scoped = [entry for entry in parity.COMPARISONS if "--label" in entry.get("vbx_args", [])]
+    compared = {
+        entry["vbx_args"][entry["vbx_args"].index("--label") + 1]
+        for entry in scoped
+        if entry["vbx"] == "robot-graph" and entry.get("compare") is not False
+    }
+    check("the graph is compared under a known and an unknown label",
+          {"engine", "no-such-label"} <= compared, str(compared))
+    for entry in scoped:
+        check(f"--{entry['vbx']} passes the same label to bv",
+              entry.get("bv_args") == entry["vbx_args"], str(entry))
+
+    gaps = [entry for entry in parity.COMPARISONS
+            if entry.get("compare") is False and "--label" in entry.get("name", "")]
+    check("a label-scoped command that does not match yet is a skip naming its bead",
+          gaps != [] and all("(vbx-" in entry.get("note", "") for entry in gaps),
+          str([entry.get("note") for entry in gaps]))
+
+
 def main() -> int:
     parity = load_parity()
+    test_label_scoped_runs(parity)
     test_envelope_only_keys_are_one_list(parity)
     test_declared_differences_are_narrow(parity)
     test_sqlite_workspace_keeps_every_record(parity)

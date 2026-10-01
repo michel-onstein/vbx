@@ -51,6 +51,15 @@ fixture, that command and that exact path, printed as `declared` rather than
 as a match, compared normally on every JSONL fixture — and a declaration that
 stops firing fails the run.
 
+bv's `--label` is a global scope — the label's subgraph, its beads plus their
+direct dependency neighbours — so the harness also runs label-scoped commands
+over the demo. `--robot-graph --label` is compared with a known label
+(`engine`) and an unknown one. The others that do not match yet are listed as
+label-scoped skips, each naming its bead: `vbx-cli` ignores the global scope
+on triage, plan, priority, next, suggest and insights (vbx-4cz), its
+`--label` on alerts keeps every alert (vbx-jnm), and `--robot-capacity` is not
+compared at all yet (vbx-ko1).
+
 The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.
 

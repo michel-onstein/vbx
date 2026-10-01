@@ -544,17 +544,60 @@ func (s *Session) graphExport(req []byte) ([]byte, error) {
 		format = "json"
 	}
 
-	result, err := export.ExportGraph(issues, stats, export.GraphExportConfig{
+	dataHash := analyzer.DataHash()
+	graphIssues := issues
+	if r.Label != "" {
+		graphIssues, stats = s.labelGraph(issues, r.Label)
+	}
+
+	// The label is never passed to the exporter: the scope above already
+	// selected the label subgraph, and ExportGraph's own label filter keeps
+	// only the labelled beads, which erases their dependency context.
+	result, err := export.ExportGraph(graphIssues, stats, export.GraphExportConfig{
 		Format:   format,
-		Label:    r.Label,
 		Root:     r.Root,
 		Depth:    r.Depth,
-		DataHash: analyzer.DataHash(),
+		DataHash: dataHash,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("exporting the graph: %w", err)
 	}
-	return s.withProvenance(result, analyzer.DataHash(), labelScope(issues, r.Label))
+	if r.Label != "" {
+		if result.FiltersApplied == nil {
+			result.FiltersApplied = make(map[string]string)
+		}
+		result.FiltersApplied["label"] = r.Label
+	}
+	// bv writes data_hash from its envelope, so it is there even when the
+	// exporter returns an empty graph — an unknown label — and leaves it unset.
+	result.DataHash = dataHash
+	return s.withProvenance(result, dataHash, labelScope(issues, r.Label))
+}
+
+// labelGraph is the issue set and stats bv 0.25.2's --robot-graph --label
+// exports from: its scopeLoadedIssues (cmd/bv/main.go) replaces the loaded
+// issues with the label subgraph's AllIssues — the labelled beads plus their
+// direct dependency neighbours — keeps the labelled CoreIssues as the
+// candidates, and the graph handler analyses that set afresh through
+// RobotContext.Analyzer. Ported from bv v0.25.2, which exports no function
+// doing the selection. An unknown label is an empty set.
+func (s *Session) labelGraph(issues []model.Issue, label string) ([]model.Issue, *analysis.GraphStats) {
+	subgraph := analysis.ComputeLabelSubgraph(issues, label)
+	scoped := make([]model.Issue, 0, len(subgraph.AllIssues))
+	for _, id := range subgraph.AllIssues {
+		if issue, ok := subgraph.IssueMap[id]; ok {
+			scoped = append(scoped, issue)
+		}
+	}
+	candidates := make(map[string]bool, len(subgraph.CoreIssues))
+	for _, id := range subgraph.CoreIssues {
+		candidates[id] = true
+	}
+	an := analysis.NewAnalyzer(scoped)
+	an.SetReadinessScope(s.readinessIndex(), candidates)
+	an.SetNow(robotNow())
+	stats := an.Analyze()
+	return scoped, &stats
 }
 
 // fileImpact rates the risk of touching a set of files.
