@@ -30,7 +30,7 @@ end over bv's own Go analysis engine.
 | Swift | 6.3.3 (Xcode 26.6), package builds in language mode 5 |
 | Go | 1.26.6 and 1.27.1 (`darwin/arm64`) — 1.27 needs `-ldflags=-macos=`, which `build-engine.sh` passes only to a linker that offers it |
 | Minimum macOS | 14.0 |
-| Upstream `bv` | `github.com/Dicklesworthstone/beads_viewer v0.20.0` |
+| Upstream `bv` | `github.com/Dicklesworthstone/beads_viewer v0.25.2` — its `go 1.26.0` directive is why the engine needs Go 1.26+ |
 
 Biome is referenced by the global conventions but is **not configured in this
 repo** — there is no `package.json`, and Biome does not format Markdown. Go is

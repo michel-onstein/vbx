@@ -44,6 +44,7 @@ BUMP = ROOT / "scripts" / "version-bump.sh"
 DOCS_BUILD = ROOT / "scripts" / "build-docs.py"
 BEADS_CHECK = ROOT / "scripts" / "beads-check.py"
 NOTES = ROOT / "scripts" / "release-notes.py"
+NOTICES = ROOT / "scripts" / "build-notices.py"
 
 # Fabricated, and deliberately distinctive: a substring that appears nowhere
 # else means an assertion that it is absent cannot pass by coincidence.
@@ -1198,6 +1199,79 @@ def test_beads_source_repo_check() -> None:
               "some-topic-branch" in drifted.stderr, drifted.stderr.strip())
 
 
+def run_notices_check(gomod: str, notices: str) -> subprocess.CompletedProcess[str]:
+    """Run build-notices.py --check against a scratch go.mod and notices file."""
+    with tempfile.TemporaryDirectory() as raw:
+        scratch = Path(raw)
+        (scratch / "scripts").mkdir()
+        (scratch / "Engine" / "bridge").mkdir(parents=True)
+        (scratch / "Resources").mkdir()
+        target = scratch / "scripts" / NOTICES.name
+        target.write_bytes(NOTICES.read_bytes())
+        (scratch / "Engine" / "bridge" / "go.mod").write_text(gomod)
+        (scratch / "Resources" / "ACKNOWLEDGEMENTS.md").write_text(notices)
+        return subprocess.run([sys.executable, str(target), "--check"],
+                              capture_output=True, text=True)
+
+
+def notices_for(modules: dict[str, str]) -> str:
+    """A minimal notices file in the generator's shape, rider included."""
+    body = "".join(f"### {name}\n\nVersion {version}\n\n```\nlicence\n```\n\n"
+                   for name, version in modules.items())
+    return f"# Acknowledgements\n\nADDITIONAL RIDER / RESTRICTION\n\n{body}"
+
+
+def test_notices_check_catches_version_drift() -> None:
+    """Regression for 2026-10-01: stale notices passed `--check`.
+
+    Bumping beads_viewer from v0.20.0 to v0.25.2 moved fourteen modules, and
+    `build-notices.py --check` still passed against acknowledgements written
+    for the old versions, because it only checked that each module was named.
+    A module's licence can change between releases — bv's rider is part of
+    its — so the version is part of what the notices attest to.
+    """
+    print("\nAcknowledgements")
+    result = subprocess.run([sys.executable, str(NOTICES), "--check"], cwd=ROOT,
+                            capture_output=True, text=True)
+    check("the committed notices match go.mod", result.returncode == 0,
+          (result.stdout + result.stderr).strip())
+
+    gomod = ("module example\n\ngo 1.26.0\n\nrequire (\n"
+             "\tgithub.com/Dicklesworthstone/beads_viewer v0.25.2\n"
+             "\tmodernc.org/sqlite v1.58.0 // indirect\n)\n")
+    current = {"github.com/Dicklesworthstone/beads_viewer": "v0.25.2",
+               "modernc.org/sqlite": "v1.58.0"}
+
+    agreeing = run_notices_check(gomod, notices_for(current))
+    check("notices at go.mod's versions pass", agreeing.returncode == 0,
+          (agreeing.stdout + agreeing.stderr).strip())
+
+    stale = run_notices_check(
+        gomod, notices_for({**current,
+                            "github.com/Dicklesworthstone/beads_viewer": "v0.20.0"}))
+    check("a module acknowledged at an old version is caught", stale.returncode == 1,
+          (stale.stdout + stale.stderr).strip())
+    check("...and the module and both versions are named",
+          "beads_viewer (notices v0.20.0, go.mod v0.25.2)" in stale.stderr,
+          stale.stderr.strip())
+
+    missing = run_notices_check(
+        gomod, notices_for({"github.com/Dicklesworthstone/beads_viewer": "v0.25.2"}))
+    check("a module missing from the notices is caught", missing.returncode == 1)
+    check("...and named", "modernc.org/sqlite" in missing.stderr, missing.stderr.strip())
+
+    extra = run_notices_check(
+        gomod, notices_for({**current, "github.com/gone/away": "v1.0.0"}))
+    check("a module dropped from go.mod but still acknowledged is caught",
+          extra.returncode == 1)
+    check("...and named", "github.com/gone/away" in extra.stderr, extra.stderr.strip())
+
+    riderless = run_notices_check(
+        gomod, notices_for(current).replace("ADDITIONAL RIDER / RESTRICTION", ""))
+    check("a missing rider is still caught", riderless.returncode == 1,
+          riderless.stderr.strip())
+
+
 def test_docs_html_check() -> None:
     """The generated HTML has to still match the Markdown it came from.
 
@@ -1824,6 +1898,7 @@ def main() -> int:
     test_cask_and_release_script()
     test_version_bump()
     test_beads_only_does_not_release()
+    test_notices_check_catches_version_drift()
     test_docs_html_check()
     test_beads_source_repo_check()
     test_bump_regenerates_the_html()

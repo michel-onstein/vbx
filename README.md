@@ -66,7 +66,7 @@ security delete-generic-password -s com.qjam.vbx -a cloudflare-token
 
 ## Build and run
 
-Requires Go 1.25+, Swift 6 / Xcode 16+, macOS 14+.
+Requires Go 1.26+, Swift 6 / Xcode 16+, macOS 14+.
 
 ```bash
 ./scripts/build-engine.sh --check   # build the Go archive, run the C ABI smoke test
