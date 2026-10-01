@@ -5,6 +5,20 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Label-scoped graph export matches bv (vbx-7dm)
+
+`vbx-cli --robot-graph --label` exports bv 0.25.2's label subgraph — the
+labelled beads plus their direct dependency neighbours, analysed afresh —
+instead of the labelled beads alone, and keeps `data_hash` and
+`filters_applied` for an unknown label. `parity-check.py` gains label-scoped
+runs, named apart from the unscoped ones: the graph is compared with a known
+and an unknown label; the other label-scoped commands, which differ for other
+reasons, are skips naming the beads filed for them — vbx-4cz (global `--label`
+ignored on triage, plan, priority, next, suggest, insights), vbx-jnm (alerts),
+vbx-ko1 (capacity). CLI only; the app's graph view does not scope by label.
+Parity with bv 0.25.2: 0 differing commands before and after, with two more
+compared. See BUGS.md.
+
 ## 2026-10-01 — Triage uses git history only where bv does (vbx-8u3)
 
 `Session.triageHistoryGate` ports bv 0.25.2's two refusals before the triage

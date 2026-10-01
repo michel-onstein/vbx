@@ -4,6 +4,35 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — A label-scoped graph dropped the label's dependency context
+
+**Symptom:** on `Fixtures/demo`, `vbx-cli --robot-graph --label engine`
+exported 6 nodes and 3 edges where bv 0.25.2 exports 13 and 11 (`ui`: 9 vs
+11), and for an unknown label vbx omitted `data_hash` and `filters_applied`,
+which bv keeps. The envelope already matched; the payload did not. (vbx-7dm)
+
+**Cause:** vbx handed the label to `export.ExportGraph`, whose own filter keeps
+only the labelled beads. bv 0.25 never does: `--label` is a global scope, and
+`scopeLoadedIssues` replaces the loaded issues with the label subgraph's
+`AllIssues` — labelled beads plus their direct dependency neighbours —
+before the graph handler analyses that set afresh and exports it unfiltered,
+adding `filters_applied.label` itself. bv's `data_hash` comes from its
+envelope, so it survives the exporter's early return on an empty graph.
+`parity-check.py` never passed `--label`, so nothing compared it.
+
+**Fix:** `Session.labelGraph` (robot.go) ports the selection, with the
+candidates and the full-source readiness authority bv's analyzer gets; the
+label is no longer passed to the exporter, and `data_hash` is always set.
+`parity-check.py` now runs label-scoped commands; the ones that differ for
+other reasons are skips naming vbx-4cz, vbx-jnm and vbx-ko1.
+
+**Regression test:** `TestLabelGraphIsTheLabelSubgraph` and
+`TestUnknownLabelGraphKeepsTheDataHash` (`graph_label_test.go`, node ids pinned
+to bv 0.25.2's), and `--robot-graph --label engine` / `--label no-such-label`
+in `parity-check.py`.
+
+---
+
 ## 2026-10-01 — Triage reported staleness bv never would, from history it could not use
 
 **Symptom:** over `Fixtures/sprints` while its `issues.jsonl` was still
