@@ -4,6 +4,32 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — `waits-for` and `conditional-blocks` drawn as non-blocking
+
+**Symptom:** after the engine moved to bv v0.25.2, a bead held only by a
+`waits-for` or `conditional-blocks` edge was blocked in the engine's
+actionable set and metrics, while the graph laid the edge out as
+non-blocking and the inspector labelled it as an informational link. (vbx-850)
+
+**Cause:** bv v0.25.0 (commit 55ec82b) widened `IsBlocking()` to
+`"" || blocks || conditional-blocks || waits-for`. The Swift copy in
+`DependencyType.isBlocking` still encoded the v0.20 rule — `""` and `blocks`
+only — which the 2026-08-19 entry below had narrowed it to. Both entries were
+right for their bv; nothing tied the Swift copy to the engine's version.
+
+**Fix:** `DependencyType` gains `.conditionalBlocks` and `.waitsFor` (the enum
+stays open via `other(String)`), and `isBlocking` returns true for both. The
+switch is exhaustive, so a new named case has to decide its blocking.
+
+**Prevention:** `blockingAgreesWithEngine` in `Tests/VBXEngineTests` writes a
+workspace with one open blocker per dependency type bv defines (plus `""` and a
+custom type), asks the real engine for the actionable set, and asserts it
+agrees with Swift's `isBlocking` for each — so the next upstream change fails a
+test instead of drifting. `ModelTests.waitsForAndConditionalBlocksBlock` pins
+the two types directly. Both fail without the fix.
+
+---
+
 ## 2026-10-01 — Stale acknowledgements passed `build-notices.py --check`
 
 **Symptom:** after bumping `beads_viewer` from v0.20.0 to v0.25.2, which moved

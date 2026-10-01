@@ -816,8 +816,12 @@ the places <code>bv</code> is lenient, so the two agree on what a malformed file
 <li><code>IssueType</code> likewise: the five known types get icons and sort weights; anything else is
   valid and renders with a default icon, matching <code>bv</code>'s <code>IsValid()</code> / <code>IsKnownType()</code> split
   (which exists to accommodate Gastown types like <code>role</code>, <code>agent</code>, <code>molecule</code>).</li>
-<li><code>DependencyType.isBlocking</code> preserves the legacy quirk that an <strong>empty type means
-  blocking</strong>. Getting this wrong silently changes every downstream metric.</li>
+<li><code>DependencyType.isBlocking</code> mirrors bv's <code>IsBlocking()</code>: <code>blocks</code>, <code>conditional-blocks</code>
+  and <code>waits-for</code> block (bv v0.25.0 onwards), and it preserves the legacy quirk that an
+  <strong>empty type means blocking</strong>. <code>parent-child</code>, <code>related</code>, <code>discovered-from</code> and custom
+  types do not. The enum stays open — an unknown type decodes to <code>other(String)</code>. Getting
+  this wrong silently changes every downstream metric, and an engine test asserts the
+  Swift copy agrees with the engine for every type bv defines.</li>
 <li>All model types are <code>Sendable</code> value types so they cross actor boundaries freely.</li>
 <li>Metric maps are stored keyed by issue ID for API fidelity, but hot paths keep a parallel
   dense <code>[Double]</code> indexed by a stable node index, built once per snapshot.</li>

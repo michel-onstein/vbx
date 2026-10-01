@@ -43,8 +43,11 @@ them.
 - **Decoding never drops a record.** Status, type and dependency-type enums are
   open. A dropped issue silently changes every downstream metric.
 - **An empty dependency type blocks**, matching bv's rule for rows written
-  before the typed system. Only `""` and `blocks` block — not `parent-child`,
-  not `waits-for`.
+  before the typed system. Since bv v0.25.0, `""`, `blocks`,
+  `conditional-blocks` and `waits-for` block — not `parent-child`, `related`,
+  `discovered-from` or a custom type. The rule is bv's `IsBlocking()`, and
+  it has moved once already: check the engine's bv version, not this line, and
+  `blockingAgreesWithEngine` fails when Swift's copy drifts from it.
 - **The engine archive is not committed.** Run `./scripts/build-engine.sh`
   before `swift build` in a fresh clone. The generated header *is* committed,
   because the Swift C target needs it to compile.

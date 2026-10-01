@@ -79,7 +79,7 @@ func commentIDShapes() throws {
 
 // MARK: - Blocking semantics
 
-@Test("Only 'blocks' and the empty type block")
+@Test("blocks, conditional-blocks, waits-for and the empty type block")
 func blockingSemantics() {
     #expect(DependencyType.blocks.isBlocking)
     // Legacy rows written before the typed system have no type and must
@@ -89,7 +89,42 @@ func blockingSemantics() {
     #expect(!DependencyType.related.isBlocking)
     #expect(!DependencyType.parentChild.isBlocking)
     #expect(!DependencyType.discoveredFrom.isBlocking)
-    #expect(!DependencyType(rawValue: "waits-for").isBlocking)
+    #expect(!DependencyType(rawValue: "custom-link").isBlocking)
+}
+
+// Regression (vbx-850): bv v0.25.0 made waits-for and conditional-blocks
+// blocking, and the engine follows it; Swift still said they did not, so the
+// graph and inspector disagreed with the engine's actionable set and metrics.
+@Test("waits-for and conditional-blocks block, as in bv v0.25")
+func waitsForAndConditionalBlocksBlock() {
+    #expect(DependencyType(rawValue: "waits-for") == .waitsFor)
+    #expect(DependencyType(rawValue: "conditional-blocks") == .conditionalBlocks)
+    #expect(DependencyType.waitsFor.isBlocking)
+    #expect(DependencyType.conditionalBlocks.isBlocking)
+
+    let issue = Bead(
+        id: "a", title: "A",
+        dependencies: [
+            Dependency(issueID: "a", dependsOnID: "w", type: DependencyType(rawValue: "waits-for")),
+            Dependency(issueID: "a", dependsOnID: "c", type: DependencyType(rawValue: "conditional-blocks")),
+            Dependency(issueID: "a", dependsOnID: "p", type: .parentChild),
+        ])
+    #expect(issue.blockingDependencies.map(\.dependsOnID).sorted() == ["c", "w"])
+}
+
+@Test("Named dependency types keep their raw value, and unknown ones stay open")
+func dependencyTypeRoundTrip() throws {
+    let raws = [
+        "blocks", "conditional-blocks", "waits-for", "related", "parent-child",
+        "discovered-from", "", "custom-link",
+    ]
+    for raw in raws {
+        #expect(DependencyType(rawValue: raw).rawValue == raw)
+        let json = "{\"issue_id\":\"a\",\"depends_on_id\":\"b\",\"type\":\"\(raw)\"}"
+        let decoded = try JSONDecoder().decode(Dependency.self, from: Data(json.utf8))
+        #expect(decoded.type.rawValue == raw)
+    }
+    #expect(DependencyType(rawValue: "custom-link") == .other("custom-link"))
 }
 
 @Test("blockingDependencies filters out non-blocking edges")

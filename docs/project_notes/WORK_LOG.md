@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — `waits-for` and `conditional-blocks` block in Swift too (vbx-850)
+
+`DependencyType.isBlocking` follows bv v0.25's `IsBlocking()`: `blocks`,
+`conditional-blocks`, `waits-for` and the legacy empty type block. The graph
+layout and the inspector now agree with the engine, which already followed
+since the v0.25.2 bump. New engine test `blockingAgreesWithEngine` checks
+Swift's rule against the engine for every bv dependency type. CLAUDE.md's rule,
+the tutorial's graph section and VBX_DESIGN.md §7 updated to match.
+
+---
+
 ## 2026-10-01 — The engine is built on bv v0.25.2 (vbx-ft9)
 
 `Engine/bridge` now depends on `beads_viewer` v0.25.2 (was v0.20.0); its
