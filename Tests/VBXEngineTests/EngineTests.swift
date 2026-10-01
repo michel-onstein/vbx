@@ -333,3 +333,26 @@ func blockingAgreesWithEngine() async throws {
     #expect(!actionable.contains("t-1"), "conditional-blocks must block")
     #expect(!actionable.contains("t-2"), "waits-for must block")
 }
+
+@Test("A TOON re-encode restamps the envelope's output_format, and only where the engine set one")
+func toonRestampsOutputFormat() async throws {
+    let engine = BeadsEngine()
+    _ = try await engine.open(path: fixturePath)
+    defer { Task { await engine.close() } }
+
+    let data = try await engine.rawJSON("suggest")
+    let payload = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(payload["output_format"] as? String == "json")
+    #expect(payload["source_kind"] as? String == "jsonl_local")
+    #expect((payload["scope_hash"] as? String)?.count == 64)
+
+    let restamped = RobotEnvelope.stamping(format: "toon", on: payload) as? [String: Any]
+    #expect(restamped?["output_format"] as? String == "toon")
+    #expect(restamped?["data_hash"] as? String == payload["data_hash"] as? String)
+
+    // No envelope, nothing invented.
+    let bare = RobotEnvelope.stamping(format: "toon", on: ["ids": ["a"]]) as? [String: Any]
+    #expect(bare?["output_format"] == nil)
+    let list = RobotEnvelope.stamping(format: "toon", on: [1, 2]) as? [Int]
+    #expect(list == [1, 2])
+}

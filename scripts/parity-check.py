@@ -23,7 +23,9 @@ landing either side of one compare unequal however close they are.
 *Different envelopes.* bv wraps most payloads in a header that vbx returns
 bare — `bv --robot-label-flow` yields `{generated_at, data_hash, flow, …}`
 where vbx yields the flow itself. Rather than pretend those are equal, each
-command declares which subtree to compare on each side.
+command declares which subtree to compare on each side. Where vbx does carry
+the envelope it carries bv's provenance keys too, except the two listed in
+ENVELOPE_ONLY_KEYS with their reasons — one list for every command.
 
 *More than one workspace.* The demo fixture exercises none of the readiness
 and blocking cases bv 0.25 changed — custom statuses, `waits-for` and
@@ -117,23 +119,21 @@ VOLATILE_KEYS = {
     "history_status",  # depends on whether a git walk was reachable
 }
 
-# The provenance envelope bv 0.25 builds in `cmd/bv`, which vbx cannot
-# import. Whether vbx ports it or the harness declares it envelope-only is
-# bead vbx-v57's call; until then a command that opts in with
-# `skip_top_level` is compared without these top-level keys. Only the top
-# level — a nested key of the same name is data and is still compared.
-PROVENANCE_KEYS = {
-    "output_format",
-    "source_path",
-    "source_kind",
-    "source_authority",
-    "authority_hash",
-    "scope_hash",
+# bv envelope keys vbx deliberately does not emit, each with its reason. This
+# is the only place the harness drops a key for being bv's alone, and it
+# applies to every command: each is removed from the top level of both whole
+# outputs before any subtree is taken. A nested key of the same name is data
+# and is still compared.
+#
+# The rest of bv 0.25's provenance envelope — output_format, source_path,
+# source_kind, scope_hash — vbx ports (ADR-023), so it is compared like any
+# other field. Where vbx and bv read different sources in the same workspace,
+# those keys differ honestly, and that difference is vbx-tvi's.
+ENVELOPE_ONLY_KEYS = {
+    "source_authority": "bv's multi-source selection report (freshness ranking,"
+                        " stale fallback); vbx ranks no sources (vbx-tvi), ADR-023",
+    "authority_hash": "a hash of source_authority, so it goes wherever that goes",
 }
-
-# bv's provenance envelope plus its `data_hash`, for commands where vbx emits
-# neither. Whether vbx should is vbx-v57's call, made for every command at once.
-ENVELOPE_KEYS = PROVENANCE_KEYS | {"data_hash"}
 
 # Go's zero time.Time as bv's JSON encoder writes it. See strip_bv_zero_times.
 GO_ZERO_TIME = "0001-01-01T00:00:00Z"
@@ -176,15 +176,12 @@ COMPARISONS = [
      "vbx_args": ["--id", "spr-sprint-2"], "bv_args": ["spr-sprint-2"],
      "bv_path": "sprint", "vbx_path": "sprint", "bv_omitzero": SPRINT_OMITZERO},
     {"vbx": "robot-burndown", "bv": "robot-burndown", "only": {"sprints"},
-     "vbx_args": ["--id", "spr-sprint-2"], "bv_args": ["spr-sprint-2"],
-     "skip_top_level": ENVELOPE_KEYS},
+     "vbx_args": ["--id", "spr-sprint-2"], "bv_args": ["spr-sprint-2"]},
     {"vbx": "robot-insights", "bv": "robot-insights", "compare": False,
      "note": "bv inlines Insights' PascalCase fields at the top level"},
     {"vbx": "robot-priority", "bv": "robot-priority", "bv_path": "recommendations",
      "vbx_path": "recommendations"},
-    # The payload is compared whole, less bv's provenance envelope, which
-    # vbx-v57 decides for every command at once.
-    {"vbx": "robot-next", "bv": "robot-next", "skip_top_level": PROVENANCE_KEYS},
+    {"vbx": "robot-next", "bv": "robot-next"},
 ]
 
 
@@ -277,6 +274,18 @@ def build_sqlite_workspace(jsonl: Path, destination: Path) -> Path:
     finally:
         connection.close()
     return destination
+
+
+def strip_envelope_only(output):
+    """Drops ENVELOPE_ONLY_KEYS from the top level of one whole output.
+
+    Applied to both sides of every comparison, before the compared subtree is
+    taken, so the envelope is the only place a key is removed from — the same
+    name nested inside a payload is data.
+    """
+    if not isinstance(output, dict):
+        return output
+    return {key: value for key, value in output.items() if key not in ENVELOPE_ONLY_KEYS}
 
 
 def strip_bv_zero_times(value, keys: set[str]):
@@ -427,8 +436,8 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
             continue
 
         try:
-            vbx_payload = dig(json.loads(vbx_out), entry.get("vbx_path"))
-            bv_payload = dig(json.loads(bv_out), entry.get("bv_path"))
+            vbx_payload = dig(strip_envelope_only(json.loads(vbx_out)), entry.get("vbx_path"))
+            bv_payload = dig(strip_envelope_only(json.loads(bv_out)), entry.get("bv_path"))
         except json.JSONDecodeError as error:
             differed.append((name, [f"could not parse output: {error}"]))
             continue
@@ -436,11 +445,6 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
         if bv_payload is None:
             skipped.append((name, f"bv payload has no {entry.get('bv_path')}"))
             continue
-
-        skip_top_level = entry.get("skip_top_level", set())
-        if skip_top_level:
-            vbx_payload = {k: v for k, v in vbx_payload.items() if k not in skip_top_level}
-            bv_payload = {k: v for k, v in bv_payload.items() if k not in skip_top_level}
 
         bv_payload = strip_bv_zero_times(bv_payload, entry.get("bv_omitzero", set()))
 

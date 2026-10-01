@@ -161,7 +161,12 @@ func (s *Session) burndown(req []byte) ([]byte, error) {
 		payload["scope_changes"] = changes
 		payload["ideal_line"] = idealLineScoped(sprint, total, changes)
 	}
-	return json.Marshal(payload)
+
+	// bv inlines the burndown under its robot envelope, so vbx does too.
+	generated, hash := s.robotEnvelope()
+	payload["generated_at"] = generated
+	payload["data_hash"] = hash
+	return s.withProvenance(payload, hash, provenanceScope{})
 }
 
 // burndownPayload is bv's calculateBurndownAt: everything except the scope
