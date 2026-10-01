@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.2.5 — 2026-10-01
+
+### Fixes
+
+- Test fixture copies drop any stale br database, so br writes find their beads ([#82](https://github.com/michel-onstein/vbx/pull/82))
+
 ## 0.2.4 — 2026-10-01
 
 ### Fixes
