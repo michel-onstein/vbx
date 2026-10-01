@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.5.0 — 2026-10-01
+
+### Features
+
+- vbx-cli's triage and --robot-next claim beads with br update --claim from the live tracker; the app never runs br ([#87](https://github.com/michel-onstein/vbx/pull/87))
+
 ## 0.4.1 — 2026-10-01
 
 ### Fixes
