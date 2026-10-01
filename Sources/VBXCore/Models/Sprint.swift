@@ -104,6 +104,96 @@ public struct BurndownPoint: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// One sprint bead bv's at-risk detector flagged, and why.
+public struct AtRiskItem: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var title: String
+    public var status: String
+    public var priority: Int
+    /// The engine's signal names — `blocked_too_long`, `no_activity`,
+    /// `critical_blocked`, `blockers_not_closing`. Kept as strings so a signal
+    /// a later engine adds is shown rather than dropped.
+    public var signals: [String]
+    /// The earliest instant behind any of the signals.
+    public var since: Date?
+    /// The engine's explanation of each signal, in a sentence.
+    public var detail: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, status, priority, signals, since, detail
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        priority = try c.decodeIfPresent(Int.self, forKey: .priority) ?? 2
+        signals = try c.decodeIfPresent([String].self, forKey: .signals) ?? []
+        since = try? c.decodeIfPresent(Date.self, forKey: .since)
+        detail = try c.decodeIfPresent(String.self, forKey: .detail) ?? ""
+    }
+
+    public init(
+        id: String, title: String = "", status: String = "open", priority: Int = 2,
+        signals: [String], since: Date? = nil, detail: String = ""
+    ) {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.priority = priority
+        self.signals = signals
+        self.since = since
+        self.detail = detail
+    }
+
+    /// A signal's name for display. Formatting only: an unknown signal is
+    /// shown as the engine spelled it.
+    public static func label(for signal: String) -> String {
+        switch signal {
+        case "blocked_too_long": "Blocked too long"
+        case "no_activity": "No activity"
+        case "critical_blocked": "Critical, blocked"
+        case "blockers_not_closing": "Blockers not closing"
+        default: signal.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+}
+
+/// A bead joining or leaving a sprint after it was planned, read from the
+/// sprint file's git history.
+public struct ScopeChange: Codable, Sendable, Hashable, Identifiable {
+    public var date: Date
+    public var issueID: String
+    public var issueTitle: String
+    /// `added` or `removed`.
+    public var action: String
+
+    public var id: String { "\(date.timeIntervalSince1970)-\(action)-\(issueID)" }
+    public var isAddition: Bool { action == "added" }
+
+    private enum CodingKeys: String, CodingKey {
+        case date, action
+        case issueID = "issue_id"
+        case issueTitle = "issue_title"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        date = (try? c.decodeIfPresent(Date.self, forKey: .date)) ?? nil ?? .distantPast
+        issueID = try c.decodeIfPresent(String.self, forKey: .issueID) ?? ""
+        issueTitle = try c.decodeIfPresent(String.self, forKey: .issueTitle) ?? ""
+        action = try c.decodeIfPresent(String.self, forKey: .action) ?? ""
+    }
+
+    public init(date: Date, issueID: String, issueTitle: String = "", action: String) {
+        self.date = date
+        self.issueID = issueID
+        self.issueTitle = issueTitle
+        self.action = action
+    }
+}
+
 /// A sprint's burndown, with the ideal line and a projection.
 public struct Burndown: Codable, Sendable, Hashable {
     public var sprintID: String
@@ -122,7 +212,14 @@ public struct Burndown: Codable, Sendable, Hashable {
     public var projectedComplete: Date?
     public var onTrack: Bool
     public var dailyPoints: [BurndownPoint]
+    /// Scope-aware: it bends where beads joined or left the sprint.
     public var idealLine: [BurndownPoint]
+    /// Sprint beads bv's detector flags. Nil when the engine did not report
+    /// it — unknown, which is not the same as the empty list's "none".
+    public var atRisk: [AtRiskItem]?
+    /// Beads that joined or left mid-sprint, oldest first. Empty when the
+    /// sprint never changed or the workspace has no history to read.
+    public var scopeChanges: [ScopeChange]
 
     private enum CodingKeys: String, CodingKey {
         case sprintID = "sprint_id"
@@ -141,6 +238,8 @@ public struct Burndown: Codable, Sendable, Hashable {
         case onTrack = "on_track"
         case dailyPoints = "daily_points"
         case idealLine = "ideal_line"
+        case atRisk = "at_risk"
+        case scopeChanges = "scope_changes"
     }
 
     public init(from decoder: Decoder) throws {
@@ -161,6 +260,8 @@ public struct Burndown: Codable, Sendable, Hashable {
         onTrack = try c.decodeIfPresent(Bool.self, forKey: .onTrack) ?? true
         dailyPoints = try c.decodeIfPresent([BurndownPoint].self, forKey: .dailyPoints) ?? []
         idealLine = try c.decodeIfPresent([BurndownPoint].self, forKey: .idealLine) ?? []
+        atRisk = try c.decodeIfPresent([AtRiskItem].self, forKey: .atRisk)
+        scopeChanges = try c.decodeIfPresent([ScopeChange].self, forKey: .scopeChanges) ?? []
     }
 
     public init() {
@@ -177,6 +278,8 @@ public struct Burndown: Codable, Sendable, Hashable {
         onTrack = true
         dailyPoints = []
         idealLine = []
+        atRisk = nil
+        scopeChanges = []
     }
 
     public static let empty = Burndown()

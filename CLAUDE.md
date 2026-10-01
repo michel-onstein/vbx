@@ -156,7 +156,8 @@ them.
   green. Add a new edge case there, so the demo's numbers stay stable.
   `parity-check.py` compares it as JSONL and as a `beads.db` built at run time,
   because vbx reads SQLite through its own loader. Its deferral is in 2099, so
-  the ready set does not depend on the clock.
+  the ready set does not depend on the clock. Sprint data likewise lives in
+  `Fixtures/sprints`; adding a sprint file to the demo would move its numbers.
 - **`Bundle.main` in a test process is SwiftPM's helper binary**, not the app —
   so `CFBundleShortVersionString`, `CFBundleVersion` and the bundle identifier
   are all absent. Anything reading them renders empty in every snapshot. Take

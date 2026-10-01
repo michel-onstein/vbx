@@ -4,6 +4,27 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — The burndown counted a reopened bead as done
+
+**Symptom:** a sprint bead that was closed and then reopened kept burning down
+on the actual line from its old close date, so the sprint read one bead better
+than the truth for the rest of the sprint. (vbx-e8n)
+
+**Cause:** the port of bv's `generateDailyBurndown` tested `closed_at` alone.
+bv tests `status == closed` *and* `closed_at` — in v0.20.0 as in v0.25.2 — and
+a reopened bead keeps the `closed_at` of its earlier close. No fixture had a
+reopened bead, and none had sprints for the parity check to compare.
+
+**Fix:** the daily points require the bead to be closed now. `Fixtures/sprints`
+holds such a bead (`spr-4`), and `parity-check.py` now compares
+`--robot-burndown` over it.
+
+**Regression test:** `TestBurndownOverTheSprintsFixtureMatchesBV` (daily
+remaining pinned to bv 0.25.2's `10 9 9 9 8 8 8 8 7 7 7 7 7`; the old rule gives
+one fewer from 2026-08-20 on), and `--robot-burndown` in `parity-check.py`.
+
+---
+
 ## 2026-10-01 — The watcher debounce test failed under a loaded suite
 
 **Symptom:** `The watcher fires on a real file change and debounces a burst`

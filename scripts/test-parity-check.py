@@ -86,11 +86,32 @@ def test_every_difference_is_reported(parity) -> None:
 def test_default_run_covers_every_fixture(parity) -> None:
     print("\nFixtures")
     names = [fixture["name"] for fixture in parity.FIXTURES]
-    check("the demo, the readiness fixture and its beads.db form are all compared",
-          names == ["demo", "readiness", "readiness (beads.db)"], str(names))
+    check("the demo, the readiness fixture, its beads.db form and the sprints are all compared",
+          names == ["demo", "readiness", "readiness (beads.db)", "sprints"], str(names))
     for fixture in parity.FIXTURES:
         path = ROOT / fixture["workspace"] / ".beads" / "issues.jsonl"
         check(f"{fixture['workspace']} exists", path.exists(), str(path))
+
+    # A command scoped to one fixture must name one that exists, or it is
+    # skipped everywhere and never compared at all.
+    for entry in parity.COMPARISONS:
+        for name in entry.get("only", ()):
+            check(f"--{entry['vbx']} is scoped to a real fixture ({name})", name in names)
+    sprints = ROOT / "Fixtures" / "sprints" / ".beads" / "sprints.jsonl"
+    check("the sprints fixture has a sprint file", sprints.exists(), str(sprints))
+
+
+def test_bv_zero_times_are_dropped_only_when_zero(parity) -> None:
+    print("\nbv's ignored omitzero")
+    bv = {"sprints": [
+        {"id": "s", "created_at": parity.GO_ZERO_TIME, "updated_at": "2026-08-01T00:00:00Z"},
+    ], "created_at": parity.GO_ZERO_TIME}
+    stripped = parity.strip_bv_zero_times(bv, {"created_at", "updated_at"})
+    check("a zero time under a named key is dropped, nested too",
+          stripped == {"sprints": [{"id": "s", "updated_at": "2026-08-01T00:00:00Z"}]},
+          str(stripped))
+    check("nothing is dropped without named keys",
+          parity.strip_bv_zero_times(bv, set()) == bv)
 
 
 def main() -> int:
@@ -98,6 +119,7 @@ def main() -> int:
     test_sqlite_workspace_keeps_every_record(parity)
     test_every_difference_is_reported(parity)
     test_default_run_covers_every_fixture(parity)
+    test_bv_zero_times_are_dropped_only_when_zero(parity)
     print()
     if FAILURES:
         print(f"{len(FAILURES)} failed:")

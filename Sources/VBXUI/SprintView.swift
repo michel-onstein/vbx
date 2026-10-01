@@ -14,7 +14,9 @@ struct SprintView: View {
                 header
                 if store.burndown.isLoaded {
                     riskBanner
+                    atRiskSection
                     burndownChart
+                    scopeChangesSection
                     velocityChart
                 } else {
                     noSprint
@@ -96,6 +98,38 @@ struct SprintView: View {
         .background(
             (store.burndown.onTrack ? Color.green : Color.orange).opacity(0.1),
             in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var atRiskSection: some View {
+        SprintAtRiskSection(items: store.burndown.atRisk) { store.select(id: $0) }
+    }
+
+    /// Beads that joined or left after the sprint was planned — the reason
+    /// the ideal line bends.
+    @ViewBuilder
+    private var scopeChangesSection: some View {
+        if !store.burndown.scopeChanges.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Scope changes").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(store.burndown.scopeChanges) { change in
+                    HStack(spacing: 6) {
+                        Image(systemName: change.isAddition ? "plus.circle" : "minus.circle")
+                            .foregroundStyle(change.isAddition ? Color.orange : Color.green)
+                            .font(.caption)
+                        Text(change.date, style: .date).font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Button {
+                            store.select(id: change.issueID)
+                        } label: {
+                            Text(change.issueID).font(.caption.monospaced())
+                        }
+                        .buttonStyle(.link)
+                        Text(change.issueTitle).font(.caption).lineLimit(1)
+                        Spacer()
+                    }
+                }
+            }
+        }
     }
 
     private func stat(_ value: String, _ name: String, tint: Color = .primary) -> some View {
@@ -242,5 +276,61 @@ struct SprintView: View {
 
     private func days(_ value: Double) -> String {
         value < 1 ? String(format: "%.1fd", value) : String(format: "%.0fd", value)
+    }
+}
+
+/// The sprint beads the engine's at-risk detector flags, and why.
+///
+/// Three states, not two: `nil` — the engine did not report the detector —
+/// draws nothing at all, while an empty list is the real answer "nothing is
+/// at risk" and says so.
+struct SprintAtRiskSection: View {
+    let items: [AtRiskItem]?
+    var select: (String) -> Void = { _ in }
+
+    var body: some View {
+        if let items {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("At risk").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                if items.isEmpty {
+                    Label("No open sprint bead is at risk.", systemImage: "checkmark.shield")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(items) { item in
+                        row(item)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func row(_ item: AtRiskItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Button {
+                    select(item.id)
+                } label: {
+                    Text(item.id).font(.caption.monospaced())
+                }
+                .buttonStyle(.link)
+                Text("P\(item.priority)").font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text(item.title).font(.caption).lineLimit(1)
+                Spacer()
+                ForEach(item.signals, id: \.self) { signal in
+                    Text(AtRiskItem.label(for: signal))
+                        .font(.caption2)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.15), in: Capsule())
+                        .foregroundStyle(.orange)
+                }
+            }
+            if !item.detail.isEmpty {
+                Text(item.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
     }
 }

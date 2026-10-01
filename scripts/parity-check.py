@@ -30,9 +30,11 @@ and blocking cases bv 0.25 changed — custom statuses, `waits-for` and
 `conditional-blocks`, `defer_until`, a missing blocker, parent-child gating, a
 tombstoned blocker — which is how numbers moved under the engine bump while
 every check stayed green. So the run covers every workspace in FIXTURES: the
-demo, `Fixtures/readiness`, and the same readiness beads as a `beads.db`,
-built at run time by `build_sqlite_workspace` because vbx reads SQLite through
-its own loader rather than bv's. `--workspace` narrows the run to one.
+demo, `Fixtures/readiness`, the same readiness beads as a `beads.db`, built
+at run time by `build_sqlite_workspace` because vbx reads SQLite through its
+own loader rather than bv's, and `Fixtures/sprints`, the only one with sprints
+for the burndown and sprint commands to read. `--workspace` narrows the run to
+one.
 
 Each differing command reports its first difference and how many more there
 are; `--verbose` lists every one.
@@ -63,6 +65,11 @@ FIXTURES = [
     {"name": "demo", "workspace": "Fixtures/demo"},
     {"name": "readiness", "workspace": "Fixtures/readiness"},
     {"name": "readiness (beads.db)", "workspace": "Fixtures/readiness", "sqlite": True},
+    # Sprints of its own rather than in the demo, whose numbers every other
+    # comparison depends on. Sprint 2 spans PINNED_CLOCK and holds a bead of
+    # each at-risk signal, a reopened bead with a stale closed_at, a tombstone
+    # and an id no bead has.
+    {"name": "sprints", "workspace": "Fixtures/sprints"},
 ]
 
 # br's issues columns, in br's order. A beads.db built here has the column
@@ -124,8 +131,21 @@ PROVENANCE_KEYS = {
     "scope_hash",
 }
 
+# bv's provenance envelope plus its `data_hash`, for commands where vbx emits
+# neither. Whether vbx should is vbx-v57's call, made for every command at once.
+ENVELOPE_KEYS = PROVENANCE_KEYS | {"data_hash"}
+
+# Go's zero time.Time as bv's JSON encoder writes it. See strip_bv_zero_times.
+GO_ZERO_TIME = "0001-01-01T00:00:00Z"
+
+# model.Sprint's `omitzero` timestamps, which bv writes anyway.
+SPRINT_OMITZERO = {"created_at", "updated_at"}
+
 # How each command lines up. `bv_path` and `vbx_path` name the subtree to
-# compare, as a dotted path; None means the whole payload.
+# compare, as a dotted path; None means the whole payload. `vbx_args` and
+# `bv_args` follow the flag on each side — the two spell a value differently.
+# `only` names the fixtures a command is compared over, for one that needs data
+# only some fixtures hold; elsewhere it is reported as skipped, never passed.
 COMPARISONS = [
     {"vbx": "robot-label-flow", "bv": "robot-label-flow", "bv_path": "flow"},
     {"vbx": "robot-label-health", "bv": "robot-label-health", "bv_path": "results"},
@@ -148,7 +168,16 @@ COMPARISONS = [
     {"vbx": "robot-alerts", "bv": "robot-alerts", "bv_path": "alerts",
      "vbx_path": "alerts"},
     {"vbx": "robot-sprint-list", "bv": "robot-sprint-list", "bv_path": "sprints",
-     "vbx_path": "sprints"},
+     "vbx_path": "sprints", "bv_omitzero": SPRINT_OMITZERO},
+    # The sprint is named rather than `current`: bv resolves `current` against
+    # the wall clock, not SOURCE_DATE_EPOCH, so it would stop matching once the
+    # sprint ended.
+    {"vbx": "robot-sprint-show", "bv": "robot-sprint-show", "only": {"sprints"},
+     "vbx_args": ["--id", "spr-sprint-2"], "bv_args": ["spr-sprint-2"],
+     "bv_path": "sprint", "vbx_path": "sprint", "bv_omitzero": SPRINT_OMITZERO},
+    {"vbx": "robot-burndown", "bv": "robot-burndown", "only": {"sprints"},
+     "vbx_args": ["--id", "spr-sprint-2"], "bv_args": ["spr-sprint-2"],
+     "skip_top_level": ENVELOPE_KEYS},
     {"vbx": "robot-insights", "bv": "robot-insights", "compare": False,
      "note": "bv inlines Insights' PascalCase fields at the top level"},
     {"vbx": "robot-priority", "bv": "robot-priority", "bv_path": "recommendations",
@@ -248,6 +277,28 @@ def build_sqlite_workspace(jsonl: Path, destination: Path) -> Path:
     finally:
         connection.close()
     return destination
+
+
+def strip_bv_zero_times(value, keys: set[str]):
+    """Drops the named keys from bv's payload where they hold Go's zero time.
+
+    bv tags these fields `omitzero` — absent when unset — but encodes robot
+    output with goccy/go-json, which ignores that tag and writes
+    `0001-01-01T00:00:00Z` instead. vbx encodes with encoding/json, which
+    honours it. The zero time is not data, so only that exact value is
+    dropped: a real timestamp under the same key is still compared.
+    """
+    if not keys:
+        return value
+    if isinstance(value, dict):
+        return {
+            key: strip_bv_zero_times(item, keys)
+            for key, item in value.items()
+            if not (key in keys and item == GO_ZERO_TIME)
+        }
+    if isinstance(value, list):
+        return [strip_bv_zero_times(item, keys) for item in value]
+    return value
 
 
 def normalise(value):
@@ -356,12 +407,17 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
         if entry.get("compare") is False:
             skipped.append((name, entry.get("note", "not comparable")))
             continue
+        if "only" in entry and label not in entry["only"]:
+            skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
+            continue
         if not have_bv:
             skipped.append((name, "bv is not installed"))
             continue
 
-        vbx_status, vbx_out, vbx_err = run(vbx, [f"--{name}"], workspace)
-        bv_status, bv_out, bv_err = run(bv, [f"--{entry['bv']}", "--format", "json"], workspace)
+        vbx_status, vbx_out, vbx_err = run(
+            vbx, [f"--{name}", *entry.get("vbx_args", [])], workspace)
+        bv_status, bv_out, bv_err = run(
+            bv, [f"--{entry['bv']}", *entry.get("bv_args", []), "--format", "json"], workspace)
 
         if vbx_status != 0:
             differed.append((name, [f"vbx-cli exited {vbx_status}: {vbx_err.strip()}"]))
@@ -385,6 +441,8 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
         if skip_top_level:
             vbx_payload = {k: v for k, v in vbx_payload.items() if k not in skip_top_level}
             bv_payload = {k: v for k, v in bv_payload.items() if k not in skip_top_level}
+
+        bv_payload = strip_bv_zero_times(bv_payload, entry.get("bv_omitzero", set()))
 
         differences = describe_differences(normalise(vbx_payload), normalise(bv_payload))
         if differences:
