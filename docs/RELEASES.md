@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.2.2 — 2026-10-01
+
+### Fixes
+
+- Build the engine under Go 1.27 without losing the macOS 14 target ([#79](https://github.com/michel-onstein/vbx/pull/79))
+
 ## 0.2.1 — 2026-08-27
 
 ### Fixes
