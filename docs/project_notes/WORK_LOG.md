@@ -5,6 +5,16 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Fixture copies no longer carry a stale `br` database (vbx-fcq)
+
+The test helpers that copy `Fixtures/demo` now go through
+`Fixture.copy(from:prefix:)`, which keeps only `.beads/issues.jsonl`, so a
+`beads.db` left in a checkout cannot make a copy's first `br` write miss every
+bead. Two regression tests in `FixtureCopyTests.swift`; bug log entry of the
+same date.
+
+---
+
 ## 2026-10-01 — Editing finds `br` in `~/.local/bin` from a Finder launch (vbx-9y7)
 
 `BeadWriter` now probes `~/.local/bin/br`, where `br`'s installer puts it, so
