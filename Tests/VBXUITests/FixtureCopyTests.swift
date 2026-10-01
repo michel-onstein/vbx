@@ -52,4 +52,29 @@ struct FixtureCopyTests {
         let bead: Bead? = store.issues.first { $0.id == "vbx-12" }
         #expect(bead?.priority == 3, "vbx-12 is \(String(describing: bead?.priority))")
     }
+
+    @Test("br can write to the readiness fixture")
+    func readinessFixtureIsWritable() async throws {
+        // br validates the whole workspace on import and rejects all of it for
+        // one bad row — a dependency without created_at, or one naming a bead
+        // that does not exist (which is why the fixture's missing blocker is an
+        // `external:` reference). A fixture br refuses is one no write test can
+        // use, and the refusal reads as an app bug.
+        let directory = try Fixture.copy(from: Fixture.readinessPath, prefix: "vbx-readiness")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let writer = BeadWriter()
+        try #require(writer.isAvailable, "br was not found")
+
+        // rdy-17 is P2 and sits two parent-child edges down.
+        try await writer.setPriority(0, for: "rdy-17", in: directory.path)
+
+        let store = ProjectStore()
+        store.skipPhase2 = true
+        await store.open(path: directory.path)
+        #expect(store.issues.count == 21, "a write dropped records: \(store.issues.count)")
+        let bead: Bead? = store.issues.first { $0.id == "rdy-17" }
+        #expect(bead?.priority == 0, "rdy-17 is \(String(describing: bead?.priority))")
+        await store.close()
+    }
 }

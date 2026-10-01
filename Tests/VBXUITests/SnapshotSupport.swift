@@ -336,6 +336,13 @@ enum Fixture {
             .path
     }
 
+    /// The readiness fixture: bv 0.25's readiness and blocking edge cases,
+    /// kept apart from the demo so the demo's numbers stay stable.
+    static var readinessPath: String {
+        URL(fileURLWithPath: path).deletingLastPathComponent()
+            .appendingPathComponent("readiness").path
+    }
+
     /// Fully loaded store, including Phase-2 metrics, so metric-dependent views
     /// render their real content rather than placeholders.
     static func loadedStore() async -> ProjectStore {

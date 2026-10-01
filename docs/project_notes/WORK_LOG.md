@@ -5,6 +5,25 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — A fixture for bv 0.25's readiness and blocking cases (vbx-h22)
+
+`Fixtures/readiness` holds 21 beads covering what the demo never reached: a
+custom status, `blocked` and `deferred` statuses, `waits-for` and
+`conditional-blocks`, a future and a past `defer_until`, a missing blocker (an
+`external:` reference, because br's import rejects a dangling plain id),
+parent-child gating two levels deep, an epic with an open child, and a
+tombstoned blocker. br can write to it, asserted in `FixtureCopyTests`.
+`parity-check.py` now runs every fixture by default — the demo, the readiness
+JSONL, and the readiness beads as a `beads.db` built at run time with br's
+column shape — lists every difference under `--verbose`, and has its own
+tests in `scripts/test-parity-check.py`. Go and Swift tests pin the ready set
+to bv 0.25.2's and record, by name, where vbx's recipe filter and SQLite loader
+still differ; those are vbx-hjz's to close (its notes list them). Load order
+and velocity differences on the `beads.db` form are not readiness, and are
+filed as vbx-dj4. The demo's numbers and parity are unchanged.
+
+---
+
 ## 2026-10-01 — Claim commands come from the live tracker, in vbx-cli only (vbx-ut6)
 
 The engine's open configuration gained `live_tracker_actions`. `vbx-cli` sets

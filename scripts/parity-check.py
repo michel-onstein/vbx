@@ -25,6 +25,18 @@ bare — `bv --robot-label-flow` yields `{generated_at, data_hash, flow, …}`
 where vbx yields the flow itself. Rather than pretend those are equal, each
 command declares which subtree to compare on each side.
 
+*More than one workspace.* The demo fixture exercises none of the readiness
+and blocking cases bv 0.25 changed — custom statuses, `waits-for` and
+`conditional-blocks`, `defer_until`, a missing blocker, parent-child gating, a
+tombstoned blocker — which is how numbers moved under the engine bump while
+every check stayed green. So the run covers every workspace in FIXTURES: the
+demo, `Fixtures/readiness`, and the same readiness beads as a `beads.db`,
+built at run time by `build_sqlite_workspace` because vbx reads SQLite through
+its own loader rather than bv's. `--workspace` narrows the run to one.
+
+Each differing command reports its first difference and how many more there
+are; `--verbose` lists every one.
+
 Exit status is 0 when every comparable command agrees, 1 when any differs.
 Commands bv does not have, and commands vbx has not implemented, are reported
 as coverage gaps rather than silently skipped — a harness that only checks the
@@ -37,9 +49,36 @@ import argparse
 import json
 import math
 import os
+import sqlite3
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+# The workspaces every default run covers. A `sqlite` entry is the named
+# fixture's JSONL rebuilt as a beads.db in a temporary directory, so the run
+# reaches the SQLite loader too: vbx carries its own (Engine/bridge/engine/
+# sqlite.go, since bv's is internal), and a JSONL-only check cannot see it.
+FIXTURES = [
+    {"name": "demo", "workspace": "Fixtures/demo"},
+    {"name": "readiness", "workspace": "Fixtures/readiness"},
+    {"name": "readiness (beads.db)", "workspace": "Fixtures/readiness", "sqlite": True},
+]
+
+# br's issues columns, in br's order. A beads.db built here has the column
+# shape a real one has — including the ones neither loader reads — so a loader
+# that silently skips a column (defer_until) or filters on one (deleted_at) is
+# exercised exactly as it would be on a user's database.
+BR_ISSUE_COLUMNS = [
+    "id", "content_hash", "title", "description", "design", "acceptance_criteria",
+    "notes", "status", "priority", "issue_type", "assignee", "owner",
+    "estimated_minutes", "created_at", "created_by", "updated_at", "closed_at",
+    "close_reason", "closed_by_session", "due_at", "defer_until", "external_ref",
+    "source_system", "source_repo", "deleted_at", "deleted_by", "delete_reason",
+    "original_type", "compaction_level", "compacted_at", "compacted_at_commit",
+    "original_size", "sender", "ephemeral", "pinned", "is_template",
+    "source_repo_path", "agent_context", "prerequisites",
+]
 
 # Both binaries read SOURCE_DATE_EPOCH as "now". Pinning it is what makes the
 # comparison exact: staleness is measured from the current instant, so two
@@ -145,6 +184,72 @@ def dig(value, path: str | None):
     return value
 
 
+def build_sqlite_workspace(jsonl: Path, destination: Path) -> Path:
+    """Writes `destination/.beads/beads.db` holding the beads in `jsonl`.
+
+    Every record is kept, tombstones included, because br keeps them: a
+    deleted bead is a row with `status = 'tombstone'` and `deleted_at` set,
+    and what a loader does with that row is part of what is being compared.
+    Dependency rows are written as given, so a reference to a bead that does
+    not exist stays dangling. Returns the workspace directory.
+    """
+    beads = destination / ".beads"
+    beads.mkdir(parents=True, exist_ok=True)
+    database = beads / "beads.db"
+    if database.exists():
+        database.unlink()
+
+    connection = sqlite3.connect(database)
+    try:
+        column_list = ", ".join(
+            f"{column} DATETIME" if column.endswith("_at") or column == "defer_until"
+            else column
+            for column in BR_ISSUE_COLUMNS
+        )
+        connection.execute(f"CREATE TABLE issues ({column_list}, PRIMARY KEY (id))")
+        connection.execute(
+            "CREATE TABLE dependencies (issue_id TEXT, depends_on_id TEXT, type TEXT,"
+            " created_at DATETIME, created_by TEXT, metadata TEXT, thread_id TEXT)")
+        connection.execute("CREATE TABLE labels (issue_id TEXT, label TEXT)")
+        connection.execute(
+            "CREATE TABLE comments (id TEXT, issue_id TEXT, author TEXT, text TEXT,"
+            " created_at DATETIME)")
+
+        for line in jsonl.read_text().splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            row = {column: record.get(column) for column in BR_ISSUE_COLUMNS}
+            for column, default in (("description", ""), ("design", ""),
+                                    ("acceptance_criteria", ""), ("notes", ""),
+                                    ("source_repo", "."), ("ephemeral", 0),
+                                    ("pinned", 0), ("is_template", 0),
+                                    ("prerequisites", "")):
+                if row[column] is None:
+                    row[column] = default
+            placeholders = ", ".join("?" for _ in BR_ISSUE_COLUMNS)
+            connection.execute(
+                f"INSERT INTO issues ({', '.join(BR_ISSUE_COLUMNS)}) VALUES ({placeholders})",
+                [row[column] for column in BR_ISSUE_COLUMNS])
+            for label in record.get("labels") or []:
+                connection.execute("INSERT INTO labels VALUES (?, ?)", (record["id"], label))
+            for dependency in record.get("dependencies") or []:
+                connection.execute(
+                    "INSERT INTO dependencies VALUES (?, ?, ?, ?, ?, '{}', '')",
+                    (dependency.get("issue_id", record["id"]), dependency["depends_on_id"],
+                     dependency.get("type", ""), dependency.get("created_at"),
+                     dependency.get("created_by", "")))
+            for comment in record.get("comments") or []:
+                connection.execute(
+                    "INSERT INTO comments VALUES (?, ?, ?, ?, ?)",
+                    (str(comment.get("id")), record["id"], comment.get("author"),
+                     comment.get("text"), comment.get("created_at")))
+        connection.commit()
+    finally:
+        connection.close()
+    return destination
+
+
 def normalise(value):
     """Strips volatile keys and rounds floats so two runs can be compared.
 
@@ -165,30 +270,33 @@ def normalise(value):
     return value
 
 
-def describe_difference(left, right, path: str = "") -> str | None:
-    """The first place two payloads differ, as a readable path."""
+def describe_differences(left, right, path: str = "") -> list[str]:
+    """Every place two payloads differ, as readable paths, in a stable order.
+
+    Lists of unequal length report the lengths and are not walked further:
+    once one side has an extra item, comparing by position only restates it.
+    """
     if type(left) is not type(right):
-        return f"{path or '<root>'}: {type(left).__name__} vs {type(right).__name__}"
+        return [f"{path or '<root>'}: {type(left).__name__} vs {type(right).__name__}"]
 
     if isinstance(left, dict):
+        found: list[str] = []
         for key in sorted(set(left) | set(right)):
             if key not in left:
-                return f"{path}.{key}: missing on the vbx side"
-            if key not in right:
-                return f"{path}.{key}: missing on the bv side"
-            found = describe_difference(left[key], right[key], f"{path}.{key}")
-            if found:
-                return found
-        return None
+                found.append(f"{path}.{key}: missing on the vbx side")
+            elif key not in right:
+                found.append(f"{path}.{key}: missing on the bv side")
+            else:
+                found.extend(describe_differences(left[key], right[key], f"{path}.{key}"))
+        return found
 
     if isinstance(left, list):
         if len(left) != len(right):
-            return f"{path}: {len(left)} items vs {len(right)}"
+            return [f"{path}: {len(left)} items vs {len(right)}"]
+        found = []
         for index, (a, b) in enumerate(zip(left, right)):
-            found = describe_difference(a, b, f"{path}[{index}]")
-            if found:
-                return found
-        return None
+            found.extend(describe_differences(a, b, f"{path}[{index}]"))
+        return found
 
     if isinstance(left, float) or isinstance(right, float):
         # Compared with a tolerance rather than rounded. Rounding was tried
@@ -200,12 +308,12 @@ def describe_difference(left, right, path: str = "") -> str | None:
         # noise from summation order. This tolerance is far below anything
         # that would change a decision.
         if math.isclose(left, right, rel_tol=1e-6, abs_tol=1e-9):
-            return None
-        return f"{path or '<root>'}: {left!r} vs {right!r}"
+            return []
+        return [f"{path or '<root>'}: {left!r} vs {right!r}"]
 
     if left != right:
-        return f"{path or '<root>'}: {left!r} vs {right!r}"
-    return None
+        return [f"{path or '<root>'}: {left!r} vs {right!r}"]
+    return []
 
 
 def implemented_commands(vbx: str, cwd: Path) -> set[str]:
@@ -221,33 +329,17 @@ def implemented_commands(vbx: str, cwd: Path) -> set[str]:
     return {entry["flag"] for entry in json.loads(out)["commands"]}
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workspace", default="Fixtures/demo")
-    parser.add_argument("--vbx", default=".build/debug/vbx-cli")
-    parser.add_argument("--bv", default="bv")
-    parser.add_argument("--verbose", action="store_true")
-    args = parser.parse_args()
+def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
+                      label: str, verbose: bool) -> tuple[int, int]:
+    """Runs every comparison over one workspace and prints the result.
 
-    root = Path(__file__).resolve().parent.parent
-    workspace = (root / args.workspace).resolve()
-    vbx = str((root / args.vbx).resolve())
-
-    if not Path(vbx).exists():
-        print(f"vbx-cli not found at {vbx}; run swift build first", file=sys.stderr)
-        return 1
-    if not workspace.exists():
-        print(f"workspace not found at {workspace}", file=sys.stderr)
-        return 1
-
-    have_bv = subprocess.run(
-        ["which", args.bv], capture_output=True, text=True
-    ).returncode == 0
-
+    Returns (differed, missing) so the caller can total them across
+    workspaces.
+    """
     available = implemented_commands(vbx, workspace)
 
     matched: list[str] = []
-    differed: list[tuple[str, str]] = []
+    differed: list[tuple[str, list[str]]] = []
     skipped: list[tuple[str, str]] = []
     vbx_only: list[str] = []
     missing: list[str] = []
@@ -269,10 +361,10 @@ def main() -> int:
             continue
 
         vbx_status, vbx_out, vbx_err = run(vbx, [f"--{name}"], workspace)
-        bv_status, bv_out, bv_err = run(args.bv, [f"--{entry['bv']}", "--format", "json"], workspace)
+        bv_status, bv_out, bv_err = run(bv, [f"--{entry['bv']}", "--format", "json"], workspace)
 
         if vbx_status != 0:
-            differed.append((name, f"vbx-cli exited {vbx_status}: {vbx_err.strip()}"))
+            differed.append((name, [f"vbx-cli exited {vbx_status}: {vbx_err.strip()}"]))
             continue
         if bv_status != 0:
             skipped.append((name, f"bv exited {bv_status}: {bv_err.strip()[:80]}"))
@@ -282,7 +374,7 @@ def main() -> int:
             vbx_payload = dig(json.loads(vbx_out), entry.get("vbx_path"))
             bv_payload = dig(json.loads(bv_out), entry.get("bv_path"))
         except json.JSONDecodeError as error:
-            differed.append((name, f"could not parse output: {error}"))
+            differed.append((name, [f"could not parse output: {error}"]))
             continue
 
         if bv_payload is None:
@@ -294,19 +386,25 @@ def main() -> int:
             vbx_payload = {k: v for k, v in vbx_payload.items() if k not in skip_top_level}
             bv_payload = {k: v for k, v in bv_payload.items() if k not in skip_top_level}
 
-        difference = describe_difference(normalise(vbx_payload), normalise(bv_payload))
-        if difference is None:
-            matched.append(name)
+        differences = describe_differences(normalise(vbx_payload), normalise(bv_payload))
+        if differences:
+            differed.append((name, differences))
         else:
-            differed.append((name, difference))
+            matched.append(name)
 
     # Report.
-    print(f"Parity against {args.bv} over {workspace.name}")
+    print(f"Parity against {bv} over {label}")
     print()
     for name in matched:
         print(f"  match      --{name}")
-    for name, reason in differed:
-        print(f"  DIFFER     --{name}: {reason}")
+    for name, differences in differed:
+        if verbose:
+            print(f"  DIFFER     --{name}:")
+            for difference in differences:
+                print(f"               {difference}")
+        else:
+            more = f" (+{len(differences) - 1} more)" if len(differences) > 1 else ""
+            print(f"  DIFFER     --{name}: {differences[0]}{more}")
     for name, reason in skipped:
         print(f"  skip       --{name}: {reason}")
     for name in vbx_only:
@@ -319,6 +417,52 @@ def main() -> int:
         f"{len(matched)} matched, {len(differed)} differed, {len(skipped)} skipped, "
         f"{len(vbx_only)} vbx-only, {len(missing)} missing"
     )
+    print()
+    return len(differed), len(missing)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--workspace",
+                        help="compare this workspace only, instead of every one in FIXTURES")
+    parser.add_argument("--vbx", default=".build/debug/vbx-cli")
+    parser.add_argument("--bv", default="bv")
+    parser.add_argument("--verbose", action="store_true",
+                        help="list every difference, not just the first per command")
+    args = parser.parse_args()
+
+    root = Path(__file__).resolve().parent.parent
+    vbx = str((root / args.vbx).resolve())
+
+    if not Path(vbx).exists():
+        print(f"vbx-cli not found at {vbx}; run swift build first", file=sys.stderr)
+        return 1
+
+    fixtures = FIXTURES
+    if args.workspace:
+        fixtures = [{"name": Path(args.workspace).name, "workspace": args.workspace}]
+
+    have_bv = subprocess.run(
+        ["which", args.bv], capture_output=True, text=True
+    ).returncode == 0
+
+    differed = missing = 0
+    with tempfile.TemporaryDirectory(prefix="vbx-parity-") as scratch:
+        for fixture in fixtures:
+            workspace = (root / fixture["workspace"]).resolve()
+            if not workspace.exists():
+                print(f"workspace not found at {workspace}", file=sys.stderr)
+                return 1
+            if fixture.get("sqlite"):
+                workspace = build_sqlite_workspace(
+                    workspace / ".beads" / "issues.jsonl",
+                    Path(scratch) / fixture["workspace"].replace("/", "-"))
+            d, m = compare_workspace(vbx, args.bv, have_bv, workspace,
+                                     fixture["name"], args.verbose)
+            differed += d
+            missing += m
+
+    print(f"{len(fixtures)} workspaces: {differed} differing commands, {missing} missing")
     if not have_bv:
         print("bv is not installed; comparisons were skipped rather than passed.")
 

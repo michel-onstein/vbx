@@ -140,7 +140,18 @@ them.
 - **The demo fixture must stay writable by `br`.** Its preflight validates every
   dependency row and requires `created_at` on each, and it rejects the *whole*
   workspace when one is missing. That is why no test caught the priority bug:
-  every real write against the fixture had always failed.
+  every real write against the fixture had always failed. The same holds for
+  `Fixtures/readiness`, and br's import also rejects a dependency naming a bead
+  that does not exist — so that fixture's missing blocker is an `external:`
+  reference, which br accepts and bv still reads as unknown.
+- **bv 0.25's readiness cases live in `Fixtures/readiness`, not the demo.**
+  Custom status, `waits-for`, `conditional-blocks`, `defer_until`, a missing
+  blocker, parent-child gating, a tombstoned blocker — none of which the demo
+  reaches, which is how numbers moved under the engine bump with every test
+  green. Add a new edge case there, so the demo's numbers stay stable.
+  `parity-check.py` compares it as JSONL and as a `beads.db` built at run time,
+  because vbx reads SQLite through its own loader. Its deferral is in 2099, so
+  the ready set does not depend on the clock.
 - **`Bundle.main` in a test process is SwiftPM's helper binary**, not the app —
   so `CFBundleShortVersionString`, `CFBundleVersion` and the bundle identifier
   are all absent. Anything reading them renders empty in every snapshot. Take
@@ -243,13 +254,16 @@ python3 scripts/beads-check.py            # every bead is stamped with this repo
 swift test                          # Swift suite
 cd Engine/bridge && go test ./...   # Go suite
 gofmt -l Engine/bridge              # must print nothing
-python3 scripts/parity-check.py     # vbx-cli vs bv, command by command
+python3 scripts/test-parity-check.py  # the parity harness itself (no binaries)
+python3 scripts/parity-check.py     # vbx-cli vs bv, command by command, every fixture
 ```
 
 The parity check needs `bv` on the PATH. Without it every comparison is
 reported as *skipped* rather than passing, so a missing `bv` cannot look like
 agreement. It exits non-zero when any comparable command differs, or when a
-command it declares is not implemented.
+command it declares is not implemented. It covers every workspace in its
+`FIXTURES` (`--workspace` narrows it to one), and prints the first difference
+per command with a count of the rest — `--verbose` lists them all.
 
 Biome is not configured here (no `package.json`, and Biome does not format
 Markdown). Go is formatted with `gofmt`.
