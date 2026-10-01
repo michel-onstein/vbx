@@ -17,7 +17,7 @@ box, the README title.
 | [FEATURE_PARITY.md](docs/FEATURE_PARITY.md) | — | Every bv capability mapped to a vbx surface and delivery phase | Living |
 | [RELEASES.md](docs/RELEASES.md) | ADR-013 | User-facing changes per release — generated from the git tags, never edited | Generated |
 | [project_notes/BUGS.md](docs/project_notes/BUGS.md) | — | Bug log with the regression test locking each fix in | Living |
-| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…020 | Architectural decisions and their trade-offs | Living |
+| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…021 | Architectural decisions and their trade-offs | Living |
 | [project_notes/KEY_FACTS.md](docs/project_notes/KEY_FACTS.md) | — | Toolchain, commands, layout, gotchas | Living |
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
@@ -41,7 +41,12 @@ them.
   `phase2Ready` and `hasPhase2Values` are different: everything-skipped is
   "ready" with nothing in it.
 - **Decoding never drops a record.** Status, type and dependency-type enums are
-  open. A dropped issue silently changes every downstream metric.
+  open. A dropped issue silently changes every downstream metric. **Analysis is
+  a different set:** like bv 0.25, the engine analyses every record *except
+  tombstones*, while bv's readiness index sees the tombstones too, so a deleted
+  blocker counts as resolved. The session's `records` (the `issues` payload)
+  keep the tombstone; its `issues` (the analysis set) do not. Pick the one you
+  mean. See ADR-021.
 - **An empty dependency type blocks**, matching bv's rule for rows written
   before the typed system. Since bv v0.25.0, `""`, `blocks`,
   `conditional-blocks` and `waits-for` block — not `parent-child`, `related`,

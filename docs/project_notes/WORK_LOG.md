@@ -5,6 +5,26 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Recipes, beads.db and tombstones follow bv's readiness model (vbx-hjz)
+
+Recipes are applied by bv's own `recipe.Apply`, so `actionable` and `blocked`
+now withhold a blocked parent's subtree, a future `defer_until` and a missing
+blocker, as bv 0.25.2 does; vbx's copy of the filter and sort is gone. Three
+behaviour changes come with bv's semantics: a date filter no longer excludes an
+undated bead, a malformed one is an error (and `recipe_save` refuses it), and an
+id sort is natural (`x-2` before `x-10`).
+The SQLite loader reads `defer_until` and keeps deleted rows as tombstones. The
+session now analyses every record except tombstones, as bv does, while bv's
+readiness index sees the tombstones as resolved blockers and the `issues`
+payload still carries their records (ADR-021). Parity with bv 0.25.2: the demo
+is unchanged (envelope keys only, vbx-v57); `Fixtures/readiness` now differs
+only on vbx-v57's envelope keys (was 6 commands); its `beads.db` form differs
+only on load order and velocity (vbx-dj4) and envelope keys, plus a data hash
+that has the same root as vbx-dj4's velocity difference — bv falls back to a
+reduced column set on br's schema — noted on that bead.
+
+---
+
 ## 2026-10-01 — A fixture for bv 0.25's readiness and blocking cases (vbx-h22)
 
 `Fixtures/readiness` holds 21 beads covering what the demo never reached: a

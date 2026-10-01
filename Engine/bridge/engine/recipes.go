@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/recipe"
 	"gopkg.in/yaml.v3"
@@ -16,11 +16,12 @@ import (
 
 // Recipes: declarative view configuration.
 //
-// `pkg/recipe` loads and merges them, but the code that *applies* one lives in
-// `cmd/bv` and is not importable, so the filter and sort semantics are
-// reproduced here. They are reproduced exactly, quirks included, because a
-// recipe that selects different beads in vbx than in bv is worse than one that
-// does not work at all.
+// `pkg/recipe` loads, validates and — since bv 0.25 — applies them: recipe.Apply
+// is the one engine bv's TUI and robot path share. vbx calls it rather than
+// keeping a copy, because a recipe that selects different beads in vbx than in
+// bv is worse than one that does not work at all, and the copy vbx used to
+// keep did exactly that once bv moved `actionable` onto its readiness model
+// (parent gating, future deferral, a missing blocker read as unknown).
 
 // recipeLoader builds a loader scoped to the open workspace.
 func (s *Session) recipeLoader() (*recipe.Loader, error) {
@@ -146,8 +147,10 @@ func (s *Session) applyRecipe(req []byte) ([]byte, error) {
 	}
 
 	issues, _, stats := s.snapshot()
-	selected := filterByRecipe(issues, found, robotNow())
-	sortByRecipe(selected, found, stats)
+	selected, err := applyRecipeTo(issues, found, s.recipeMetrics(issues, found, stats), robotNow())
+	if err != nil {
+		return nil, err
+	}
 
 	ids := make([]string, 0, len(selected))
 	for _, issue := range selected {
@@ -190,6 +193,13 @@ func (s *Session) saveRecipe(req []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%q is not a usable recipe name", name)
 	}
 	r.Recipe.Name = name
+
+	// bv's loader skips a recipe that fails Validate, with only a warning, so
+	// one saved anyway would vanish from the list on the next load. Refusing
+	// it here says why while the user still has the editor open.
+	if err := r.Recipe.Validate(); err != nil {
+		return nil, fmt.Errorf("recipe %q: %w", name, err)
+	}
 
 	path := s.recipeFilePath()
 	if path == "" {
@@ -240,245 +250,44 @@ func (s *Session) deleteRecipe(req []byte) ([]byte, error) {
 	return json.Marshal(map[string]any{"removed": r.Name, "path": path})
 }
 
-// ---- filtering ------------------------------------------------------------
-
-// filterByRecipe applies a recipe's filters, matching bv's semantics.
-func filterByRecipe(issues []model.Issue, r *recipe.Recipe, now time.Time) []model.Issue {
-	f := r.Filters
-
-	// The blocker set is computed once: a bead is blocked when any blocking
-	// dependency points at something not yet closed.
-	openBlockers := map[string]bool{}
-	if f.Actionable != nil || f.HasBlockers != nil {
-		notClosed := map[string]bool{}
-		for _, issue := range issues {
-			if issue.Status != model.StatusClosed && issue.Status != model.StatusTombstone {
-				notClosed[issue.ID] = true
-			}
-		}
-		for _, issue := range issues {
-			for _, dep := range issue.Dependencies {
-				if dep == nil || !dep.Type.IsBlocking() {
-					continue
-				}
-				if notClosed[dep.DependsOnID] {
-					openBlockers[issue.ID] = true
-					break
-				}
-			}
-		}
-	}
-
-	// A date filter that will not parse is dropped rather than treated as the
-	// zero time, which would exclude everything.
-	createdAfter, hasCreatedAfter := parseRecipeTime(f.CreatedAfter, now)
-	createdBefore, hasCreatedBefore := parseRecipeTime(f.CreatedBefore, now)
-	updatedAfter, hasUpdatedAfter := parseRecipeTime(f.UpdatedAfter, now)
-	updatedBefore, hasUpdatedBefore := parseRecipeTime(f.UpdatedBefore, now)
-
-	out := make([]model.Issue, 0, len(issues))
-	for _, issue := range issues {
-		if len(f.Status) > 0 && !containsFold(f.Status, string(issue.Status)) {
-			continue
-		}
-		if len(f.Priority) > 0 && !containsInt(f.Priority, issue.Priority) {
-			continue
-		}
-		// Tags require *all* of them, unlike the label filter in the sidebar
-		// which takes any. That is bv's rule and recipes are written to it.
-		if len(f.Tags) > 0 && !hasAllLabels(issue.Labels, f.Tags) {
-			continue
-		}
-		if len(f.ExcludeTags) > 0 && hasAnyLabel(issue.Labels, f.ExcludeTags) {
-			continue
-		}
-		if f.TitleContains != "" &&
-			!strings.Contains(strings.ToLower(issue.Title), strings.ToLower(f.TitleContains)) {
-			continue
-		}
-		if f.IDPrefix != "" && !strings.HasPrefix(issue.ID, f.IDPrefix) {
-			continue
-		}
-		if f.Actionable != nil && openBlockers[issue.ID] == *f.Actionable {
-			continue
-		}
-		if f.HasBlockers != nil && openBlockers[issue.ID] != *f.HasBlockers {
-			continue
-		}
-
-		// A bead with no timestamp is skipped by a date filter rather than
-		// failing it: an unset date is unknown, not "the beginning of time".
-		if hasCreatedAfter && !afterTime(issue.CreatedAt, createdAfter) {
-			continue
-		}
-		if hasCreatedBefore && !beforeTime(issue.CreatedAt, createdBefore) {
-			continue
-		}
-		if hasUpdatedAfter && !afterTime(issue.UpdatedAt, updatedAfter) {
-			continue
-		}
-		if hasUpdatedBefore && !beforeTime(issue.UpdatedAt, updatedBefore) {
-			continue
-		}
-
-		out = append(out, issue)
-	}
-	return out
-}
-
-func parseRecipeTime(value string, now time.Time) (time.Time, bool) {
-	if strings.TrimSpace(value) == "" {
-		return time.Time{}, false
-	}
-	parsed, err := recipe.ParseRelativeTime(value, now)
+// applyRecipeTo filters and sorts with bv's own recipe.Apply, leaving the
+// max_items cut to the caller so it can report how many matched.
+//
+// The analysis set goes in — tombstones are not candidates, as in bv — while
+// metrics.Readiness carries the full-source authority, so `actionable` and
+// `has_blockers` see a tombstoned blocker as resolved. A malformed time
+// filter is an error, as it is in bv; the loader has normally rejected such a
+// recipe already.
+func applyRecipeTo(
+	issues []model.Issue, r *recipe.Recipe, metrics recipe.Metrics, now time.Time,
+) ([]model.Issue, error) {
+	uncapped := *r
+	uncapped.View.MaxItems = 0
+	selected, err := recipe.Apply(issues, metrics, &uncapped, now)
 	if err != nil {
-		return time.Time{}, false
+		return nil, fmt.Errorf("recipe %s: %w", r.Name, err)
 	}
-	return parsed, true
+	return selected, nil
 }
 
-func afterTime(value time.Time, bound time.Time) bool {
-	if value.IsZero() {
-		return false
+// recipeMetrics supplies what the recipe's sort chain needs, as bv's
+// recipeMetrics does: graph scores for pagerank/betweenness/impact, triage
+// scores for triage. The graph scores are the session's own, waited for, so
+// a Phase-2 sort is never silently a sort on zeros while Phase 2 is running.
+func (s *Session) recipeMetrics(
+	issues []model.Issue, r *recipe.Recipe, stats *analysis.GraphStats,
+) recipe.Metrics {
+	metrics := recipe.Metrics{Readiness: s.readinessIndex()}
+	if r.NeedsGraphMetrics() && stats != nil {
+		stats.WaitForPhase2()
+		metrics.Graph = stats
 	}
-	return value.After(bound)
-}
-
-func beforeTime(value time.Time, bound time.Time) bool {
-	if value.IsZero() {
-		return false
-	}
-	return value.Before(bound)
-}
-
-func containsFold(haystack []string, needle string) bool {
-	for _, candidate := range haystack {
-		if strings.EqualFold(candidate, needle) {
-			return true
+	if r.NeedsTriageScores() {
+		scores := analysis.ComputeTriageScores(issues)
+		metrics.Triage = make(map[string]float64, len(scores))
+		for _, score := range scores {
+			metrics.Triage[score.IssueID] = score.TriageScore
 		}
 	}
-	return false
-}
-
-func containsInt(haystack []int, needle int) bool {
-	for _, candidate := range haystack {
-		if candidate == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func hasAllLabels(labels []string, required []string) bool {
-	for _, want := range required {
-		if !containsFold(labels, want) {
-			return false
-		}
-	}
-	return true
-}
-
-func hasAnyLabel(labels []string, forbidden []string) bool {
-	for _, want := range forbidden {
-		if containsFold(labels, want) {
-			return true
-		}
-	}
-	return false
-}
-
-// ---- sorting --------------------------------------------------------------
-
-// sortByRecipe orders in place, honouring the recipe's secondary key.
-func sortByRecipe(issues []model.Issue, r *recipe.Recipe, stats interface {
-	PageRank() map[string]float64
-	Betweenness() map[string]float64
-}) {
-	if r.Sort.Field == "" {
-		return
-	}
-
-	var pageRank, betweenness map[string]float64
-	if stats != nil {
-		pageRank = stats.PageRank()
-		betweenness = stats.Betweenness()
-	}
-
-	sort.SliceStable(issues, func(i, j int) bool {
-		if cmp := compareBy(issues[i], issues[j], r.Sort, pageRank, betweenness); cmp != 0 {
-			return cmp < 0
-		}
-		if r.Sort.Secondary != nil {
-			if cmp := compareBy(
-				issues[i], issues[j], *r.Sort.Secondary, pageRank, betweenness); cmp != 0 {
-				return cmp < 0
-			}
-		}
-		// Ids last, so an ordering is reproducible rather than dependent on
-		// the input order.
-		return issues[i].ID < issues[j].ID
-	})
-}
-
-// compareBy returns -1, 0 or 1 for one sort key, direction applied.
-func compareBy(
-	a, b model.Issue, config recipe.SortConfig, pageRank, betweenness map[string]float64,
-) int {
-	result := 0
-	switch strings.ToLower(config.Field) {
-	case "priority":
-		result = compareInt(a.Priority, b.Priority)
-	case "id":
-		result = strings.Compare(a.ID, b.ID)
-	case "title":
-		result = strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
-	case "created":
-		result = compareTime(a.CreatedAt, b.CreatedAt)
-	case "updated":
-		result = compareTime(a.UpdatedAt, b.UpdatedAt)
-	case "pagerank":
-		result = compareFloat(pageRank[a.ID], pageRank[b.ID])
-	case "betweenness":
-		result = compareFloat(betweenness[a.ID], betweenness[b.ID])
-	default:
-		return 0
-	}
-
-	if strings.EqualFold(config.Direction, "desc") {
-		return -result
-	}
-	return result
-}
-
-func compareInt(a, b int) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	default:
-		return 0
-	}
-}
-
-func compareFloat(a, b float64) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	default:
-		return 0
-	}
-}
-
-func compareTime(a, b time.Time) int {
-	switch {
-	case a.Before(b):
-		return -1
-	case a.After(b):
-		return 1
-	default:
-		return 0
-	}
+	return metrics
 }

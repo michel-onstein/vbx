@@ -1063,3 +1063,68 @@ gates, in bv's order, with the claim command taken from the bead's actions.
   bv's claim, byte for byte.
 - `parity-check.py` compares `--robot-next` again, less the provenance envelope
   keys vbx-v57 owns.
+
+---
+
+## ADR-021 — Tombstones are records the app keeps and beads the analysis does not
+
+**Date:** 2026-10-01 · **Status:** Accepted, implemented
+
+**Context.** bv 0.25 splits a load in two. Its loaders return the *visible*
+set — every record except tombstones — and report the tombstones' ids
+separately (`LoadReport.TombstoneIDs`, `workspace.LoadResult.TombstoneIDs`).
+Everything bv analyses runs over the visible set: triage counts, the graph, label
+health, suggestions, priority and the data hash. Its readiness authority
+(`model.ReadinessIndex`) is built over the visible set *plus* a stub per
+tombstone id, so a deleted blocker counts as resolved rather than missing; a
+missing blocker is "unknown" and withholds its dependents for ever. vbx analysed
+every decoded record, tombstones included — 21 beads where bv counts 20 on
+`Fixtures/readiness` — and its SQLite loader dropped deleted rows outright,
+which turned a tombstoned blocker into a missing one. Meanwhile CLAUDE.md's rule
+is that **decoding never drops a record**, because a dropped issue silently
+changes every downstream metric.
+
+**Decision.** The session keeps three things where it kept one
+(`Engine/bridge/engine/readiness.go`):
+
+- `records` — every decoded record, tombstones included. The `issues` payload,
+  `info.issue_count`, the History views and the time-travel diff read this.
+- `issues` — the analysis set, `records` less tombstones. The analyzer, triage,
+  label health, suggestions, the graph, search and the data hash read this,
+  exactly as bv does.
+- `readiness` — bv's `ReadinessIndex` over `records` plus any tombstone id a
+  loader reported without a record (bv's workspace loader keeps none). It is
+  installed into the analyzer with `SetReadinessScope` before analysis starts,
+  and passed to triage, `--robot-next`, recipes and the site export.
+
+The SQLite loader returns deleted rows, marking a row a tombstone by bv's rule:
+its status, or a nonzero `tombstone` column. `deleted_at` alone does not make
+one — bv does not read it, and br sets both together.
+
+**Why this does not break the decoding rule.** The rule is about *decoding*:
+nothing the loader reads is dropped, and the record stays available to the app,
+which already hid tombstones from every list filter. Leaving a tombstone out of
+*analysis* is not a dropped record but bv's definition of what is analysed; the
+metric drift the rule guards against is exactly what analysing tombstones
+caused here. The rule's text in CLAUDE.md now says so.
+
+**Alternatives.**
+
+- *Keep analysing tombstones.* Rejected: every count, density and label figure
+  disagrees with bv on any workspace that has deleted a bead, and parity cannot
+  be checked on such a workspace at all.
+- *Drop tombstones at load, as bv does.* Rejected: the record is the user's,
+  and it is the case the decoding rule exists for — the app could no longer
+  show or diff a deleted bead.
+- *Treat `deleted_at` as a tombstone too.* Rejected for now: bv does not, so a
+  row with `deleted_at` and a live status would be analysed by bv and not by
+  vbx. br never writes that combination.
+
+**Consequences.**
+
+- `info.issue_count` is the record count (21 on the readiness fixture); triage's
+  `meta.issue_count` is the analysis count (20), as in bv.
+- The reload gate hashes every record plus the reported tombstone ids, not the
+  analysis set, so an edit confined to a tombstone, or a new one, still reloads.
+- Recipes run through bv's `recipe.Apply` with the readiness authority, so
+  `actionable` and `blocked` match bv's sets; vbx keeps no copy of the filter.

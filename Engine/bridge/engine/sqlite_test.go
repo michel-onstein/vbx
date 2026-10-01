@@ -29,8 +29,8 @@ func makeBeadsDB(t *testing.T, dir string) string {
 			priority INTEGER, issue_type TEXT, assignee TEXT, owner TEXT,
 			estimated_minutes INTEGER, created_at DATETIME, created_by TEXT,
 			updated_at DATETIME, closed_at DATETIME, due_at DATETIME,
-			external_ref TEXT, source_repo TEXT, deleted_at DATETIME,
-			compaction_level INTEGER, original_size INTEGER)`,
+			defer_until DATETIME, external_ref TEXT, source_repo TEXT,
+			deleted_at DATETIME, compaction_level INTEGER, original_size INTEGER)`,
 		`CREATE TABLE dependencies (
 			issue_id TEXT, depends_on_id TEXT, type TEXT,
 			created_at DATETIME, created_by TEXT)`,
@@ -39,15 +39,17 @@ func makeBeadsDB(t *testing.T, dir string) string {
 			id TEXT, issue_id TEXT, author TEXT, text TEXT, created_at DATETIME)`,
 
 		`INSERT INTO issues (id,title,description,status,priority,issue_type,assignee,
-			estimated_minutes,created_at,updated_at)
+			estimated_minutes,created_at,updated_at,defer_until)
 		 VALUES ('s-1','First','desc one','open',1,'task','michel',60,
-			'2026-01-01T00:00:00Z','2026-02-01T00:00:00Z')`,
+			'2026-01-01T00:00:00Z','2026-02-01T00:00:00Z','2099-01-01T00:00:00Z')`,
 		`INSERT INTO issues (id,title,status,priority,issue_type,created_at,updated_at)
 		 VALUES ('s-2','Second','closed',0,'bug',
 			'2026-01-02T00:00:00Z','2026-02-02T00:00:00Z')`,
-		// A soft-deleted row that must not load.
+		// A deleted row, as br writes one: status tombstone and deleted_at.
+		// It loads — a deleted blocker is a resolved one — and the session
+		// keeps it out of analysis.
 		`INSERT INTO issues (id,title,status,issue_type,deleted_at)
-		 VALUES ('s-gone','Deleted','open','task','2026-03-01T00:00:00Z')`,
+		 VALUES ('s-gone','Deleted','tombstone','task','2026-03-01T00:00:00Z')`,
 
 		`INSERT INTO dependencies (issue_id,depends_on_id,type)
 		 VALUES ('s-1','s-2','blocks')`,
@@ -78,16 +80,18 @@ func TestLoadSQLite(t *testing.T) {
 		t.Fatalf("LoadSQLite: %v", err)
 	}
 
-	if len(issues) != 2 {
-		t.Fatalf("got %d issues, want 2 (the deleted row must be excluded)", len(issues))
+	if len(issues) != 3 {
+		t.Fatalf("got %d issues, want 3 (the deleted row is kept, as bv keeps it)", len(issues))
 	}
 
 	byID := map[string]int{}
 	for i, it := range issues {
 		byID[it.ID] = i
 	}
-	if _, gone := byID["s-gone"]; gone {
-		t.Error("soft-deleted issue was loaded")
+	// Regression (vbx-hjz): the loader used to drop rows with deleted_at, so a
+	// bead blocked only by a deleted one waited on a missing blocker for ever.
+	if gone, ok := byID["s-gone"]; !ok || issues[gone].Status != "tombstone" {
+		t.Error("the deleted row was not loaded as a tombstone")
 	}
 
 	first := issues[byID["s-1"]]
@@ -105,6 +109,11 @@ func TestLoadSQLite(t *testing.T) {
 	}
 	if first.CreatedAt.IsZero() || first.UpdatedAt.IsZero() {
 		t.Errorf("timestamps not parsed: %v / %v", first.CreatedAt, first.UpdatedAt)
+	}
+	// Regression (vbx-hjz): defer_until was not read, so a bead deferred into
+	// the future read as ready from beads.db and not from the JSONL.
+	if first.DeferUntil == nil || first.DeferUntil.Year() != 2099 {
+		t.Errorf("defer_until not read: %v", first.DeferUntil)
 	}
 	if len(first.Labels) != 2 {
 		t.Errorf("labels = %v, want 2", first.Labels)
@@ -160,8 +169,40 @@ func TestSessionOpensSQLiteWorkspace(t *testing.T) {
 	if got := string(raw); !contains(got, `"kind":"sqlite"`) {
 		t.Errorf("expected the sqlite source to be chosen, got %s", got)
 	}
-	if got := string(raw); !contains(got, `"issue_count":2`) {
-		t.Errorf("expected 2 issues, got %s", got)
+	// issue_count is every record, the tombstone included; the analysis set
+	// leaves it out, as bv's does.
+	if got := string(raw); !contains(got, `"issue_count":3`) {
+		t.Errorf("expected 3 records, got %s", got)
+	}
+	if issues, _, _ := s.snapshot(); len(issues) != 2 {
+		t.Errorf("analysis set has %d beads, want 2 without the tombstone", len(issues))
+	}
+}
+
+// TestLoadSQLiteHonoursTheTombstoneColumn: an older schema marks a deleted
+// row with a `tombstone` flag rather than its status, and bv reads it.
+func TestLoadSQLiteHonoursTheTombstoneColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "beads.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE issues (id TEXT PRIMARY KEY, title TEXT, status TEXT, tombstone INTEGER)`,
+		`INSERT INTO issues VALUES ('t-1','Kept','open',0), ('t-2','Flagged','open',1)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	issues, err := LoadSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 2 || issues[0].Status != "open" || issues[1].Status != "tombstone" {
+		t.Errorf("loaded %+v, want t-1 open and t-2 a tombstone", issues)
 	}
 }
 

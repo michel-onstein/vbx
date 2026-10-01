@@ -55,7 +55,7 @@ func (s *Session) correlationHistory(limit int, refresh bool) (*historyResult, e
 	}
 
 	s.mu.RLock()
-	source, issues := s.source, s.issues
+	source, issues := s.source, s.records
 	s.mu.RUnlock()
 	if source == "" {
 		return nil, fmt.Errorf("session has no source")
@@ -286,7 +286,7 @@ func (s *Session) causality(req []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	issues, _, _ := s.snapshot()
+	issues := s.recordSet() // the history covers every record
 	opts := correlation.DefaultCausalityOptions()
 	// Blocker titles turn "waiting on vbx-8ou" into a sentence naming the
 	// bead, which is the difference between a chain you can read and a list
@@ -314,7 +314,7 @@ func (s *Session) relatedWork(req []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	issues, _, _ := s.snapshot()
+	issues := s.recordSet() // the history covers every record
 	opts := correlation.DefaultRelatedWorkOptions()
 	opts.DependencyGraph = dependencyGraph(issues)
 	if r.Limit > 0 {
@@ -340,7 +340,7 @@ func (s *Session) impactNetwork(req []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	issues, _, _ := s.snapshot()
+	issues := s.recordSet() // the history covers every record
 	network := correlation.NewNetworkBuilderWithIssues(result.report, issues).Build()
 
 	depth := r.Depth
@@ -440,7 +440,7 @@ func (s *Session) orphans(req []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	issues, _, _ := s.snapshot()
+	issues := s.recordSet() // the history covers every record
 	return json.Marshal(detectOrphans(result, issues, r.Limit))
 }
 
@@ -461,7 +461,7 @@ func (s *Session) commitPatch(req []byte) ([]byte, error) {
 	}
 
 	s.mu.RLock()
-	source, issues := s.source, s.issues
+	source, issues := s.source, s.records
 	s.mu.RUnlock()
 
 	extractor, err := openObjectStore(source, issues)

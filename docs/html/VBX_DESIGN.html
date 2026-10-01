@@ -813,6 +813,10 @@ the places <code>bv</code> is lenient, so the two agree on what a malformed file
   <code>deferred</code>, <code>draft</code>, <code>pinned</code>, <code>hooked</code>, <code>review</code>, <code>closed</code>, <code>tombstone</code>) <strong>plus an
   <code>unknown(String)</code> case</strong> — beads is an evolving ecosystem and an unrecognised status must
   render, not crash.</li>
+<li>A <code>tombstone</code> is decoded and kept as a record, but the engine leaves it out
+  of analysis, as <code>bv</code> 0.25 does, while <code>bv</code>'s readiness index still counts it
+  as a resolved blocker. The record set and the analysis set differ on purpose
+  (ADR-021).</li>
 <li><code>IssueType</code> likewise: the five known types get icons and sort weights; anything else is
   valid and renders with a default icon, matching <code>bv</code>'s <code>IsValid()</code> / <code>IsKnownType()</code> split
   (which exists to accommodate Gastown types like <code>role</code>, <code>agent</code>, <code>molecule</code>).</li>

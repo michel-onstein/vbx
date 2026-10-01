@@ -7,6 +7,17 @@ import Testing
 
 private typealias Bead = VBXCore.Issue
 
+/// bv's `naturalLess` for issue ids, used only to state the expected order.
+private func naturalIDLess(_ a: String, _ b: String) -> Bool {
+    func split(_ s: String) -> (String, Int)? {
+        let digits = s.reversed().prefix(while: \.isNumber)
+        guard !digits.isEmpty, let n = Int(String(digits.reversed())) else { return nil }
+        return (String(s.dropLast(digits.count)), n)
+    }
+    if let (pa, na) = split(a), let (pb, nb) = split(b), pa == pb { return na < nb }
+    return a < b
+}
+
 /// Recipes: declarative filter, sort and view, applied atomically.
 @MainActor
 @Suite("Recipes")
@@ -198,8 +209,12 @@ struct RecipeTests {
             "save failed: \(store.loadError ?? "none")")
 
         await store.applyRecipe(named: "vbx-test-recipe")
+        // bv 0.25's recipe.Apply sorts ids naturally — `x-2` before `x-10`
+        // when the prefix matches, lexically otherwise — and vbx now applies
+        // recipes with it rather than with its own lexical copy.
         let ids = store.recipeIDs ?? []
-        #expect(ids == ids.sorted())
+        #expect(!ids.isEmpty)
+        #expect(ids == ids.sorted(by: naturalIDLess))
 
         await store.deleteRecipe(named: "vbx-test-recipe")
         let remaining = store.recipes.userDefined.map(\.recipe.name)
