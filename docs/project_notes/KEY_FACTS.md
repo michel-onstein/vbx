@@ -169,6 +169,14 @@ view snapshots for inspection.
   (`hint` may be `null`) with an empty stderr for an unknown id, an invalid
   priority or an empty title; 0.7.4 can add pager log lines on stderr.
   `BeadWriter.failureMessage` shows the JSON's message and hint first (vbx-jmu).
+- **`br update --if-unchanged <updated_at>` (0.7.0+) compares at full
+  precision.** Measured on 0.7.4: `.000Z` matches a stored `Z`, so it compares
+  instants rather than text, but `.885Z` against a stored `.885481Z` is refused.
+  A refusal exits 6 with `"code": "UPDATE_PRECONDITION_FAILED"` on stdout and
+  writes nothing; an unparseable value exits 4 (`VALIDATION_FAILED`). 0.6.0
+  rejects the flag outright. So the token is `Issue.updatedAtStamp`, never a
+  `Date`, and `BeadWriter` sends it only after `br update --help` lists the flag
+  (vbx-7fh, ADR-022).
 - **`Bundle.main` in the test process is SwiftPM's helper binary** —
   `…/XcodeDefault.xctoolchain/usr/libexec/swift/pm`, measured, not assumed. It
   has no `CFBundleShortVersionString` and no `CFBundleVersion`, so the About

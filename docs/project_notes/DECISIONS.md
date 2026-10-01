@@ -1132,3 +1132,63 @@ caused here. The rule's text in CLAUDE.md now says so.
   analysis set, so an edit confined to a tombstone, or a new one, still reloads.
 - Recipes run through bv's `recipe.Apply` with the readiness authority, so
   `actionable` and `blocked` match bv's sets; vbx keeps no copy of the filter.
+
+---
+
+## ADR-022 — A single-bead edit lands only on the record vbx showed
+
+**Date:** 2026-10-01 · **Status:** Accepted, implemented
+
+**Context.** vbx edits a bead by running `br update`, and between the user
+reading a record and committing an edit, an agent or a terminal can change it.
+An unguarded `br update --priority` then overwrites that change without anyone
+seeing it — the user decided against a version that no longer exists. `br`
+0.7.0 added `--if-unchanged <updated_at>`: the write happens only if the
+record's `updated_at` still matches, otherwise `br` exits 6 with
+`UPDATE_PRECONDITION_FAILED` on stdout and writes nothing. It compares
+instants at `br`'s full precision (microseconds in practice, nanoseconds
+allowed), so `2026-10-01T22:33:13.885Z` against a stored `.885481Z` is a
+conflict. `br` 0.6.0 does not have the flag and rejects it as an unexpected
+argument.
+
+**Decision.**
+
+- **`Issue.updatedAtStamp` keeps `updated_at` verbatim.** `updatedAt` is a
+  `Date`, which the ISO 8601 parser fills to the millisecond and a `Double`
+  cannot hold to the nanosecond, so it cannot be the token. The engine's Go
+  `time.Time` keeps full precision and emits RFC 3339 with it, so the string
+  that reaches Swift is exact.
+- **Priority and title edits pass the stamp of the displayed record.** A
+  multi-bead priority change is one `br update` per bead, so each is guarded by
+  its own stamp. A label change is one `br label` command for many beads and
+  has no such flag; it stays unguarded.
+- **Support is detected, not assumed.** `BeadWriter` asks `br update --help`
+  once whether it lists `--if-unchanged`, caches a conclusive answer, and sends
+  the unguarded write to a `br` that does not. Feature detection rather than a
+  version comparison: it asks about the thing it is about to use.
+- **A refusal is a conflict the user sees.** The store reloads, so the newer
+  record is on screen, and says the edit was not written and may be made again.
+- **The recovery retry stays guarded.** The `br` 0.7.4 "recovery in progress"
+  retry (vbx-1sw) re-sends the same arguments, stamp included. If the first
+  attempt landed before failing, the retry is refused by vbx's own write, so a
+  refusal *after a retry* reads the record back with `br show` and counts the
+  edit done when the record already says what it asked for. A refusal on the
+  first attempt is always a conflict.
+
+**Alternatives.**
+
+- *Read the stamp with `br show` just before writing.* Rejected: that is the
+  record as it is now, not the one the user decided against, and guards
+  nothing.
+- *Compare versions (`br --version >= 0.7.0`).* Rejected for the reason above;
+  a fork or pre-release can carry the flag under any number.
+- *Treat every refusal whose record already matches as success.* Rejected: on a
+  first attempt the match was made by someone else, and that is a change the
+  user should see rather than have silently absorbed.
+
+**Consequences.**
+
+- With `br` 0.6.0 behaviour is unchanged; the guard arrives with the upgrade.
+- An edit costs one extra `br update --help` per writer, once.
+- Nothing in vbx reads `updatedAtStamp` for display or arithmetic; it is a
+  token handed back to `br`.

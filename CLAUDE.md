@@ -17,7 +17,7 @@ box, the README title.
 | [FEATURE_PARITY.md](docs/FEATURE_PARITY.md) | — | Every bv capability mapped to a vbx surface and delivery phase | Living |
 | [RELEASES.md](docs/RELEASES.md) | ADR-013 | User-facing changes per release — generated from the git tags, never edited | Generated |
 | [project_notes/BUGS.md](docs/project_notes/BUGS.md) | — | Bug log with the regression test locking each fix in | Living |
-| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…021 | Architectural decisions and their trade-offs | Living |
+| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…022 | Architectural decisions and their trade-offs | Living |
 | [project_notes/KEY_FACTS.md](docs/project_notes/KEY_FACTS.md) | — | Toolchain, commands, layout, gotchas | Living |
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
@@ -213,6 +213,13 @@ them.
   losing the write is least likely to be noticed. Pass the text as an argv
   element instead — from a script, not through the shell, so quoting cannot
   mangle it. (`br create --description-file` *does* work; it is only `update`.)
+- **A single-bead `br update` is guarded by `Issue.updatedAtStamp`, never by
+  `updatedAt`.** `br update --if-unchanged` (0.7.0+) compares to the
+  microsecond; a `Date` keeps milliseconds, so a stamp rebuilt from one is a
+  conflict on every edit. Pass the stamp of the record the user *saw* — reading
+  it fresh with `br show` just before writing guards nothing. A new single-bead
+  edit goes through the same path; a multi-id command (`br label`) cannot. See
+  ADR-022.
 - **`br` stamps `source_repo` with the directory it runs in, so every bead
   created in a worktree is stamped wrong.** That rule and this repo's worktree
   discipline are in direct conflict, and the worktree rule is the right one — 30

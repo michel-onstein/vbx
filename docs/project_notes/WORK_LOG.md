@@ -5,6 +5,20 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Edits no longer overwrite a bead someone else just changed (vbx-7fh)
+
+Priority and title edits pass the displayed record's `updated_at` to
+`br update --if-unchanged` when the installed `br` has it (0.7.0+, detected
+from `br update --help`), so a concurrent agent's change is not silently
+overwritten. A refusal reloads and tells the user the edit was not written.
+`Issue.updatedAtStamp` carries the stamp verbatim, because `br` compares to the
+microsecond and a `Date` keeps milliseconds. The recovery retry (vbx-1sw)
+re-sends the same stamp and treats a retry refusal whose record already holds
+the edit as success. Label changes stay unguarded: one command, many beads.
+Tested against `br` 0.6.0 (fallback) and 0.7.4 (guard); see ADR-022.
+
+---
+
 ## 2026-10-01 — The watcher debounce is tested on a virtual clock (vbx-7a2)
 
 `FileWatchService`'s debounce moved into `Debouncer`, which takes an injected
