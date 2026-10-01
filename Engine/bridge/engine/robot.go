@@ -181,16 +181,125 @@ func containsExact(values []string, needle string) bool {
 	return false
 }
 
-// next returns the single bead that is safe to claim.
+// nextDegradation is one reason robot-next answered without a claim.
+type nextDegradation struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+	Repair   string `json:"repair,omitempty"`
+}
+
+// nextDiagnosticPick is the top pick robot-next declined, for inspection.
+type nextDiagnosticPick struct {
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Score    float64  `json:"score"`
+	Reasons  []string `json:"reasons"`
+	Unblocks int      `json:"unblocks"`
+}
+
+// nextOutput is bv 0.25's robot-next payload, field for field, under vbx's
+// envelope. The provenance keys bv adds to its envelope are vbx-v57's.
+type nextOutput struct {
+	GeneratedAt       string                `json:"generated_at"`
+	DataHash          string                `json:"data_hash"`
+	Actionable        bool                  `json:"actionable"`
+	Phase2Ready       bool                  `json:"phase2_ready"`
+	Status            analysis.MetricStatus `json:"status"`
+	Message           string                `json:"message,omitempty"`
+	ID                string                `json:"id,omitempty"`
+	Title             string                `json:"title,omitempty"`
+	Score             float64               `json:"score,omitempty"`
+	Reasons           []string              `json:"reasons,omitempty"`
+	Unblocks          int                   `json:"unblocks,omitempty"`
+	DiagnosticTopPick *nextDiagnosticPick   `json:"diagnostic_top_pick,omitempty"`
+	ClaimCmd          string                `json:"claim_command,omitempty"`
+	ShowCmd           string                `json:"show_command,omitempty"`
+	Actions           *model.IssueActions   `json:"actions,omitempty"`
+	Degraded          []nextDegradation     `json:"degraded,omitempty"`
+	UsageHints        []string              `json:"usage_hints,omitempty"`
+}
+
+func diagnosticFromPick(pick analysis.TopPick) *nextDiagnosticPick {
+	return &nextDiagnosticPick{
+		ID: pick.ID, Title: pick.Title, Score: pick.Score,
+		Reasons: pick.Reasons, Unblocks: pick.Unblocks,
+	}
+}
+
+// next returns the single bead that is safe to claim, with the command that
+// claims it.
 //
-// The claim-safety gate is `cmd/bv`'s, and it is the reason this command
-// exists at all: a recommendation can be graph-important and still be blocked,
-// assigned, closed or an epic. Handing one of those to an agent as "next"
-// sends it at work it cannot start.
+// This is `cmd/bv`'s handleRobotNext, which cannot be imported. Its gates run
+// in bv's order, and each one that fails names itself in `degraded` with the
+// pick it declined, because the repair differs:
+//
+//  1. the load is partial (source_authority_incomplete);
+//  2. triage has no top pick at all (no_actionable_recommendation);
+//  3. no top pick passes the claim gate (robot_next_claim_unsafe);
+//  4. the metrics the score depends on are incomplete
+//     (robot_next_metric_incomplete);
+//  5. the bead has no live tracker route (live_action_route_unavailable) —
+//     always the outcome in the app, which never resolves one (ADR-020).
+//
+// The claim command is the tracker's own `br update --claim`, from the bead's
+// origin, never a string assembled here: bv 0.25 replaced the old
+// `--status=in_progress` form with the atomic claim, and only a bead whose
+// tracker advertises it gets one.
 func (s *Session) next(req []byte) ([]byte, error) {
-	issues, _, stats := s.snapshot()
+	issues, analyzer, stats := s.snapshot()
 	if stats != nil {
 		stats.WaitForPhase2()
+	}
+
+	now := robotNow()
+	readiness := model.NewReadinessIndex(issues)
+	opts := analysis.TriageOptions{
+		WaitForPhase2: true,
+		Readiness:     readiness,
+		UseFastConfig: true,
+	}
+	if analyzer != nil {
+		opts.SeedDataHash = analyzer.DataHash()
+	}
+	triage := analysis.ComputeTriageWithOptionsAndTime(issues, opts, now)
+
+	generated, hash := s.robotEnvelope()
+	output := nextOutput{
+		GeneratedAt: generated,
+		DataHash:    hash,
+		Phase2Ready: triage.Meta.Phase2Ready,
+		Status:      triage.Status,
+		UsageHints: []string{
+			"Use scripts/br_retry.sh actionable --json plus the claim gate before mutating Beads state in crowded swarms.",
+			"No claim_command is emitted unless the item is open, unblocked, unassigned, and triage metrics are ready.",
+			"Inspect .status for skipped, timeout, or pending graph phases.",
+		},
+	}
+	picks := triage.QuickRef.TopPicks
+
+	if !s.claimsProven() {
+		output.Message = "No claim command emitted because source authority is incomplete or stale"
+		if len(picks) > 0 {
+			output.DiagnosticTopPick = diagnosticFromPick(picks[0])
+		}
+		output.Degraded = []nextDegradation{{
+			Code: "source_authority_incomplete", Severity: "warning",
+			Message: "Readiness is provisional; inspect source_authority for failed sources, dropped records, or stale fallback.",
+			Repair:  "Restore or refresh the affected sources and rerun the command before claiming work.",
+		}}
+		return json.Marshal(output)
+	}
+
+	if len(picks) == 0 {
+		output.Message = "No proven actionable item available"
+		output.Degraded = []nextDegradation{{
+			Code:     "no_actionable_recommendation",
+			Severity: "info",
+			Message:  "No open, unblocked, unassigned non-epic recommendation passed the robot-next claimability filter.",
+			Repair:   "Use br ready --json or scripts/br_retry.sh actionable --json for authoritative claim candidates.",
+		}}
+		return json.Marshal(output)
 	}
 
 	byID := make(map[string]model.Issue, len(issues))
@@ -198,112 +307,102 @@ func (s *Session) next(req []byte) ([]byte, error) {
 		byID[issue.ID] = issue
 	}
 
-	triage := analysis.ComputeTriage(issues)
-	generated, hash := s.robotEnvelope()
-
-	payload := map[string]any{
-		"generated_at": generated,
-		"data_hash":    hash,
-		"actionable":   false,
-	}
-	if stats != nil {
-		payload["phase2_ready"] = stats.IsPhase2Ready()
-	}
-
-	var diagnostic map[string]any
-	var reasons []string
-
-	for _, rec := range triage.Recommendations {
-		blockers := claimBlockers(rec.ID, byID)
-		if diagnostic == nil {
-			diagnostic = map[string]any{
-				"id": rec.ID, "title": rec.Title, "score": rec.Score,
-			}
+	diagnostic := diagnosticFromPick(picks[0])
+	var top *analysis.TopPick
+	var unsafeReasons []string
+	for i := range picks {
+		reasons := claimabilityReasons(picks[i].ID, byID, readiness, now)
+		if len(reasons) == 0 {
+			top = &picks[i]
+			break
 		}
-		if len(blockers) > 0 {
-			if reasons == nil {
-				reasons = blockers
-			}
-			continue
+		if len(unsafeReasons) == 0 {
+			unsafeReasons = reasons
 		}
-
-		payload["actionable"] = true
-		payload["id"] = rec.ID
-		payload["title"] = rec.Title
-		payload["score"] = rec.Score
-		payload["claim_command"] = fmt.Sprintf("br update %s --status=in_progress", rec.ID)
-		payload["show_command"] = fmt.Sprintf("br show %s", rec.ID)
-		return json.Marshal(payload)
 	}
-
-	// Nothing claimable. Which of the three degraded outcomes it is matters,
-	// because the repair differs.
-	switch {
-	case len(triage.Recommendations) == 0:
-		payload["message"] = "No proven actionable item available"
-		payload["degraded"] = []map[string]any{{
-			"code":     "no_actionable_recommendation",
-			"severity": "info",
-			"repair":   "Use br ready --json for authoritative claim candidates.",
+	if top == nil {
+		output.Message = "No claim command emitted because the top recommendation was not claim-safe"
+		output.DiagnosticTopPick = diagnostic
+		output.Degraded = []nextDegradation{{
+			Code:     "robot_next_claim_unsafe",
+			Severity: "warning",
+			Message:  strings.Join(unsafeReasons, "; "),
+			Repair:   "Use the authoritative Beads actionable queue plus claim gate before claiming work.",
 		}}
-	default:
-		payload["message"] =
-			"No claim command emitted because the top recommendation was not claim-safe"
-		payload["degraded"] = []map[string]any{{
-			"code":     "robot_next_claim_unsafe",
-			"severity": "warning",
-			"reasons":  reasons,
-			"repair": "Use the authoritative Beads actionable queue plus claim gate " +
-				"before claiming work.",
+		return json.Marshal(output)
+	}
+
+	if reasons := triage.Status.ClaimUnsafeReasons(); len(reasons) > 0 {
+		output.Message = "No claim command emitted because triage metrics were incomplete"
+		output.DiagnosticTopPick = diagnostic
+		output.Degraded = []nextDegradation{{
+			Code:     "robot_next_metric_incomplete",
+			Severity: "warning",
+			Message:  strings.Join(reasons, "; "),
+			Repair:   "Retry bv --robot-next after graph metrics are available, or use the authoritative Beads actionable queue plus claim gate.",
 		}}
+		return json.Marshal(output)
 	}
-	if diagnostic != nil {
-		payload["diagnostic_top_pick"] = diagnostic
+
+	actions := byID[top.ID].Actions(true)
+	output.Actions = &actions
+	if actions.Show != nil {
+		output.ShowCmd = actions.Show.Shell
 	}
-	return json.Marshal(payload)
+	if actions.Claim == nil {
+		output.Message = "No claim command emitted: " + actions.UnavailableReason
+		output.DiagnosticTopPick = diagnostic
+		output.Degraded = []nextDegradation{{
+			Code: "live_action_route_unavailable", Severity: "info",
+			Message: actions.UnavailableReason,
+		}}
+		return json.Marshal(output)
+	}
+
+	output.Actionable = true
+	output.ID = top.ID
+	output.Title = top.Title
+	output.Score = top.Score
+	output.Reasons = top.Reasons
+	output.Unblocks = top.Unblocks
+	output.ClaimCmd = actions.Claim.Shell
+	return json.Marshal(output)
 }
 
-// claimBlockers lists why a bead cannot be claimed, in bv's order.
-func claimBlockers(id string, byID map[string]model.Issue) []string {
+// claimabilityReasons lists why a bead cannot be claimed, in bv's order — an
+// empty list means it can.
+func claimabilityReasons(
+	id string, byID map[string]model.Issue, readiness *model.ReadinessIndex, now time.Time,
+) []string {
 	issue, known := byID[id]
 	if !known {
 		return []string{fmt.Sprintf("%s is absent from loaded Beads records", id)}
 	}
 
 	var reasons []string
-	if !strings.EqualFold(strings.TrimSpace(string(issue.Status)), "open") {
+	if !strings.EqualFold(strings.TrimSpace(string(issue.Status)), string(model.StatusOpen)) {
 		reasons = append(reasons, fmt.Sprintf("%s status is %q", id, issue.Status))
 	}
-	if strings.EqualFold(strings.TrimSpace(string(issue.IssueType)), "epic") {
+	if strings.EqualFold(strings.TrimSpace(string(issue.IssueType)), string(model.TypeEpic)) {
 		reasons = append(reasons, fmt.Sprintf("%s is an epic", id))
 	}
-	if strings.TrimSpace(issue.Assignee) != "" {
-		reasons = append(reasons,
-			fmt.Sprintf("%s is already assigned to %s", id, issue.Assignee))
+	if assignee := strings.TrimSpace(issue.Assignee); assignee != "" {
+		reasons = append(reasons, fmt.Sprintf("%s is already assigned to %s", id, assignee))
 	}
-
-	var blocking []string
-	for _, dep := range issue.Dependencies {
-		if dep == nil || !dep.Type.IsBlocking() {
-			continue
-		}
-		if dep.DependsOnID == "" {
-			blocking = append(blocking, "<missing blocker id>")
-			continue
-		}
-		blocker, exists := byID[dep.DependsOnID]
-		if !exists {
-			blocking = append(blocking, dep.DependsOnID+" (missing)")
-			continue
-		}
-		if blocker.Status != model.StatusClosed && blocker.Status != model.StatusTombstone {
-			blocking = append(blocking, dep.DependsOnID)
-		}
+	// A future defer_until withholds the bead, exactly as `br ready` hides it.
+	if issue.IsDeferredAt(now) {
+		reasons = append(reasons, fmt.Sprintf("%s is deferred until %s",
+			id, issue.DeferUntil.UTC().Format(time.RFC3339)))
 	}
-	if len(blocking) > 0 {
-		sort.Strings(blocking)
+	if blockers := readiness.Blockers(issue.ID); len(blockers) > 0 {
 		reasons = append(reasons,
-			fmt.Sprintf("%s is blocked by %s", id, strings.Join(blocking, ", ")))
+			fmt.Sprintf("%s is blocked by %s", id, strings.Join(blockers, ", ")))
+	}
+	if readiness.DependencyState(issue.ID) == model.DependenciesUnknown {
+		reasons = append(reasons, "dependency authority is missing or unresolved")
+	}
+	if readiness.HasOpenChildren(issue.ID) {
+		reasons = append(reasons, "parent still has open children")
 	}
 	return reasons
 }

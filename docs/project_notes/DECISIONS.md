@@ -1003,3 +1003,63 @@ entirely to SwiftUI.
   outside it is refused. The failure this last one guards is an overlay that
   ends up zero-sized, which is indistinguishable from a gesture the system never
   delivered.
+
+---
+
+## ADR-020 — Only vbx-cli resolves the live tracker; the app explains why it has no claim
+
+**Date:** 2026-10-01 · **Status:** Accepted, implemented
+
+**Context.** bv 0.25 binds every loaded bead to the tracker that supplied it
+(`loader.AttachIssueOrigins`), and derives each triage recommendation's
+`actions` — a `br show` and, for a claimable bead, the atomic
+`br update --claim` — from that binding. `--robot-next` emits its
+`claim_command` from the same place, and declines with
+`live_action_route_unavailable` when there is no route. The binding reads
+`.beads/metadata.json` and then asks the installed `br` what it supports, by
+running `br update --help` with a two-second timeout. The App Sandbox forbids
+that subprocess, so the app cannot do what bv does; and without the binding
+vbx's triage differed from bv on `actions.local_id` and its `--robot-next`
+still emitted the pre-0.25 `br update <id> --status=in_progress`, which is not
+atomic.
+
+**Decision.** The session takes an explicit `live_tracker_actions` option in
+its open configuration (`OpenConfig.LiveTrackerActions`, through the existing
+JSON config of `vbx_open` — no new C entry point). `vbx-cli` sets it; the app
+never does. With it, the engine calls bv's binding exactly as bv's loader does,
+with bv's "complete" verdict (no record failed to parse). Without it, every
+bead gets an origin carrying its id and the reason
+"live tracker actions are resolved by vbx-cli, not the app" — so the payload
+has the same shape in both, and the absence of a command is explained rather
+than empty. `--robot-next` is now a port of bv's `handleRobotNext`: the
+source-authority, top-pick, claim-gate, metric-completeness and live-route
+gates, in bv's order, with the claim command taken from the bead's actions.
+
+**Alternatives.**
+
+- *Sniff the sandbox* (the `APP_SANDBOX_CONTAINER_ID` environment variable).
+  Rejected: the Developer ID build is not sandboxed but is still the app, and a
+  test process looks like neither. The caller knows what it is; it says so.
+- *Bind origins in the app too and let the subprocess fail.* Rejected: a
+  sandbox denial costs up to the two-second timeout on every load, and the
+  failure reason ("cannot establish installed tracker capabilities") blames the
+  user's `br` rather than the app.
+- *Keep vbx's own claim string.* Rejected: it is the non-atomic claim bv
+  replaced, and an agent racing another on `--status=in_progress` can both
+  "win".
+
+**Consequences.**
+
+- The app never spawns `br` from the engine **for a single-repository
+  workspace**. A `.bv/workspace.yaml` multi-repository load still goes through
+  bv's `workspace.LoadAllFromConfig`, which binds origins itself; the app
+  replaces those bindings afterwards, but the probe has already run. Tracked as
+  "Stop bv's workspace loader spawning br in the sandboxed app" (vbx-jvj).
+- A load with a malformed record is not claim-safe: triage withdraws every
+  claim (bv's `suppressUnprovenTriageClaims`) and `--robot-next` answers
+  `source_authority_incomplete`.
+- `--robot-next` on the demo fixture is no longer actionable, as bv's is not:
+  the fixture has no tracker metadata. Run in a real `br` workspace it emits
+  bv's claim, byte for byte.
+- `parity-check.py` compares `--robot-next` again, less the provenance envelope
+  keys vbx-v57 owns.

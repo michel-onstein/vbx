@@ -86,6 +86,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 		return err
 	}
 
+	s.bindWorkspaceOrigins(issues)
 	analyzer, stats := s.analyse(issues)
 
 	s.mu.Lock()
@@ -95,6 +96,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings
 	s.workspacePath, s.repoLoads = configPath, loads
 	s.issues, s.analyzer, s.stats = issues, analyzer, stats
+	s.complete = len(warnings) == 0
 	s.loadedAt = timeNow()
 	return nil
 }
@@ -123,12 +125,14 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 		return withChangedFlag(payload, false)
 	}
 
+	s.bindWorkspaceOrigins(issues)
 	analyzer, stats := s.analyse(issues)
 
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings
 	s.workspacePath, s.repoLoads = configPath, loads
 	s.issues, s.analyzer, s.stats = issues, analyzer, stats
+	s.complete = len(warnings) == 0
 	s.loadedAt = timeNow()
 	s.mu.Unlock()
 

@@ -202,7 +202,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `bv` command | `vbx-cli` | GUI surface | Phase |
 |---|---|---|---|
 | `--robot-triage`, `--robot-triage-by-track`, `--robot-triage-by-label` | ✓ | Insights triage section | 6 |
-| `--robot-next` | ✓ | "Next bead" toolbar action + Shortcuts intent | 6 |
+| `--robot-next` | ✓ (claim command from the live tracker, CLI only — ADR-020) | "Next bead" toolbar action + Shortcuts intent | 6 |
 | `--robot-plan` | ✓ | Actionable Plan view | 6 |
 | `--robot-insights`, `--robot-metrics` | ✓ | Insights dashboard | 6 |
 | `--robot-priority` | ✓ | Priority hints overlay | 6 |
