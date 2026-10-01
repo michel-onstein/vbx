@@ -243,3 +243,63 @@ func historyReachable() async throws {
     #expect(report.stats.totalCommits > 0, "walked no commits; range=\(report.gitRange)")
     #expect(!report.gitRange.isEmpty)
 }
+
+// Regression (vbx-850): the Swift copy of bv's IsBlocking drifted from the
+// engine when bv v0.25.0 made waits-for and conditional-blocks blocking. This
+// pins the two together by asking the engine itself: for every dependency
+// type bv defines (plus the legacy empty type and a custom one), a bead whose
+// only dependency is an open bead of that type is actionable exactly when
+// Swift says the type does not block.
+@Test("Swift's isBlocking agrees with the engine for every dependency type")
+func blockingAgreesWithEngine() async throws {
+    // bv v0.25.2 pkg/model/types.go: DepBlocks … DepDiscoveredFrom.
+    let types = [
+        "blocks", "conditional-blocks", "waits-for", "related", "parent-child",
+        "discovered-from", "", "custom-link",
+    ]
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vbx-blocking-\(UUID().uuidString)")
+    let beads = root.appendingPathComponent(".beads")
+    try FileManager.default.createDirectory(at: beads, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    func row(_ fields: [String: Any]) throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: fields, options: .sortedKeys), as: UTF8.self)
+    }
+    let stamp = "2026-10-01T09:00:00Z"
+    var lines: [String] = []
+    for (n, type) in types.enumerated() {
+        lines.append(try row([
+            "id": "b-\(n)", "title": "Blocker \(n)", "status": "open", "issue_type": "task",
+            "priority": 2, "created_at": stamp, "updated_at": stamp,
+        ]))
+        lines.append(try row([
+            "id": "t-\(n)", "title": "Dependent via '\(type)'", "status": "open", "issue_type": "task",
+            "priority": 2, "created_at": stamp, "updated_at": stamp,
+            "dependencies": [[
+                "issue_id": "t-\(n)", "depends_on_id": "b-\(n)", "type": type, "created_at": stamp,
+            ]],
+        ]))
+    }
+    try (lines.joined(separator: "\n") + "\n")
+        .write(to: beads.appendingPathComponent("issues.jsonl"), atomically: true, encoding: .utf8)
+
+    let engine = BeadsEngine()
+    _ = try await engine.open(path: root.path, skipPhase2: true)
+    let actionable = try await engine.actionableIDs()
+    let issues = try await engine.issues()
+    await engine.close()
+
+    for (n, type) in types.enumerated() {
+        let dependent = try #require(issues.first { $0.id == "t-\(n)" })
+        let dep = try #require(dependent.dependencies.first, "the '\(type)' edge was dropped")
+        #expect(dep.type.rawValue == type)
+        // Engine: blocked iff not actionable. Swift: blocked iff isBlocking.
+        #expect(
+            actionable.contains("t-\(n)") == !dep.type.isBlocking,
+            "'\(type)': engine says \(actionable.contains("t-\(n)") ? "actionable" : "blocked"), Swift isBlocking=\(dep.type.isBlocking)")
+    }
+    // The pair that motivated this test, stated outright.
+    #expect(!actionable.contains("t-1"), "conditional-blocks must block")
+    #expect(!actionable.contains("t-2"), "waits-for must block")
+}

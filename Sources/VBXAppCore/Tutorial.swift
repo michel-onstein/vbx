@@ -178,10 +178,11 @@ public final class Tutorial: ObservableObject {
             surface: .graph,
             terminalKey: "g",
             body: """
-                Only **blocking** dependencies shape the graph and the metrics.
-                An empty dependency type blocks too — that is bv's rule for
-                rows written before the typed system — but `parent-child` and
-                `waits-for` do not.
+                Only **blocking** dependencies shape the graph and the metrics:
+                `blocks`, `conditional-blocks` and `waits-for`. An empty
+                dependency type blocks too — that is bv's rule for rows written
+                before the typed system — but `parent-child`, `related` and
+                `discovered-from` do not.
 
                 In a multi-repository workspace, dependencies that cross a
                 repository boundary are drawn distinctly. Those are the

@@ -500,8 +500,12 @@ classDiagram
 - `IssueType` likewise: the five known types get icons and sort weights; anything else is
   valid and renders with a default icon, matching `bv`'s `IsValid()` / `IsKnownType()` split
   (which exists to accommodate Gastown types like `role`, `agent`, `molecule`).
-- `DependencyType.isBlocking` preserves the legacy quirk that an **empty type means
-  blocking**. Getting this wrong silently changes every downstream metric.
+- `DependencyType.isBlocking` mirrors bv's `IsBlocking()`: `blocks`, `conditional-blocks`
+  and `waits-for` block (bv v0.25.0 onwards), and it preserves the legacy quirk that an
+  **empty type means blocking**. `parent-child`, `related`, `discovered-from` and custom
+  types do not. The enum stays open — an unknown type decodes to `other(String)`. Getting
+  this wrong silently changes every downstream metric, and an engine test asserts the
+  Swift copy agrees with the engine for every type bv defines.
 - All model types are `Sendable` value types so they cross actor boundaries freely.
 - Metric maps are stored keyed by issue ID for API fidelity, but hot paths keep a parallel
   dense `[Double]` indexed by a stable node index, built once per snapshot.

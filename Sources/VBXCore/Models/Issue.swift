@@ -234,6 +234,8 @@ public enum IssueType: RawRepresentable, Codable, Sendable, Hashable {
 /// Relationship between two beads.
 public enum DependencyType: RawRepresentable, Codable, Sendable, Hashable {
     case blocks
+    case conditionalBlocks
+    case waitsFor
     case related
     case parentChild
     case discoveredFrom
@@ -242,6 +244,8 @@ public enum DependencyType: RawRepresentable, Codable, Sendable, Hashable {
     public init(rawValue: String) {
         switch rawValue {
         case "blocks": self = .blocks
+        case "conditional-blocks": self = .conditionalBlocks
+        case "waits-for": self = .waitsFor
         case "related": self = .related
         case "parent-child": self = .parentChild
         case "discovered-from": self = .discoveredFrom
@@ -252,6 +256,8 @@ public enum DependencyType: RawRepresentable, Codable, Sendable, Hashable {
     public var rawValue: String {
         switch self {
         case .blocks: "blocks"
+        case .conditionalBlocks: "conditional-blocks"
+        case .waitsFor: "waits-for"
         case .related: "related"
         case .parentChild: "parent-child"
         case .discoveredFrom: "discovered-from"
@@ -259,14 +265,18 @@ public enum DependencyType: RawRepresentable, Codable, Sendable, Hashable {
         }
     }
 
-    /// An *empty* type counts as blocking, matching bv's backward-compatibility
-    /// rule for dependencies created before the typed system existed. Getting
-    /// this wrong silently changes PageRank, betweenness, and the actionable set.
+    /// Mirrors bv's `DependencyType.IsBlocking()`: `blocks`,
+    /// `conditional-blocks` and `waits-for` block (bv v0.25.0 onwards), and so
+    /// does an *empty* type — bv's backward-compatibility rule for dependencies
+    /// created before the typed system existed. `parent-child`, `related`,
+    /// `discovered-from` and any custom type do not. Getting this wrong
+    /// silently changes PageRank, betweenness, and the actionable set, and puts
+    /// the graph and inspector at odds with the engine's numbers.
     public var isBlocking: Bool {
         switch self {
-        case .blocks: true
+        case .blocks, .conditionalBlocks, .waitsFor: true
         case .other(let raw): raw.isEmpty
-        default: false
+        case .related, .parentChild, .discoveredFrom: false
         }
     }
 }
