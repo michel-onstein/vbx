@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.9.1 — 2026-10-01
+
+### Fixes
+
+- Parity declares the beads.db differences vbx keeps on purpose ([#98](https://github.com/michel-onstein/vbx/pull/98))
+
 ## 0.9.0 — 2026-10-01
 
 ### Features
