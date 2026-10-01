@@ -4,6 +4,38 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — Triage reported staleness bv never would, from history it could not use
+
+**Symptom:** over `Fixtures/sprints` while its `issues.jsonl` was still
+uncommitted, `--robot-triage` reported `spr-12` 28 days stale and bv 0.25.2
+reported no staleness at all. Committing the fixture made them agree. (vbx-8u3)
+
+**Cause:** not the untracked file itself — at a repository's root, bv walks an
+untracked beads file too and falls back to `updated_at` exactly as vbx did. The
+divergence was in *whether* the walk runs. bv's `handleRobotTriage` leaves the
+history nil, and so staleness absent, in two cases vbx walked anyway: when
+SOURCE_DATE_EPOCH pins the clock (status `skipped`, because a walk raced against
+a wall-clock deadline cannot give stable bytes), and when the workspace
+directory is not itself a checkout — bv's `ValidateRepository` looks for `.git`
+there and never further up. vbx's object store finds the enclosing repository,
+found no events for the never-committed file, and `ComputeStaleness` fell back
+to `updated_at`. Once committed, recent commit events made both sides report
+nothing stale, which hid the difference.
+
+**Fix:** `Session.triageHistoryGate` applies both of bv's refusals before the
+walk: `skipped` under a pinned clock, `error` when `ValidateRepository` rejects
+the workspace directory. The History view still walks up to the enclosing
+repository; only triage's score has to agree with bv.
+
+**Regression test:** `TestTriageStalenessIsAbsentWithoutUsableHistory` (nested
+workspace with the beads file untracked and committed, no repository, pinned
+clock — each checked against bv 0.25.2), and
+`TestTriageStalenessFallsBackToUpdatedAtAtARepositoryRoot` for the case both
+tools still compute. `parity-check.py` exercises the pinned-clock rule in every
+workspace it runs.
+
+---
+
 ## 2026-10-01 — The burndown counted a reopened bead as done
 
 **Symptom:** a sprint bead that was closed and then reopened kept burning down
