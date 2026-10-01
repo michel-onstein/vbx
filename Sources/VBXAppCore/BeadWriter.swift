@@ -149,17 +149,31 @@ public final class BeadWriter: ObservableObject {
     /// editing would work from a terminal launch and mysteriously not from the
     /// Dock.
     public static func locateBR() -> String? {
+        let candidates = brCandidates(
+            path: ProcessInfo.processInfo.environment["PATH"],
+            home: FileManager.default.homeDirectoryForCurrentUser.path)
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// Every place ``locateBR()`` looks, in the order it looks.
+    ///
+    /// `PATH` first, so a terminal launch uses whichever `br` the shell would.
+    /// Then the install locations a Finder launch cannot see: `~/.local/bin`
+    /// (br's own installer), `~/.cargo/bin` (`cargo install`), and Homebrew on
+    /// Apple silicon and Intel. Separate from the probe so a test can pin the
+    /// list without depending on what is installed.
+    public static func brCandidates(path: String?, home: String) -> [String] {
         var candidates: [String] = []
-        if let path = ProcessInfo.processInfo.environment["PATH"] {
+        if let path {
             candidates += path.split(separator: ":").map { "\($0)/br" }
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
         candidates += [
+            "\(home)/.local/bin/br",
             "\(home)/.cargo/bin/br",
             "/opt/homebrew/bin/br",
             "/usr/local/bin/br",
         ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        return candidates
     }
 
     /// Runs a command in the workspace directory.

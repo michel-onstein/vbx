@@ -125,3 +125,26 @@ func workspaceDirectoryIsTheProjectRoot() async {
     #expect(store.workspaceDirectory == fixture)
     await store.close()
 }
+
+@MainActor
+@Test("br is looked for in ~/.local/bin, where its installer puts it")
+func brCandidatesIncludeLocalBin() {
+    // A Finder launch inherits no shell PATH, so the fixed list is all there
+    // is. Without ~/.local/bin, a br installed there reads as missing and
+    // every edit fails from the Dock while working from a terminal (vbx-9y7).
+    let candidates = BeadWriter.brCandidates(path: nil, home: "/Users/someone")
+    #expect(
+        candidates == [
+            "/Users/someone/.local/bin/br",
+            "/Users/someone/.cargo/bin/br",
+            "/opt/homebrew/bin/br",
+            "/usr/local/bin/br",
+        ])
+}
+
+@MainActor
+@Test("PATH is searched before the fixed install locations, in its own order")
+func brCandidatesPreferPath() {
+    let candidates = BeadWriter.brCandidates(path: "/a/bin:/b/bin", home: "/h")
+    #expect(Array(candidates.prefix(3)) == ["/a/bin/br", "/b/bin/br", "/h/.local/bin/br"])
+}
