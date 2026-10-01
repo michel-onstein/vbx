@@ -5,6 +5,16 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Editing finds `br` in `~/.local/bin` from a Finder launch (vbx-9y7)
+
+`BeadWriter` now probes `~/.local/bin/br`, where `br`'s installer puts it, so
+a vbx launched from Finder or the Dock — which inherits no shell `PATH` — no
+longer reports `br` missing. The candidate list is factored into
+`brCandidates(path:home:)` and pinned by two tests in `BeadWriterTests.swift`;
+bug log entry of the same date.
+
+---
+
 ## 2026-10-01 — `swift test` links under Swift 6.4's default build system (vbx-lss)
 
 The Go engine archive is renamed from `libvbxengine.a` to `libvbxgo.a`, because

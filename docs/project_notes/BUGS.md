@@ -4,6 +4,27 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — `br` in `~/.local/bin` was invisible to a Finder launch
+
+**Symptom:** launched from Finder or the Dock, vbx reported `br` missing and
+every edit failed, while the same build launched from a terminal edited fine.
+(vbx-9y7)
+
+**Cause:** a GUI launch inherits launchd's minimal `PATH`, so
+`BeadWriter.locateBR()` relies on its fixed list of install locations —
+`~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`. `br`'s own installer
+puts it in `~/.local/bin`, which was not on the list.
+
+**Fix:** `~/.local/bin` is probed after `PATH` and before `~/.cargo/bin`. The
+list is now built by `BeadWriter.brCandidates(path:home:)`, separate from the
+probe, so it can be asserted without depending on what is installed.
+
+**Prevention:** `brCandidatesIncludeLocalBin` and `brCandidatesPreferPath` in
+`Tests/VBXAppCoreTests/BeadWriterTests.swift` pin the full candidate list and
+its order; both fail with the `~/.local/bin` entry removed.
+
+---
+
 ## 2026-10-01 — `-lvbxengine` linked SwiftPM's own `libVBXEngine.a`
 
 **Symptom:** under Swift 6.4's default build system, `swift build` and `swift
