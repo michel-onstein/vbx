@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.5.1 — 2026-10-01
+
+### Fixes
+
+- Parity is checked against bv 0.25's readiness and blocking edge cases, not only the demo ([#88](https://github.com/michel-onstein/vbx/pull/88))
+
 ## 0.5.0 — 2026-10-01
 
 ### Features
