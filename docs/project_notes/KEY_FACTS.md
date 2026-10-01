@@ -97,6 +97,7 @@ view snapshots for inspection.
 | `Sources/VBXUI` | SwiftUI views |
 | `Sources/vbx`, `Sources/vbx-cli` | App shell and CLI |
 | `Fixtures/demo` | 18-bead workspace used by tests and demos |
+| `Fixtures/readiness` | 21 beads covering bv 0.25's readiness and blocking cases; tests and parity only |
 | `Resources` | App icon: generated `vbx-icon.svg` and the committed `vbx.icns` |
 | `Resources/entitlements` | Developer ID entitlements, plus the App Store *template* |
 | `docs/images` | `vbx-icon.png`, the same artwork at 512px for the README |

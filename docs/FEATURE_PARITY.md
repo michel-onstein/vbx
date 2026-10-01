@@ -29,7 +29,10 @@ the robot protocol with TOON output.
 an enumerated list of volatile fields — timestamps, wall-clock durations,
 absolute paths and build identity. It reports commands bv does not have and
 commands vbx has not implemented as coverage gaps rather than skipping them
-silently, and exits non-zero when any comparable command differs.
+silently, and exits non-zero when any comparable command differs. It runs over
+the demo fixture and over `Fixtures/readiness` — the readiness and blocking
+cases bv 0.25 changed — the latter both as JSONL and as a `beads.db`, because
+vbx reads SQLite through its own loader rather than bv's.
 
 Two known non-comparisons are declared in the harness rather than hidden:
 `--robot-insights`, because bv inlines `analysis.Insights`' untagged PascalCase
