@@ -5,6 +5,22 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Parity declares the beads.db differences vbx keeps on purpose (vbx-tvi, vbx-dj4)
+
+Decided option (a), recorded as ADR-024: vbx keeps preferring the JSONL and
+keeps reading every column of a `beads.db`, rather than porting bv 0.25's
+freshest-source selection or its `loadIssuesSimple` fallback, which bv takes on
+`br`'s schema because its main query selects `due_date` (br has `due_at`) and
+which drops `closed_at`, notes, design and `source_repo`. `parity-check.py`
+gains one `DECLARED_DIFFERENCES` table, scoped by fixture, command and exact
+path with a reason each: `data_hash`/`scope_hash` on next/suggest/graph and the
+label-health and triage velocity, on `readiness (beads.db)` only. Declared
+differences print as `declared`; the same paths still fail on the JSONL
+fixtures, any other difference still fails, and a declaration that stops firing
+fails the run — bv fixing its query is the revisit trigger. Tests in
+`scripts/test-parity-check.py`. Parity with bv 0.25.2: 5 differing commands
+before, 0 after (5 declared). No app behaviour changes.
+
 ## 2026-10-01 — Robot output carries bv 0.25's provenance envelope (vbx-v57)
 
 bv 0.25's six provenance keys decided one by one (ADR-023). `output_format`,

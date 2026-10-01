@@ -27,6 +27,13 @@ command declares which subtree to compare on each side. Where vbx does carry
 the envelope it carries bv's provenance keys too, except the two listed in
 ENVELOPE_ONLY_KEYS with their reasons — one list for every command.
 
+*Declared differences.* A few differences are decisions rather than bugs:
+on a br beads.db bv 0.25.2 falls back to a lossy read that vbx deliberately
+does not copy (ADR-024). Those are listed in DECLARED_DIFFERENCES, each scoped
+to one fixture, one command and one exact path, and reported as `declared` —
+never as a match. The same paths are compared on every other fixture, any
+other difference still fails, and a declaration that stops firing fails too.
+
 *More than one workspace.* The demo fixture exercises none of the readiness
 and blocking cases bv 0.25 changed — custom statuses, `waits-for` and
 `conditional-blocks`, `defer_until`, a missing blocker, parent-child gating, a
@@ -128,12 +135,77 @@ VOLATILE_KEYS = {
 # The rest of bv 0.25's provenance envelope — output_format, source_path,
 # source_kind, scope_hash — vbx ports (ADR-023), so it is compared like any
 # other field. Where vbx and bv read different sources in the same workspace,
-# those keys differ honestly, and that difference is vbx-tvi's.
+# those keys differ honestly: vbx keeps its own source choice (ADR-024).
 ENVELOPE_ONLY_KEYS = {
     "source_authority": "bv's multi-source selection report (freshness ranking,"
-                        " stale fallback); vbx ranks no sources (vbx-tvi), ADR-023",
+                        " stale fallback); vbx ranks no sources (ADR-024), ADR-023",
     "authority_hash": "a hash of source_authority, so it goes wherever that goes",
 }
+
+# Differences vbx accepts rather than fixes, each scoped to one fixture, one
+# command and one exact difference path, with its reason. This is the only
+# place the harness tolerates a difference in data: a declared path is ignored
+# on its own fixture and compared everywhere else, and any other difference on
+# that fixture still fails. Each one is reported as `declared`, never as a
+# match, and a declaration that stops firing fails the run — that is the
+# signal to revisit the decision behind it.
+#
+# bv 0.25.2 reads a br beads.db through a main query that selects due_date and
+# tombstone, which br's schema lacks (br has due_at). It falls back to
+# loadIssuesSimple, which drops closed_at, notes, design, source_repo and
+# dependency timestamps. vbx keeps reading every column (ADR-024), so on a
+# beads.db the fingerprint and the closed-time velocity differ by design.
+_LOSSY_HASH = "bv hashes its lossy fallback read of br's beads.db; vbx reads every column (ADR-024)"
+_LOSSY_SCOPE = "hashes data_hash, so it follows it (ADR-024)"
+DECLARED_DIFFERENCES = {
+    "readiness (beads.db)": {
+        ("robot-label-health", ".labels[0].velocity.avg_days_to_close"):
+            "bv's fallback read has no closed_at, so it skips the closed bead and averages"
+            " an int 0; vbx averages its real close time (ADR-024)",
+        ("robot-triage", ".project_health.velocity.estimated"):
+            "bv's fallback read has no closed_at, so it estimates close times from"
+            " updated_at; vbx reads closed_at and estimates nothing (ADR-024)",
+        ("robot-suggest", ".data_hash"): _LOSSY_HASH,
+        ("robot-suggest", ".suggestions.data_hash"): _LOSSY_HASH,
+        ("robot-suggest", ".scope_hash"): _LOSSY_SCOPE,
+        ("robot-graph", ".data_hash"): _LOSSY_HASH,
+        ("robot-graph", ".scope_hash"): _LOSSY_SCOPE,
+        ("robot-next", ".data_hash"): _LOSSY_HASH,
+        ("robot-next", ".scope_hash"): _LOSSY_SCOPE,
+    },
+}
+
+
+def difference_path(difference: str) -> str:
+    """The path a describe_differences line is about — the text before ': '."""
+    return difference.split(": ", 1)[0]
+
+
+def split_declared(differences: list[str], fixture: str, command: str
+                   ) -> tuple[list[str], list[tuple[str, str]], list[str]]:
+    """Separates one command's differences into undeclared and declared.
+
+    Returns (undeclared, declared, stale): `declared` pairs each difference
+    with its reason, and `stale` lists the paths declared for this fixture and
+    command that did not differ — a declaration that no longer fires.
+    """
+    declarations = {
+        path: reason
+        for (name, path), reason in DECLARED_DIFFERENCES.get(fixture, {}).items()
+        if name == command
+    }
+    undeclared: list[str] = []
+    declared: list[tuple[str, str]] = []
+    fired: set[str] = set()
+    for difference in differences:
+        path = difference_path(difference)
+        if path in declarations:
+            declared.append((difference, declarations[path]))
+            fired.add(path)
+        else:
+            undeclared.append(difference)
+    stale = sorted(set(declarations) - fired)
+    return undeclared, declared, stale
 
 # Go's zero time.Time as bv's JSON encoder writes it. See strip_bv_zero_times.
 GO_ZERO_TIME = "0001-01-01T00:00:00Z"
@@ -400,6 +472,7 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
 
     matched: list[str] = []
     differed: list[tuple[str, list[str]]] = []
+    declared: list[tuple[str, list[tuple[str, str]]]] = []
     skipped: list[tuple[str, str]] = []
     vbx_only: list[str] = []
     missing: list[str] = []
@@ -449,9 +522,16 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
         bv_payload = strip_bv_zero_times(bv_payload, entry.get("bv_omitzero", set()))
 
         differences = describe_differences(normalise(vbx_payload), normalise(bv_payload))
-        if differences:
-            differed.append((name, differences))
-        else:
+        undeclared, accepted, stale = split_declared(differences, label, name)
+        undeclared += [f"{path}: declared in DECLARED_DIFFERENCES but no longer differs;"
+                       " remove it and revisit its ADR" for path in stale]
+        # Declared differences are listed even beside undeclared ones, so a
+        # failing command never hides what else it was let off.
+        if accepted:
+            declared.append((name, accepted))
+        if undeclared:
+            differed.append((name, undeclared))
+        elif not accepted:
             matched.append(name)
 
     # Report.
@@ -467,6 +547,15 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
         else:
             more = f" (+{len(differences) - 1} more)" if len(differences) > 1 else ""
             print(f"  DIFFER     --{name}: {differences[0]}{more}")
+    for name, accepted in declared:
+        if verbose:
+            print(f"  declared   --{name}:")
+            for difference, reason in accepted:
+                print(f"               {difference}")
+                print(f"                 ({reason})")
+        else:
+            paths = ", ".join(difference_path(difference) for difference, _ in accepted)
+            print(f"  declared   --{name}: {paths}")
     for name, reason in skipped:
         print(f"  skip       --{name}: {reason}")
     for name in vbx_only:
@@ -476,7 +565,8 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
 
     print()
     print(
-        f"{len(matched)} matched, {len(differed)} differed, {len(skipped)} skipped, "
+        f"{len(matched)} matched, {len(differed)} differed, "
+        f"{len(declared)} with declared differences, {len(skipped)} skipped, "
         f"{len(vbx_only)} vbx-only, {len(missing)} missing"
     )
     print()

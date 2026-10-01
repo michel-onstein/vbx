@@ -1226,15 +1226,15 @@ holds *and* it means what it means in bv; otherwise declare it envelope-only.
   with its reason:
   - `source_authority` — bv's report of its multi-source selection: candidates
     ranked by freshness, a stale fallback, per-source authority warnings. vbx
-    resolves one source and ranks none (that is vbx-tvi). Its fields could be
+    resolves one source and ranks none (ADR-024). Its fields could be
     filled in, but `stale: false` and `state: complete` would then assert
     checks vbx never ran.
   - `authority_hash` — a hash of `source_authority`, so it goes with it.
 
 The values are always vbx's own. In a `br` 0.7 workspace bv reads `beads.db`
 where vbx reads `issues.jsonl`; `source_path`, `source_kind`, `data_hash` and
-so `scope_hash` then differ honestly, and that difference is vbx-tvi's, not
-something to fake here.
+so `scope_hash` then differ honestly; ADR-024 keeps vbx's choice rather than
+faking bv's.
 
 **Alternatives.**
 
@@ -1252,6 +1252,68 @@ something to fake here.
 - `Fixtures/demo`, `Fixtures/readiness` and `Fixtures/sprints` match bv 0.25.2
   on every compared command; `--robot-burndown` is compared whole.
 - The readiness `beads.db` section differs only where vbx-tvi/vbx-dj4 already
-  did; `scope_hash` follows `data_hash` there because it hashes it.
-- When vbx-tvi ports bv's source ranking, `source_authority` becomes portable
-  and this decision should be revisited.
+  did; `scope_hash` follows `data_hash` there because it hashes it. ADR-024
+  declares those differences rather than porting bv's source ranking.
+- If vbx ever ports bv's source ranking (ADR-024's revisit trigger),
+  `source_authority` becomes portable and this decision should be revisited.
+
+## ADR-024 — vbx keeps its own read of a beads.db rather than bv 0.25's lossy one
+
+**Date:** 2026-10-01 · **Status:** Accepted, implemented
+
+**Context.** bv 0.25 chooses its source through `internal/datasource`: the
+freshest candidate wins, and in practically every live `br` 0.7 workspace that
+is `beads.db`. vbx's `resolveSource` prefers a non-empty `issues.jsonl` and
+reads `beads.db` only when there is none (vbx-tvi). On `br`'s schema bv's main
+SQLite query fails — it selects `due_date` and `tombstone`, and `br` has
+`due_at` — so bv falls back to `loadIssuesSimple`, which drops `closed_at`,
+`notes`, `design`, `source_repo` and dependency timestamps. vbx's own SQLite
+loader reads every column. So on the readiness fixture as a `beads.db`, after
+vbx-dj4 fixed load order, three differences remained:
+
+- `data_hash` on `--robot-next`, `--robot-suggest` and `--robot-graph`, and
+  `scope_hash`, which hashes it;
+- `--robot-label-health` `velocity.avg_days_to_close`, a float in vbx and an
+  int in bv, which skips the closed bead it cannot see closing;
+- `--robot-triage` `velocity.estimated`, present in bv only, because without
+  `closed_at` it estimates close times from `updated_at`.
+
+The same beads as JSONL match bv on every one of these.
+
+**Decision.** Option (a): vbx keeps reading what it reads today — the JSONL
+where there is one, every column of a `beads.db` where there is not. The three
+differences are declared, not fixed, in `parity-check.py`'s single
+`DECLARED_DIFFERENCES`: scoped to the `readiness (beads.db)` fixture, the named
+command and the exact JSON path, each with its reason. The same paths are
+compared on every JSONL fixture; any other difference on the `beads.db` still
+fails; a declaration that stops firing fails the run; and each is printed as
+`declared`, never as a match.
+
+**Alternatives.**
+
+- *(b) Port bv's source selection.* Rejected. Reading the freshest file would
+  put vbx on `beads.db` in most live workspaces, and several things depend on
+  the JSONL: ADR-015's uncommitted marks diff the record against the same
+  record at `HEAD` through `snapshot_at`, and the database is gitignored.
+  vbx opens a database `mode=ro&immutable=1`, which ignores the WAL — fine for
+  a fallback, stale as the primary source of a workspace `br` is writing — and
+  dropping `immutable` is what makes `br` 0.7.4's next write fail with
+  "recovery in progress" (vbx-1sw). A sandboxed app is granted the file the
+  user chose, not a database and its `-wal`/`-shm` siblings. And the hashes
+  would *still* differ, because vbx reads every column of the database bv
+  reads lossily.
+- *(c) Port the selection and copy `loadIssuesSimple`.* Rejected. It would make
+  the hashes agree by making vbx lose `closed_at`, notes, design and
+  `source_repo` — which the inspector shows and the velocity numbers need — to
+  match what is a bug in bv's query rather than a choice.
+
+**Consequences.**
+
+- `parity-check.py` exits 0 against bv 0.25.2 on every fixture, with five
+  commands on the `beads.db` fixture reported as `declared`.
+- `source_authority`/`authority_hash` stay envelope-only (ADR-023): vbx still
+  ranks no sources.
+- **Revisit** when bv fixes its main SQLite query against `br`'s schema
+  (`due_date` vs `due_at`) — the declarations then stop firing and the run
+  fails, which is the prompt — or when bv exports its source selection, so vbx
+  could adopt it without copying `cmd/bv` or `internal/`.

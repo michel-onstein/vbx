@@ -41,6 +41,16 @@ Two known non-comparisons are declared in the harness rather than hidden:
 fields at the top level, and `--robot-label-attention`, because bv projects a
 ranked subset where vbx returns the full result.
 
+Three known differences are declared too, on the `beads.db` form of the
+readiness fixture only (ADR-024): `data_hash` (and `scope_hash`, which hashes
+it) on `--robot-next`, `--robot-suggest` and `--robot-graph`, and the
+closed-time velocity in `--robot-label-health` and `--robot-triage`. bv 0.25.2
+reads a `br` database through a lossy fallback that drops `closed_at`, notes
+and design, and vbx deliberately does not copy it. Each is scoped to that
+fixture, that command and that exact path, printed as `declared` rather than
+as a match, compared normally on every JSONL fixture — and a declaration that
+stops firing fails the run.
+
 The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.
 

@@ -19,12 +19,12 @@ import (
 //   - source_authority and authority_hash are not. They report bv's
 //     multi-source selection — candidates ranked by freshness, a stale
 //     fallback, per-source authority warnings — and vbx resolves one source
-//     without ranking any (vbx-tvi). A ported value would assert checks vbx
+//     without ranking any (ADR-024). A ported value would assert checks vbx
 //     never ran, so the parity harness declares them envelope-only instead.
 //
 // The values are vbx's own, never bv's: in a br 0.7 workspace bv reads
 // beads.db where vbx reads issues.jsonl, and the two then disagree on
-// source_path and source_kind. That difference is vbx-tvi's, not this file's.
+// source_path and source_kind. ADR-024 keeps vbx's choice; see it for why.
 
 // provenanceScope is the scoping a payload was computed under, for its
 // scope_hash. The zero value is the whole project.
