@@ -5,6 +5,19 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — br 0.7's database side files are ignored (vbx-1a7)
+
+`.beads/.gitignore` now covers what br 0.7.4 (fsqlite 0.3) writes beside its
+database: `-wal-cert`/`-wal-cert-head`, `.fsqlite-migration-state`, the
+`.vacuum-*` copies `br doctor migrate-schema apply` leaves, `.write-waiters.lock/`
+and the `.br-wal-index-*/` quarantine directories. The rules follow br's own
+`BEADS_GITIGNORE`, plus the quarantines it omits.
+`test_beads_side_files_are_ignored` in `test-packaging.py` checks every observed
+name, and that `.gitignore`, `config.yaml` and `issues.jsonl` stay tracked and
+unignored. See BUGS.md.
+
+---
+
 ## 2026-10-01 — Multi-repository workspaces open without spawning a tracker (vbx-jvj)
 
 The app no longer runs `br update --help` or `bd export` when it opens or
