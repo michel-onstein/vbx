@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
 
@@ -79,17 +78,6 @@ func scopeIDs(issues []model.Issue, scope provenanceScope) []string {
 	}
 	sort.Strings(ids)
 	return ids
-}
-
-// labelScope is bv's --label scope: the label's core beads are the
-// candidates. An unknown label selects nothing, as in bv.
-func labelScope(issues []model.Issue, label string) provenanceScope {
-	if label == "" {
-		return provenanceScope{}
-	}
-	subgraph := analysis.ComputeLabelSubgraph(issues, label)
-	candidates := append([]string{}, subgraph.CoreIssues...)
-	return provenanceScope{label: label, candidates: candidates}
 }
 
 // provenance returns the envelope keys vbx ports, for a payload computed over

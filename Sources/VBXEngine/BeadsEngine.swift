@@ -155,8 +155,19 @@ public actor BeadsEngine {
         Set(try call("actionable", as: ActionableResponse.self).ids)
     }
 
-    public func executionPlan() throws -> ExecutionPlan {
-        try call("plan", as: ExecutionPlan.self)
+    /// The execution plan. A `label` plans bv's label scope — the label's
+    /// beads and their direct dependency neighbours, with only the labelled
+    /// beads offered as work.
+    public func executionPlan(label: String? = nil) throws -> ExecutionPlan {
+        try call("plan", request: Self.labelScope(label), as: ExecutionPlan.self)
+    }
+
+    /// The request carrying bv's global `--label` scope, or nil for the whole
+    /// project. The engine applies it in one place for every method that
+    /// accepts it.
+    static func labelScope(_ label: String?) -> [String: Any]? {
+        guard let label, !label.isEmpty else { return nil }
+        return ["label": label]
     }
 
     public func graphEdges() throws -> [GraphEdge] {
@@ -167,8 +178,10 @@ public actor BeadsEngine {
         try call("unblocks", request: ["id": id], as: UnblocksResponse.self).unblocks
     }
 
-    public func triage() throws -> Triage {
-        try call("triage", as: Triage.self)
+    /// What to work on next. A `label` ranks within bv's label scope, as
+    /// `executionPlan(label:)` does.
+    public func triage(label: String? = nil) throws -> Triage {
+        try call("triage", request: Self.labelScope(label), as: Triage.self)
     }
 
     public func labelHealth() throws -> LabelAnalysis {

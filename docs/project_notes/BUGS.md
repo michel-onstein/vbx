@@ -4,6 +4,37 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — `--label` scoped the graph and nothing else
+
+**Symptom:** on `Fixtures/demo`, `vbx-cli --robot-triage --label engine`
+reported 18 issues where bv 0.25.2 reports 13; `--robot-plan` planned 3
+actionable beads where bv plans 1, `--robot-priority` had vbx-3 unblocking 6
+where bv has 1, and every envelope came back unscoped — no `scope`, and the
+unscoped `scope_hash`. Insights and next were likewise unscoped. (vbx-4cz)
+
+**Cause:** bv's `--label` is one global scope (`scopeLoadedIssues`), applied
+before any handler runs. vbx-7dm ported it for `--robot-graph` only, as
+`Session.labelGraph`; vbx-cli never forwarded `--label` to the other six
+commands, and their engine methods had nowhere to take it.
+
+**Fix:** `Session.view` (`scope.go`) is the one scoping step: the label
+subgraph's issues, an analyzer built afresh over them with the core beads as
+readiness candidates, the unscoped data hash, and the provenance scope behind
+`scope_hash`. Graph, triage, plan, priority, next, suggest and insights all
+read it; `labelGraph` and `labelScope` are gone. vbx-cli forwards `--label`
+through one `labelScoped` flag on the command table. Two empty-selection
+encodings came out of it too: priority wrote `recommendations: null` where bv
+writes `[]` (the filter reused a nil slice), and insights wrote
+`articulation_points: []` where bv writes `null`.
+
+**Regression test:** `scope_test.go` (triage, plan, priority, suggest and
+insights pinned to bv 0.25.2's answers for `engine` and `no-such-label`, and
+every envelope's `scope`/`scope_hash`), `labelScopedTriageAndPlan` in
+`EngineTests.swift`, and each command's `--label engine` / `--label
+no-such-label` run in `parity-check.py`.
+
+---
+
 ## 2026-10-01 — A label-scoped graph dropped the label's dependency context
 
 **Symptom:** on `Fixtures/demo`, `vbx-cli --robot-graph --label engine`

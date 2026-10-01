@@ -1220,8 +1220,10 @@ holds *and* it means what it means in bv; otherwise declare it envelope-only.
   - `source_kind` — vbx's own kind in bv's vocabulary: its local JSONL is
     `jsonl_local`, `sqlite` and `workspace` are as named.
   - `scope_hash` — bv's `robotScopeHash` verbatim: label, recipe, repo, the
-    unscoped data hash and the sorted candidate ids. A label-scoped graph uses
-    the label's core beads as bv's `--label` does, and reports `scope.label`.
+    unscoped data hash and the sorted candidate ids. Under a label — graph,
+    triage, plan, priority, next, suggest and insights, all through
+    `Session.view` — the ids are the label's core beads as bv's `--label`
+    makes them, and the envelope reports `scope.label`.
 - **Envelope-only**, in `parity-check.py`'s single `ENVELOPE_ONLY_KEYS`, each
   with its reason:
   - `source_authority` — bv's report of its multi-source selection: candidates

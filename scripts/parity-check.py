@@ -261,9 +261,21 @@ COMPARISONS = [
     # never passes --label checks none of that (vbx-7dm). `name` tells each
     # apart from its unscoped run in the report and in DECLARED_DIFFERENCES.
     # Over the demo only: `engine` is a demo label, and the unknown label is
-    # the empty selection, which still has to carry its envelope.
-    {"vbx": "robot-graph", "bv": "robot-graph", "name": f"robot-graph --label {label}",
-     "vbx_args": ["--label", label], "bv_args": ["--label", label], "only": {"demo"}}
+    # the empty selection, which still has to carry its envelope. Each command
+    # compares the same subtree as its unscoped run; insights, whose top level
+    # bv shapes differently, compares the metrics themselves (vbx-4cz).
+    {"vbx": command, "bv": command, "name": f"{command} --label {label}",
+     "vbx_args": ["--label", label], "bv_args": ["--label", label], "only": {"demo"},
+     **paths}
+    for command, paths in (
+        ("robot-graph", {}),
+        ("robot-triage", {"bv_path": "triage"}),
+        ("robot-plan", {"bv_path": "plan"}),
+        ("robot-priority", {"bv_path": "recommendations", "vbx_path": "recommendations"}),
+        ("robot-next", {}),
+        ("robot-suggest", {}),
+        ("robot-insights", {"bv_path": "full_stats", "vbx_path": "full_stats"}),
+    )
     for label in ("engine", "no-such-label")
 ] + [
     # Label-scoped commands that do not match yet, each a skip naming the bead
@@ -271,12 +283,6 @@ COMPARISONS = [
     {"vbx": command, "bv": command, "name": f"{command} --label", "compare": False,
      "note": note}
     for command, note in (
-        ("robot-triage", "vbx-cli ignores the global --label scope (vbx-4cz)"),
-        ("robot-plan", "vbx-cli ignores the global --label scope (vbx-4cz)"),
-        ("robot-priority", "vbx-cli ignores the global --label scope (vbx-4cz)"),
-        ("robot-next", "vbx-cli ignores the global --label scope (vbx-4cz)"),
-        ("robot-suggest", "vbx-cli ignores the global --label scope (vbx-4cz)"),
-        ("robot-insights", "vbx-cli ignores the global --label scope (vbx-4cz)"),
         ("robot-alerts", "vbx's --label keeps every alert, unlike bv's --alert-label (vbx-jnm)"),
         ("robot-capacity", "differs from bv's --capacity-label, scoped or not (vbx-ko1)"),
     )

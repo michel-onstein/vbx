@@ -193,6 +193,30 @@ func executionPlan() async throws {
     await engine.close()
 }
 
+@Test("A label scopes triage and the plan to bv's label subgraph")
+func labelScopedTriageAndPlan() async throws {
+    let engine = BeadsEngine()
+    _ = try await engine.open(path: fixturePath)
+
+    // bv 0.25.2 over the demo: --robot-plan --label engine plans vbx-3 alone,
+    // and --robot-triage --label engine recommends vbx-3, vbx-16, vbx-10.
+    let plan = try await engine.executionPlan(label: "engine")
+    #expect(plan.tracks.flatMap { $0.items.map(\.id) } == ["vbx-3"])
+    let triage = try await engine.triage(label: "engine")
+    #expect(triage.recommendations.map(\.id) == ["vbx-3", "vbx-16", "vbx-10"])
+
+    // An unknown label is the empty selection, not the whole project.
+    #expect(try await engine.executionPlan(label: "no-such-label").tracks.isEmpty)
+    #expect(try await engine.triage(label: "no-such-label").recommendations.isEmpty)
+
+    // No label, or an empty one, is the whole project.
+    #expect(try await engine.executionPlan(label: "").totalActionable
+        == engine.executionPlan().totalActionable)
+    #expect(try await engine.executionPlan().totalActionable > 1)
+
+    await engine.close()
+}
+
 @Test("Graph edges are returned for the dependency DAG")
 func graphEdges() async throws {
     let engine = BeadsEngine()
