@@ -275,3 +275,88 @@ func recoveryRetryThroughRealProcess() async throws {
     let calls = try String(contentsOf: dir.appendingPathComponent("calls"), encoding: .utf8)
     #expect(calls == "update vbx-6 --priority 3 --json\n" + "update vbx-6 --priority 3 --json\n")
 }
+
+// MARK: - Which message a failure surfaces (vbx-jmu)
+
+/// The failure `br` 0.7.4 produced in vbx-1sw: its error JSON on stdout and
+/// the pager's log on stderr, the one kept line repeated to the 24 it printed.
+private let noisyRecoveryStderr = String(repeating: recoveryStderr, count: 24)
+
+/// What the failure message of a run resolves to, through the writer.
+@MainActor
+private func surfacedMessage(_ output: BeadWriter.Output) async -> String? {
+    let writer = BeadWriter(locate: { "/fake/br" }, runner: { _, _ in output })
+    do {
+        try await writer.setTitle("New", for: "vbx-3", in: "/tmp/w")
+    } catch BeadWriter.WriteError.failed(_, let message) {
+        return message
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+    return nil
+}
+
+@MainActor
+@Test("br 0.7.4's JSON error is what a failed edit shows, not the pager log on stderr")
+func jsonErrorBeatsNoisyStderr() async {
+    // The recovery failure is retried once and fails again here; what matters
+    // is which stream the second failure is reported from.
+    let message = await surfacedMessage(
+        .init(status: 2, standardOutput: recoveryStdout, standardError: noisyRecoveryStderr))
+    #expect(
+        message
+            == "Database error: database is busy (recovery in progress) — The WAL index "
+            + "(.beads/beads.db-shm) must be rebuilt before br can read the database.")
+    #expect(message?.contains("fsqlite_pager") == false)
+}
+
+@MainActor
+@Test("A JSON error with a null hint shows its message alone")
+func jsonErrorWithoutHint() async {
+    // Verbatim from br 0.6.0 and 0.7.4 alike, for `update <id> --title "" --json`.
+    let stdout = """
+        {
+          "error": {
+            "code": "VALIDATION_FAILED",
+            "message": "Validation failed: title: cannot be empty",
+            "hint": null,
+            "retryable": true,
+            "context": {
+              "field": "title",
+              "reason": "cannot be empty"
+            }
+          }
+        }
+        """
+    let message = await surfacedMessage(.init(status: 4, standardOutput: stdout, standardError: ""))
+    #expect(message == "Validation failed: title: cannot be empty")
+}
+
+@Test("The JSON error decodes tolerantly: unknown fields ignored, hint optional")
+func structuredErrorIsTolerant() {
+    #expect(
+        BeadWriter.structuredError(in: #"{"error":{"message":"Issue not found: t-1","new":[1]}}"#)
+            == .init(message: "Issue not found: t-1", hint: nil))
+    // Not the shape, or no message to show: not a structured error at all.
+    #expect(BeadWriter.structuredError(in: #"{"id":"t-1"}"#) == nil)
+    #expect(BeadWriter.structuredError(in: #"{"error":{"message":"  "}}"#) == nil)
+    #expect(BeadWriter.structuredError(in: "error: unexpected argument '--nope'") == nil)
+}
+
+@MainActor
+@Test("A failure with no JSON error still shows its stderr")
+func plainStderrStillShown() async {
+    let message = await surfacedMessage(
+        .init(
+            status: 2, standardOutput: "",
+            standardError: "error: unexpected argument '--nope' found\n"))
+    #expect(message == "error: unexpected argument '--nope' found")
+}
+
+@MainActor
+@Test("A failure with neither JSON nor stderr shows stdout as it is")
+func plainStdoutAsLastResort() async {
+    let message = await surfacedMessage(
+        .init(status: 1, standardOutput: "something broke\n", standardError: ""))
+    #expect(message == "something broke")
+}

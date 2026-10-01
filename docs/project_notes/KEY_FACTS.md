@@ -164,6 +164,11 @@ view snapshots for inspection.
   is unaffected, and vbx's own `mode=ro&immutable=1` reader does not trigger
   it. `BeadWriter` re-sends that one failure once (vbx-1sw), so an edit can
   take ~17 s rather than failing.
+- **A failed `br … --json` puts its error on stdout, not stderr.** Both 0.6.0
+  and 0.7.4 print `{"error":{"code","message","hint","retryable","context"}}`
+  (`hint` may be `null`) with an empty stderr for an unknown id, an invalid
+  priority or an empty title; 0.7.4 can add pager log lines on stderr.
+  `BeadWriter.failureMessage` shows the JSON's message and hint first (vbx-jmu).
 - **`Bundle.main` in the test process is SwiftPM's helper binary** —
   `…/XcodeDefault.xctoolchain/usr/libexec/swift/pm`, measured, not assumed. It
   has no `CFBundleShortVersionString` and no `CFBundleVersion`, so the About
