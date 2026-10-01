@@ -241,7 +241,12 @@ them.
 - **Triage includes a bounded git-history walk**, because bv's does and it
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable
-  from a low one.
+  from a low one. **It runs only where bv's does:** not under
+  SOURCE_DATE_EPOCH (`skipped`), and not unless the workspace directory itself
+  holds `.git` — bv never looks further up, though vbx's object store would
+  (`error`). Either way the history is nil and staleness is absent; an empty
+  report instead makes `ComputeStaleness` fall back to `updated_at`. See
+  BUGS.md, 2026-10-01 (vbx-8u3).
 - **Only vbx-cli resolves the live tracker.** Claim and show commands come from
   bv's `loader.AttachIssueOrigins`, which runs `br update --help` — a
   subprocess the App Sandbox forbids. The session's `live_tracker_actions`

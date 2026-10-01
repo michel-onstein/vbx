@@ -305,17 +305,28 @@ func timeNow() time.Time { return time.Now() }
 // needs exact comparison, because a tolerance wide enough to absorb the clock
 // is wide enough to hide a real difference.
 func robotNow() time.Time {
-	raw := os.Getenv("SOURCE_DATE_EPOCH")
-	if raw == "" {
-		return time.Now()
-	}
-	seconds, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if err != nil {
+	seconds, ok := sourceDateEpoch()
+	if !ok {
 		// An unparseable value is ignored rather than treated as the epoch,
 		// which would make everything look infinitely stale.
 		return time.Now()
 	}
 	return time.Unix(seconds, 0).UTC()
+}
+
+// sourceDateEpoch reads SOURCE_DATE_EPOCH, reporting whether it is set to a
+// usable value. bv's `sourceDateEpochActive` draws the same line: a blank or
+// unparseable value pins nothing.
+func sourceDateEpoch() (int64, bool) {
+	raw := strings.TrimSpace(os.Getenv("SOURCE_DATE_EPOCH"))
+	if raw == "" {
+		return 0, false
+	}
+	seconds, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return seconds, true
 }
 
 // pinClock sets the analyzer's reference instant to robotNow() for the call
@@ -754,9 +765,13 @@ func (s *Session) triage() ([]byte, error) {
 
 	historyStatus := "skipped"
 	if hasOpenIssues(issues) {
-		report, status := s.triageHistory()
-		opts.History = historyForTriage(report)
-		historyStatus = status
+		if gated := s.triageHistoryGate(); gated != "" {
+			historyStatus = gated
+		} else {
+			report, status := s.triageHistory()
+			opts.History = historyForTriage(report)
+			historyStatus = status
+		}
 	}
 
 	result := analysis.ComputeTriageWithOptionsAndTime(issues, opts, robotNow())
@@ -833,6 +848,40 @@ func hasOpenIssues(issues []model.Issue) bool {
 		}
 	}
 	return false
+}
+
+// triageHistoryGate decides, before any walk, whether triage may use git
+// history at all, returning the status to report when it may not and "" when
+// it may.
+//
+// Both refusals are bv's (`handleRobotTriage` in v0.25.2), and both leave the
+// history nil — so staleness is *absent* — rather than handing the scorer an
+// empty report. That distinction is the whole point: given a report with no
+// events for a bead, `ComputeStaleness` falls back to `updated_at` and reports
+// a staleness bv never would. That is how an untracked fixture once showed
+// spr-12 as 28 days stale in vbx and nothing at all in bv (vbx-8u3).
+//
+//   - SOURCE_DATE_EPOCH pinned: "skipped". A git walk raced against a
+//     wall-clock deadline cannot produce stable bytes, which is the only
+//     reason to pin the clock.
+//   - The workspace directory — the one holding `.beads` — is not itself a
+//     git checkout with a JSONL beads file: "error". bv checks for `.git`
+//     right there and never looks further up, so a workspace nested inside
+//     somebody's repository gets no history signal. vbx's object store
+//     *would* find the enclosing repository, and the History view still uses
+//     it; only triage's score has to agree with bv. bv omits the status in
+//     this case; vbx says "error" so an absent signal never reads as a low
+//     one.
+func (s *Session) triageHistoryGate() string {
+	if _, pinned := sourceDateEpoch(); pinned {
+		return "skipped"
+	}
+	// An empty directory would make the check read the process's own working
+	// directory instead.
+	if dir := s.projectDir(); dir == "" || correlation.ValidateRepository(dir) != nil {
+		return "error"
+	}
+	return ""
 }
 
 // triageHistory fetches the correlation report within a bounded time.

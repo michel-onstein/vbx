@@ -5,6 +5,18 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Triage uses git history only where bv does (vbx-8u3)
+
+`Session.triageHistoryGate` ports bv 0.25.2's two refusals before the triage
+history walk: none under SOURCE_DATE_EPOCH (`history_status: skipped`), and
+none unless the workspace directory itself holds `.git` and a JSONL beads file
+(`error`). Either way staleness is absent, where vbx used to walk up to an
+enclosing repository and fall back to `updated_at`. A workspace nested inside a
+repository therefore no longer gets a staleness factor in triage, matching bv;
+the History view is unchanged. Regression tests in
+`triage_staleness_test.go`; see BUGS.md. Parity with bv 0.25.2: 0 differing
+commands before and after.
+
 ## 2026-10-01 — Parity declares the beads.db differences vbx keeps on purpose (vbx-tvi, vbx-dj4)
 
 Decided option (a), recorded as ADR-024: vbx keeps preferring the JSONL and
