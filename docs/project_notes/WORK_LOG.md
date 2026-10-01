@@ -5,6 +5,18 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — The watcher debounce is tested on a virtual clock (vbx-7a2)
+
+`FileWatchService`'s debounce moved into `Debouncer`, which takes an injected
+scheduler. `DebouncerTests` assert the debounce deterministically, and the
+real-FSEvents test bounds its notifications by the event gaps it measured
+rather than by a fixed count. Before the change, the old test failed 3/3 with
+its write gap forced to 200 ms. After it, `watcherFires` and the debouncer tests
+passed 30/30 idle, 30/30 under 36 CPU burners, and 30/30 under burners plus
+SIGSTOP freezes of the runner. App behaviour is unchanged; see BUGS.md.
+
+---
+
 ## 2026-10-01 — A beads.db lists beads in bv's order (vbx-dj4, part)
 
 `LoadSQLite` now orders rows `ORDER BY updated_at DESC`, as bv 0.25.2's reader

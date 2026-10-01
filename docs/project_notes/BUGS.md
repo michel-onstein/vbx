@@ -4,6 +4,34 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — The watcher debounce test failed under a loaded suite
+
+**Symptom:** `The watcher fires on a real file change and debounces a burst`
+failed once in a full `swift test` run (`fired <= 3`, 14 s instead of ~1.5 s)
+and passed alone and on the rerun. (vbx-7a2)
+
+**Cause:** the test, not the watcher. It spaced four writes 20 ms apart against
+a 0.15 s debounce and then demanded at most three notifications. When a loaded
+scheduler stretched those sleeps past the window, each write *correctly* fired
+on its own, and the fixed threshold called that a failure. Running the old test
+with the gap set to 200 ms fails every time (`fired 5×`). Neither CPU burners
+nor freezing the runner with SIGSTOP reproduced it, because both slow the writes
+and the delivery together.
+
+**Fix:** the debounce is now `Debouncer`, run by an injected scheduler. Its
+collapse property is pinned on a virtual clock in `DebouncerTests`, with no
+sleeps at all. The real-FSEvents test records when each event reached the
+debounce and bounds the notifications by the gaps it actually saw: at most one
+per gap of a window or more, plus one. It also polls for the first notification
+instead of sleeping a fixed 900 ms.
+
+**Regression test:** `DebouncerTests` (burst collapses, spaced signals do not,
+a signal restarts the window, cancel) and `watcherFires` in `WatchTests`. With
+the inter-write gap forced to 200 ms, the new test passes where the old one
+failed. Removing the cancel from `Debouncer.signal()` fails both.
+
+---
+
 ## 2026-10-01 — A beads.db listed equal-ranked beads in a different order from bv
 
 **Symptom:** on a beads.db workspace, lists whose entries tie (the 18 stale
