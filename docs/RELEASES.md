@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.2.6 — 2026-10-01
+
+### Fixes
+
+- Edits no longer fail after bv reads the workspace with br 0.7.4 ([#83](https://github.com/michel-onstein/vbx/pull/83))
+
 ## 0.2.5 — 2026-10-01
 
 ### Fixes
