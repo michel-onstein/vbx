@@ -130,7 +130,12 @@ public final class BeadWriter: ObservableObject {
 
     private func run(_ arguments: [String], in workspace: String) async throws {
         guard let executable else { throw WriteError.unavailable }
-        let output = try await runner([executable] + arguments, workspace)
+        var output = try await runner([executable] + arguments, workspace)
+        if Self.isRecoveryInProgress(output) {
+            // One retry, and only one: the failed attempt is what finishes the
+            // recovery, so a second failure is a real problem worth showing.
+            output = try await runner([executable] + arguments, workspace)
+        }
         guard output.succeeded else {
             let message =
                 output.standardError.isEmpty
@@ -139,6 +144,26 @@ public final class BeadWriter: ObservableObject {
                 command: "br " + arguments.joined(separator: " "),
                 message: message.trimmingCharacters(in: .whitespacesAndNewlines))
         }
+    }
+
+    /// The text `br` 0.7.4 fails with on the first write after a stock SQLite
+    /// reader has opened `beads.db`.
+    static let recoveryInProgress = "database is busy (recovery in progress)"
+
+    /// Whether a failed run is `br` 0.7.4's transient "recovery in progress".
+    ///
+    /// Once any ordinary SQLite client (`bv`, `sqlite3`) has opened the
+    /// database, the next `br` 0.7.4 write retries for about 17 s and exits 2
+    /// with `DATABASE_ERROR` — the error JSON on stdout, the retry log on
+    /// stderr — and the write after it succeeds. `br` 0.6.0 does not do this.
+    /// Every edit vbx sends is idempotent (set a priority, set a title, add or
+    /// remove a label), so re-sending it is safe whether or not the failed
+    /// attempt landed. Matched on the exact text and a non-zero exit, so no
+    /// other failure is retried.
+    nonisolated static func isRecoveryInProgress(_ output: Output) -> Bool {
+        !output.succeeded
+            && (output.standardOutput.contains(recoveryInProgress)
+                || output.standardError.contains(recoveryInProgress))
     }
 
     /// Finds `br` on disk.

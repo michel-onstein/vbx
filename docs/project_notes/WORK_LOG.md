@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Edits survive `br` 0.7.4's "recovery in progress" (vbx-1sw)
+
+`BeadWriter` re-sends a write once when `br` 0.7.4 fails it with `database is
+busy (recovery in progress)` — what the first write after `bv` or `sqlite3` has
+opened `beads.db` does — instead of surfacing pager log lines as the error. Five
+tests in `BeadWriterTests.swift`, one through the real process runner with a
+stub `br`; bug log and key facts entries of the same date. Upstream report
+drafted for `beads_rust`, not yet filed.
+
+---
+
 ## 2026-10-01 — Fixture copies no longer carry a stale `br` database (vbx-fcq)
 
 The test helpers that copy `Fixtures/demo` now go through
