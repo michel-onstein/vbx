@@ -43,16 +43,8 @@ func (s *Session) bindOrigins(issues []model.Issue, source string, complete bool
 	bindAppOrigins(issues)
 }
 
-// bindWorkspaceOrigins handles a multi-repository load.
-//
-// bv's workspace loader binds origins itself, per repository and before it
-// namespaces the ids, so the CLI has nothing to add. The app replaces those
-// bindings with its own, keeping the local id bv recorded.
-func (s *Session) bindWorkspaceOrigins(issues []model.Issue) {
-	if !s.config.LiveTrackerActions {
-		bindAppOrigins(issues)
-	}
-}
+// A multi-repository load binds per repository, before the ids are
+// namespaced, through the same choice — see `Session.workspaceReader`.
 
 // bindAppOrigins gives every bead an origin that names it and explains why it
 // has no runnable actions.

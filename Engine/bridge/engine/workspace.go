@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,7 +17,9 @@ import (
 //
 // A `.bv/workspace.yaml` aggregates several repositories into one graph. bv's
 // loader does the work — including namespacing each repo's ids by its prefix —
-// so this is discovery, bookkeeping and reporting which repo a bead came from.
+// through vbx's port of it (workspace_loader.go), which differs only in never
+// spawning a tracker from the app. This is bookkeeping and reporting which repo
+// a bead came from.
 //
 // The namespacing matters more than it looks: two repositories can each hold a
 // `vbx-1`, and without a prefix one would silently overwrite the other in
@@ -50,13 +51,15 @@ func findWorkspaceConfig(path string) string {
 
 // loadWorkspace aggregates every repository the configuration names.
 //
-// bv's workspace loader drops tombstone records itself and reports their
+// The workspace loader drops tombstone records itself and reports their
 // namespaced ids instead; those come back as tombstoneIDs so a deleted blocker
-// still counts as resolved, exactly as bv's own workspace mode treats it.
-func loadWorkspace(configPath string) (
+// still counts as resolved, exactly as bv's own workspace mode treats it. The
+// loader is vbx's port of bv's, because bv's spawns trackers — see
+// workspace_loader.go.
+func loadWorkspace(configPath string, reader workspaceReader) (
 	issues []model.Issue, loads []repoLoad, warnings []string, tombstoneIDs []string, err error,
 ) {
-	issues, results, err := workspace.LoadAllFromConfig(context.Background(), configPath)
+	issues, results, err := loadAllFromConfig(configPath, reader)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
 	}
@@ -89,12 +92,11 @@ func loadWorkspace(configPath string) (
 // loadWorkspaceSession loads every repository the configuration names and
 // analyses them as one graph.
 func (s *Session) loadWorkspaceSession(configPath string) error {
-	records, loads, warnings, tombstoneIDs, err := loadWorkspace(configPath)
+	records, loads, warnings, tombstoneIDs, err := loadWorkspace(configPath, s.workspaceReader())
 	if err != nil {
 		return err
 	}
 
-	s.bindWorkspaceOrigins(records)
 	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
 	analyzer, stats := s.analyse(issues, readiness)
 
@@ -115,7 +117,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 // reloadWorkspace re-aggregates every repository, gated on the content hash
 // exactly as the single-repository path is.
 func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
-	records, loads, warnings, tombstoneIDs, err := loadWorkspace(configPath)
+	records, loads, warnings, tombstoneIDs, err := loadWorkspace(configPath, s.workspaceReader())
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +138,6 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 		return withChangedFlag(payload, false)
 	}
 
-	s.bindWorkspaceOrigins(records)
 	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
 	analyzer, stats := s.analyse(issues, readiness)
 

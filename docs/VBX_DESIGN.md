@@ -582,7 +582,9 @@ without re-analysing, so an incidental touch does not cost a re-render.
 - bv 0.25 also spawns `br update --help` to bind each bead to its live tracker, which is
   where claim and show commands come from. Only `vbx-cli` opens a session with
   `live_tracker_actions`; in the app every bead's actions say why they are unavailable
-  ([ADR-020](project_notes/DECISIONS.md)).
+  ([ADR-020](project_notes/DECISIONS.md)). Multi-repository workspaces load through a port
+  of bv's workspace loader for the same reason: bv's binds origins, and runs `bd export`,
+  unconditionally.
 
 ---
 

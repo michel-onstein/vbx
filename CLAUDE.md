@@ -225,6 +225,11 @@ them.
   **after `br create`, run `python3 scripts/beads-check.py --fix`**. The check
   is in the verify block, which is what makes forgetting a build failure instead
   of silent drift. The real fix is upstream in `beads_rust`. See ADR-018.
+- **Never call bv's `workspace.LoadAllFromConfig` or `AggregateLoader`.** In
+  v0.25.2 they run `br update --help` and `bd export` unconditionally, which the
+  App Sandbox forbids. Workspaces load through `workspace_loader.go`, a port
+  whose tracker access is the session's choice, and `TestWorkspaceLoaderMatchesBV`
+  holds it to bv's. See ADR-020 and BUGS.md, 2026-10-01.
 - **Triage includes a bounded git-history walk**, because bv's does and it
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable

@@ -1050,11 +1050,15 @@ gates, in bv's order, with the claim command taken from the bead's actions.
 
 **Consequences.**
 
-- The app never spawns `br` from the engine **for a single-repository
-  workspace**. A `.bv/workspace.yaml` multi-repository load still goes through
-  bv's `workspace.LoadAllFromConfig`, which binds origins itself; the app
-  replaces those bindings afterwards, but the probe has already run. Tracked as
-  "Stop bv's workspace loader spawning br in the sandboxed app" (vbx-jvj).
+- The app never spawns a tracker from the engine, for a single repository or a
+  `.bv/workspace.yaml` workspace. bv's `workspace.LoadAllFromConfig` binds
+  origins inside itself and refreshes a Dolt repository's export with
+  `bd export`, with no option to skip either in v0.25.2, so vbx loads
+  workspaces through a port of bv's `AggregateLoader`
+  (`Engine/bridge/engine/workspace_loader.go`) whose binding and refresh are
+  the session's choice. `TestWorkspaceLoaderMatchesBV` holds the port to bv's
+  loader, origins included, given bv's choices. The app reads a Dolt
+  repository's existing export, as it does for a single repository (vbx-jvj).
 - A load with a malformed record is not claim-safe: triage withdraws every
   claim (bv's `suppressUnprovenTriageClaims`) and `--robot-next` answers
   `source_authority_incomplete`.
