@@ -98,7 +98,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
-	analyzer, stats := s.analyse(issues, readiness)
+	analyzer, stats := s.analyse(issues, readiness, nil)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -139,7 +139,7 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
-	analyzer, stats := s.analyse(issues, readiness)
+	analyzer, stats := s.analyse(issues, readiness, nil)
 
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings

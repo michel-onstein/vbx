@@ -5,6 +5,19 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — `--label` scopes every label-aware robot command (vbx-4cz)
+
+`vbx-cli --label` is now bv 0.25.2's global scope on `--robot-triage`,
+`--robot-plan`, `--robot-priority`, `--robot-next`, `--robot-suggest` and
+`--robot-insights` as well as `--robot-graph`: each answers over the label's
+subgraph, recommends only labelled beads, and carries `scope` and the scoped
+`scope_hash`. One engine step (`Session.view`, `scope.go`) replaces vbx-7dm's
+graph-only `labelGraph`; `BeadsEngine.triage(label:)` and
+`executionPlan(label:)` expose it to Swift. Alerts (vbx-jnm) and capacity
+(vbx-ko1) keep their own `--label` filter. Parity with bv 0.25.2: 0 differing
+commands before and after; the six vbx-4cz skips became twelve comparisons
+(known and unknown label). See BUGS.md.
+
 ## 2026-10-01 — Label-scoped graph export matches bv (vbx-7dm)
 
 `vbx-cli --robot-graph --label` exports bv 0.25.2's label subgraph — the

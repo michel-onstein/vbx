@@ -42,6 +42,7 @@ func (s *Session) suggest(req []byte) ([]byte, error) {
 		Type          string  `json:"type"`
 		MinConfidence float64 `json:"min_confidence"`
 		Bead          string  `json:"bead"`
+		Label         string  `json:"label"`
 	}
 	if len(req) > 0 {
 		if err := json.Unmarshal(req, &r); err != nil {
@@ -71,10 +72,12 @@ func (s *Session) suggest(req []byte) ([]byte, error) {
 			"invalid suggest type %q (use: duplicate, dependency, label, cycle)", r.Type)
 	}
 
-	issues, _, _ := s.snapshot()
+	// Suggestions are drawn from the label's subgraph under a label, and
+	// stamped with the unscoped data hash, as bv's are.
+	v := s.view(r.Label)
 	_, hash := s.robotEnvelope()
 	return s.withProvenance(
-		analysis.GenerateRobotSuggestOutput(issues, config, hash), hash, provenanceScope{})
+		analysis.GenerateRobotSuggestOutput(v.issues, config, hash), hash, v.scope)
 }
 
 // priority ranks beads whose priority looks wrong, with the reasoning.
@@ -84,6 +87,9 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 		MaxResults    int     `json:"max_results"`
 		ByLabel       string  `json:"by_label"`
 		ByAssignee    string  `json:"by_assignee"`
+		// Label is bv's global --label scope (scope.go), not ByLabel's filter:
+		// it changes the graph the recommendations are computed over.
+		Label string `json:"label"`
 	}
 	if len(req) > 0 {
 		if err := json.Unmarshal(req, &r); err != nil {
@@ -91,7 +97,8 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 		}
 	}
 
-	issues, analyzer, stats := s.snapshot()
+	v := s.view(r.Label)
+	issues, analyzer, stats := v.issues, v.analyzer, v.stats
 	if analyzer == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
@@ -111,7 +118,9 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 	// The filters are applied in bv's order, and each one drops a
 	// recommendation whose issue is missing rather than keeping it — an
 	// unresolvable recommendation cannot be acted on.
-	filtered := recommendations[:0]
+	// Allocated, never recommendations[:0]: with nothing to recommend that
+	// slice is nil and encodes as null, where bv writes [].
+	filtered := make([]analysis.EnhancedPriorityRecommendation, 0, len(recommendations))
 	for _, rec := range recommendations {
 		if r.MinConfidence > 0 && rec.Confidence < r.MinConfidence {
 			continue
@@ -170,7 +179,7 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 			"recommendations": len(filtered),
 			"high_confidence": highConfidence,
 		},
-	}, hash, provenanceScope{})
+	}, hash, v.scope)
 }
 
 func containsExact(values []string, needle string) bool {
@@ -247,8 +256,16 @@ func diagnosticFromPick(pick analysis.TopPick) *nextDiagnosticPick {
 // origin, never a string assembled here: bv 0.25 replaced the old
 // `--status=in_progress` form with the atomic claim, and only a bead whose
 // tracker advertises it gets one.
+//
+// A `label` in the request picks from the label's subgraph (scope.go), and
+// only a labelled bead can be the pick.
 func (s *Session) next(req []byte) ([]byte, error) {
-	issues, analyzer, stats := s.snapshot()
+	label, err := labelRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	v := s.view(label)
+	issues, stats := v.issues, v.stats
 	if stats != nil {
 		stats.WaitForPhase2()
 	}
@@ -261,10 +278,9 @@ func (s *Session) next(req []byte) ([]byte, error) {
 	opts := analysis.TriageOptions{
 		WaitForPhase2: true,
 		Readiness:     readiness,
+		CandidateIDs:  v.candidates,
 		UseFastConfig: true,
-	}
-	if analyzer != nil {
-		opts.SeedDataHash = analyzer.DataHash()
+		SeedDataHash:  v.seedHash(),
 	}
 	triage := analysis.ComputeTriageWithOptionsAndTime(issues, opts, now)
 
@@ -292,7 +308,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Message: "Readiness is provisional; inspect source_authority for failed sources, dropped records, or stale fallback.",
 			Repair:  "Restore or refresh the affected sources and rerun the command before claiming work.",
 		}}
-		return s.withProvenance(output, hash, provenanceScope{})
+		return s.withProvenance(output, hash, v.scope)
 	}
 
 	if len(picks) == 0 {
@@ -303,7 +319,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Message:  "No open, unblocked, unassigned non-epic recommendation passed the robot-next claimability filter.",
 			Repair:   "Use br ready --json or scripts/br_retry.sh actionable --json for authoritative claim candidates.",
 		}}
-		return s.withProvenance(output, hash, provenanceScope{})
+		return s.withProvenance(output, hash, v.scope)
 	}
 
 	byID := make(map[string]model.Issue, len(issues))
@@ -333,7 +349,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Message:  strings.Join(unsafeReasons, "; "),
 			Repair:   "Use the authoritative Beads actionable queue plus claim gate before claiming work.",
 		}}
-		return s.withProvenance(output, hash, provenanceScope{})
+		return s.withProvenance(output, hash, v.scope)
 	}
 
 	if reasons := triage.Status.ClaimUnsafeReasons(); len(reasons) > 0 {
@@ -345,7 +361,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Message:  strings.Join(reasons, "; "),
 			Repair:   "Retry bv --robot-next after graph metrics are available, or use the authoritative Beads actionable queue plus claim gate.",
 		}}
-		return s.withProvenance(output, hash, provenanceScope{})
+		return s.withProvenance(output, hash, v.scope)
 	}
 
 	actions := byID[top.ID].Actions(true)
@@ -360,7 +376,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Code: "live_action_route_unavailable", Severity: "info",
 			Message: actions.UnavailableReason,
 		}}
-		return s.withProvenance(output, hash, provenanceScope{})
+		return s.withProvenance(output, hash, v.scope)
 	}
 
 	output.Actionable = true
@@ -370,7 +386,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 	output.Reasons = top.Reasons
 	output.Unblocks = top.Unblocks
 	output.ClaimCmd = actions.Claim.Shell
-	return s.withProvenance(output, hash, provenanceScope{})
+	return s.withProvenance(output, hash, v.scope)
 }
 
 // claimabilityReasons lists why a bead cannot be claimed, in bv's order — an
@@ -414,7 +430,8 @@ func claimabilityReasons(
 // insights reports the deep graph metrics.
 func (s *Session) insights(req []byte) ([]byte, error) {
 	var r struct {
-		Limit int `json:"limit"`
+		Limit int    `json:"limit"`
+		Label string `json:"label"`
 	}
 	if len(req) > 0 {
 		_ = json.Unmarshal(req, &r)
@@ -424,7 +441,9 @@ func (s *Session) insights(req []byte) ([]byte, error) {
 		limit = 200
 	}
 
-	_, analyzer, stats := s.snapshot()
+	// Under a label the metrics are the label subgraph's, analysed afresh.
+	v := s.view(r.Label)
+	analyzer, stats := v.analyzer, v.stats
 	if analyzer == nil || stats == nil {
 		return nil, fmt.Errorf("session has no analysis")
 	}
@@ -449,7 +468,7 @@ func (s *Session) insights(req []byte) ([]byte, error) {
 			"slack":               limitFloatMap(stats.Slack(), limit),
 			"articulation_points": limitSlice(stats.ArticulationPoints(), limit),
 		},
-	}, hash, provenanceScope{})
+	}, hash, v.scope)
 }
 
 // limitFloatMap keeps the highest-valued entries.
@@ -506,10 +525,10 @@ func limitIntMap(values map[string]int, limit int) map[string]int {
 	return out
 }
 
+// limitSlice keeps the first limit values. A graph with no articulation
+// points stays null rather than becoming [], because bv's insights writes it
+// that way — the empty selection of an unknown label is where it shows.
 func limitSlice(values []string, limit int) []string {
-	if values == nil {
-		return []string{}
-	}
 	if len(values) <= limit {
 		return values
 	}
@@ -530,8 +549,11 @@ func (s *Session) graphExport(req []byte) ([]byte, error) {
 		}
 	}
 
-	issues, analyzer, stats := s.snapshot()
-	if analyzer == nil {
+	// The label is a scope (scope.go), never passed to the exporter: the view
+	// already selected the label subgraph, and ExportGraph's own label filter
+	// keeps only the labelled beads, which erases their dependency context.
+	v := s.view(r.Label)
+	if v.analyzer == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
 
@@ -544,16 +566,8 @@ func (s *Session) graphExport(req []byte) ([]byte, error) {
 		format = "json"
 	}
 
-	dataHash := analyzer.DataHash()
-	graphIssues := issues
-	if r.Label != "" {
-		graphIssues, stats = s.labelGraph(issues, r.Label)
-	}
-
-	// The label is never passed to the exporter: the scope above already
-	// selected the label subgraph, and ExportGraph's own label filter keeps
-	// only the labelled beads, which erases their dependency context.
-	result, err := export.ExportGraph(graphIssues, stats, export.GraphExportConfig{
+	dataHash := v.dataHash
+	result, err := export.ExportGraph(v.issues, v.stats, export.GraphExportConfig{
 		Format:   format,
 		Root:     r.Root,
 		Depth:    r.Depth,
@@ -571,33 +585,7 @@ func (s *Session) graphExport(req []byte) ([]byte, error) {
 	// bv writes data_hash from its envelope, so it is there even when the
 	// exporter returns an empty graph — an unknown label — and leaves it unset.
 	result.DataHash = dataHash
-	return s.withProvenance(result, dataHash, labelScope(issues, r.Label))
-}
-
-// labelGraph is the issue set and stats bv 0.25.2's --robot-graph --label
-// exports from: its scopeLoadedIssues (cmd/bv/main.go) replaces the loaded
-// issues with the label subgraph's AllIssues — the labelled beads plus their
-// direct dependency neighbours — keeps the labelled CoreIssues as the
-// candidates, and the graph handler analyses that set afresh through
-// RobotContext.Analyzer. Ported from bv v0.25.2, which exports no function
-// doing the selection. An unknown label is an empty set.
-func (s *Session) labelGraph(issues []model.Issue, label string) ([]model.Issue, *analysis.GraphStats) {
-	subgraph := analysis.ComputeLabelSubgraph(issues, label)
-	scoped := make([]model.Issue, 0, len(subgraph.AllIssues))
-	for _, id := range subgraph.AllIssues {
-		if issue, ok := subgraph.IssueMap[id]; ok {
-			scoped = append(scoped, issue)
-		}
-	}
-	candidates := make(map[string]bool, len(subgraph.CoreIssues))
-	for _, id := range subgraph.CoreIssues {
-		candidates[id] = true
-	}
-	an := analysis.NewAnalyzer(scoped)
-	an.SetReadinessScope(s.readinessIndex(), candidates)
-	an.SetNow(robotNow())
-	stats := an.Analyze()
-	return scoped, &stats
+	return s.withProvenance(result, dataHash, v.scope)
 }
 
 // fileImpact rates the risk of touching a set of files.

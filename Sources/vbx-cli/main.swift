@@ -29,9 +29,16 @@ struct RobotCommand {
     let request: (Options) throws -> [String: Any]?
     /// True when the command needs the expensive metrics before it can answer.
     var waitsForPhase2 = false
+    /// True when `--label` is bv's global scope for this command: the engine
+    /// answers over the label's subgraph and says so in the envelope. Set here
+    /// rather than in each `request`, so a label-aware command cannot forget
+    /// to forward it. Alerts and capacity read `--label` as their own filter
+    /// and leave this off.
+    var labelScoped = false
 
     init(
         _ flag: String, method: String, summary: String, waitsForPhase2: Bool = false,
+        labelScoped: Bool = false,
         request: @escaping (Options) throws -> [String: Any]? = { _ in nil }
     ) {
         self.flag = flag
@@ -39,6 +46,16 @@ struct RobotCommand {
         self.summary = summary
         self.request = request
         self.waitsForPhase2 = waitsForPhase2
+        self.labelScoped = labelScoped
+    }
+
+    /// The engine request: the command's own, plus the label scope.
+    func payload(_ options: Options) throws -> [String: Any]? {
+        var payload = try request(options)
+        if labelScoped, let label = options.label, !label.isEmpty {
+            payload = (payload ?? [:]).merging(["label": label]) { _, scope in scope }
+        }
+        return payload
     }
 }
 
@@ -58,15 +75,16 @@ let robotCommands: [RobotCommand] = [
     // Triage and planning
     RobotCommand(
         "robot-triage", method: "triage", summary: "Ranked recommendations",
-        waitsForPhase2: true),
+        waitsForPhase2: true, labelScoped: true),
     RobotCommand(
         "robot-next", method: "next", summary: "The single claim-safe next bead",
-        waitsForPhase2: true),
+        waitsForPhase2: true, labelScoped: true),
     RobotCommand(
-        "robot-plan", method: "plan", summary: "Parallel execution tracks"),
+        "robot-plan", method: "plan", summary: "Parallel execution tracks",
+        labelScoped: true),
     RobotCommand(
         "robot-priority", method: "priority", summary: "Priority misalignment",
-        waitsForPhase2: true,
+        waitsForPhase2: true, labelScoped: true,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.minConfidence { request["min_confidence"] = value }
@@ -77,7 +95,7 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-insights", method: "insights", summary: "Deep graph metrics",
-        waitsForPhase2: true,
+        waitsForPhase2: true, labelScoped: true,
         request: { options in options.limit.map { ["limit": $0] } }),
     RobotCommand(
         "robot-actionable", method: "actionable", summary: "Beads with nothing blocking them"),
@@ -90,6 +108,7 @@ let robotCommands: [RobotCommand] = [
     // Hygiene and health
     RobotCommand(
         "robot-suggest", method: "suggest", summary: "Duplicates, deps, labels, cycles",
+        labelScoped: true,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.suggestType { request["type"] = value }
@@ -118,10 +137,10 @@ let robotCommands: [RobotCommand] = [
     // Graph
     RobotCommand(
         "robot-graph", method: "graph_export", summary: "Graph export",
+        labelScoped: true,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.graphFormat { request["format"] = value }
-            if let value = options.label { request["label"] = value }
             if let value = options.root { request["root"] = value }
             if let value = options.depth { request["depth"] = value }
             return request.isEmpty ? nil : request
@@ -463,7 +482,7 @@ func run() async -> Int32 {
 
     let request: [String: Any]?
     do {
-        request = try command.request(options)
+        request = try command.payload(options)
     } catch let error as UsageError {
         complain("Error: \(error.message)")
         return 2

@@ -216,7 +216,7 @@ func (s *Session) load() error {
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, nil)
-	an, stats := s.analyse(issues, readiness)
+	an, stats := s.analyse(issues, readiness, nil)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -264,12 +264,13 @@ func (s *Session) readSource(src, kind string, warnings *[]string) ([]model.Issu
 // apart on which metrics run. The graph is the visible set; readiness is the
 // full-source authority, installed before analysis starts because the
 // analyzer fixes its authority on first use — bv's RobotContext.Analyzer does
-// the same.
+// the same. candidates narrows which beads readiness may offer as work — a
+// label scope's core beads (scope.go); nil means every analysed bead.
 func (s *Session) analyse(
-	issues []model.Issue, readiness *model.ReadinessIndex,
+	issues []model.Issue, readiness *model.ReadinessIndex, candidates map[string]bool,
 ) (*analysis.Analyzer, *analysis.GraphStats) {
 	an := analysis.NewAnalyzer(issues)
-	an.SetReadinessScope(readiness, nil)
+	an.SetReadinessScope(readiness, candidates)
 	if s.config.SkipPhase2 {
 		// Every Phase-2 metric off. Analyze() runs them synchronously, so
 		// skipping has to be expressed through the config rather than by
@@ -372,9 +373,9 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 	case "reload":
 		return s.reload()
 	case "triage":
-		return s.triage()
+		return s.triage(req)
 	case "plan":
-		return s.plan()
+		return s.plan(req)
 	case "impact":
 		return s.impact()
 	case "recommendations":
@@ -674,7 +675,7 @@ func (s *Session) reload() ([]byte, error) {
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, nil)
-	an, stats := s.analyse(issues, readiness)
+	an, stats := s.analyse(issues, readiness, nil)
 
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = src, kind, warnings
@@ -751,16 +752,24 @@ const triageHistoryTimeout = 10 * time.Second
 // vbx's ranking quietly disagree with `bv --robot-triage` on the same data,
 // which is exactly the drift ADR-001 exists to prevent — and which the parity
 // harness caught.
-func (s *Session) triage() ([]byte, error) {
-	issues, analyzer, _ := s.snapshot()
+//
+// A `label` in the request scopes it to the label's subgraph (scope.go): the
+// ranking is computed over the subgraph and recommends only the labelled
+// beads, as bv's --robot-triage --label does.
+func (s *Session) triage(req []byte) ([]byte, error) {
+	label, err := labelRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	v := s.view(label)
+	issues := v.issues
 
 	opts := analysis.TriageOptions{
 		WaitForPhase2: true,
 		UseFastConfig: true,
 		Readiness:     s.readinessIndex(),
-	}
-	if analyzer != nil {
-		opts.SeedDataHash = analyzer.DataHash()
+		CandidateIDs:  v.candidates,
+		SeedDataHash:  v.seedHash(),
 	}
 
 	historyStatus := "skipped"
@@ -913,8 +922,14 @@ func (s *Session) triageHistory() (*correlation.HistoryReport, string) {
 	}
 }
 
-func (s *Session) plan() ([]byte, error) {
-	_, an, _ := s.snapshot()
+// plan is the execution plan; a `label` in the request plans the label's
+// subgraph, offering only its labelled beads as work (scope.go).
+func (s *Session) plan(req []byte) ([]byte, error) {
+	label, err := labelRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	an := s.view(label).analyzer
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}

@@ -74,7 +74,7 @@ func TestTriageNarrowingLeavesTheCachedReportIntact(t *testing.T) {
 	}
 	t.Cleanup(s.Close)
 
-	if _, err := s.triage(); err != nil {
+	if _, err := s.triage(nil); err != nil {
 		t.Fatalf("triage: %v", err)
 	}
 
