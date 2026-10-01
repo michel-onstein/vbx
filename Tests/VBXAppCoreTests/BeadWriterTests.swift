@@ -360,3 +360,355 @@ func plainStdoutAsLastResort() async {
         .init(status: 1, standardOutput: "something broke\n", standardError: ""))
     #expect(message == "something broke")
 }
+
+// MARK: - Guarded single-bead edits: br update --if-unchanged (vbx-7fh)
+
+/// The line `br` 0.7.4's `update --help` carries for the flag, trimmed.
+private let helpWithGuard = """
+    Update an issue
+
+    Usage: br update [OPTIONS] [IDS]...
+
+          --if-unchanged <UPDATED_AT>
+              Only apply this update if the issue has not changed since you read it (GitHub #500).
+    """
+/// `br` 0.6.0's `update --help`: no such option.
+private let helpWithoutGuard = """
+    Update an issue
+
+    Usage: br update [OPTIONS] [IDS]...
+
+          --priority <PRIORITY>
+    """
+
+/// What `br` 0.7.4 printed, verbatim, for a guarded update whose stamp was
+/// stale — exit 6, nothing written. Captured 2026-10-01.
+private let preconditionStdout = """
+    {
+      "error": {
+        "code": "UPDATE_PRECONDITION_FAILED",
+        "message": "vbx-3 changed since you read it: expected updated_at 2026-01-01T00:00:00Z, \
+    found 2026-08-10T12:00:00Z. Nothing was written — re-read the issue and reapply your edit \
+    to the current value.",
+        "hint": "Re-read it (`br show vbx-3 --json`), reapply your edit to the current value, \
+    and retry with the new --if-unchanged token.",
+        "retryable": true,
+        "context": {
+          "issue_id": "vbx-3",
+          "expected_updated_at": "2026-01-01T00:00:00Z",
+          "actual_updated_at": "2026-08-10T12:00:00Z",
+          "written": false
+        }
+      }
+    }
+    """
+
+private let stamp = "2026-10-01T22:33:13.885481Z"
+
+/// A fake `br` that answers `update --help` with `help` and every other
+/// command through `respond`, recording everything it was sent.
+@MainActor
+private final class FakeBR {
+    var sent: [[String]] = []
+    let help: String
+    var respond: (_ argv: [String], _ call: Int) -> BeadWriter.Output
+
+    init(
+        help: String = helpWithGuard,
+        respond: @escaping (_ argv: [String], _ call: Int) -> BeadWriter.Output = { _, _ in
+            .init(status: 0, standardOutput: "[]", standardError: "")
+        }
+    ) {
+        self.help = help
+        self.respond = respond
+    }
+
+    /// The writes and reads sent, without the help probe.
+    var commands: [[String]] { sent.filter { $0 != ["/fake/br", "update", "--help"] } }
+    var probes: Int { sent.count - commands.count }
+
+    func writer() -> BeadWriter {
+        BeadWriter(
+            locate: { "/fake/br" },
+            runner: { [self] argv, _ in
+                sent.append(argv)
+                if argv == ["/fake/br", "update", "--help"] {
+                    return .init(status: 0, standardOutput: help, standardError: "")
+                }
+                return respond(argv, commands.count)
+            })
+    }
+}
+
+@MainActor
+@Test("The guard goes between the edit and --json, title and priority alike")
+func guardedArgumentsArePinned() {
+    #expect(
+        BeadWriter.priorityArguments(2, for: "vbx-3", ifUnchangedSince: stamp)
+            == ["update", "vbx-3", "--priority", "2", "--if-unchanged", stamp, "--json"])
+    #expect(
+        BeadWriter.titleArguments("New", for: "vbx-3", ifUnchangedSince: stamp)
+            == ["update", "vbx-3", "--title", "New", "--if-unchanged", stamp, "--json"])
+    // No stamp: exactly the command vbx always sent.
+    #expect(BeadWriter.priorityArguments(2, for: "vbx-3") == ["update", "vbx-3", "--priority", "2", "--json"])
+}
+
+@MainActor
+@Test("A br that has --if-unchanged gets the displayed record's updated_at with the edit")
+func guardIsSentWhenSupported() async throws {
+    let br = FakeBR()
+    let writer = br.writer()
+
+    try await writer.setPriority(2, for: "vbx-3", in: "/tmp/w", ifUnchangedSince: stamp)
+    try await writer.setTitle("New", for: "vbx-3", in: "/tmp/w", ifUnchangedSince: stamp)
+
+    #expect(
+        br.commands == [
+            ["/fake/br"] + BeadWriter.priorityArguments(2, for: "vbx-3", ifUnchangedSince: stamp),
+            ["/fake/br"] + BeadWriter.titleArguments("New", for: "vbx-3", ifUnchangedSince: stamp),
+        ])
+    // Asked once, then remembered for the writer's life.
+    #expect(br.probes == 1)
+}
+
+@MainActor
+@Test("br 0.6.0, without --if-unchanged, gets the unguarded write it always did")
+func olderBRFallsBackToUnguardedWrite() async throws {
+    let br = FakeBR(help: helpWithoutGuard)
+    let writer = br.writer()
+
+    try await writer.setPriority(2, for: "vbx-3", in: "/tmp/w", ifUnchangedSince: stamp)
+
+    // Sending the flag anyway would fail every edit with "unexpected argument".
+    #expect(br.commands == [["/fake/br"] + BeadWriter.priorityArguments(2, for: "vbx-3")])
+}
+
+@MainActor
+@Test("With no stamp to guard with, br is not even asked whether it could")
+func noStampNoProbe() async throws {
+    let br = FakeBR()
+    try await br.writer().setPriority(2, for: "vbx-3", in: "/tmp/w")
+    #expect(br.probes == 0)
+    #expect(br.commands == [["/fake/br"] + BeadWriter.priorityArguments(2, for: "vbx-3")])
+}
+
+@MainActor
+@Test("A refused guard is a conflict, reported at once, with nothing retried")
+func preconditionFailureIsAConflict() async {
+    let br = FakeBR { _, _ in
+        .init(status: 6, standardOutput: preconditionStdout, standardError: "")
+    }
+    let writer = br.writer()
+
+    do {
+        try await writer.setTitle("New", for: "vbx-3", in: "/tmp/w", ifUnchangedSince: stamp)
+        Issue.record("a refused write was reported as success")
+    } catch BeadWriter.WriteError.changedSinceRead(let id) {
+        #expect(id == "vbx-3")
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+    // A first-attempt refusal cannot be vbx's own write, so no `br show`.
+    #expect(br.commands.count == 1)
+    let message = BeadWriter.WriteError.changedSinceRead(id: "vbx-3").errorDescription
+    #expect(message?.contains("vbx-3 was changed elsewhere") == true)
+    #expect(message?.contains("not written") == true)
+}
+
+@Test("Only br's UPDATE_PRECONDITION_FAILED code counts as a refused guard")
+func preconditionMatcher() {
+    typealias Output = BeadWriter.Output
+    #expect(BeadWriter.isPreconditionFailure(Output(status: 6, standardOutput: preconditionStdout, standardError: "")))
+    #expect(!BeadWriter.isPreconditionFailure(Output(status: 2, standardOutput: recoveryStdout, standardError: "")))
+    #expect(!BeadWriter.isPreconditionFailure(Output(status: 0, standardOutput: preconditionStdout, standardError: "")))
+}
+
+/// `br show <id> --json` for vbx-3, as br answers it: an array of one record.
+private func shown(priority: Int, title: String = "Wire the engine") -> BeadWriter.Output {
+    .init(
+        status: 0,
+        standardOutput: #"[{"id":"vbx-3","title":"\#(title)","priority":\#(priority),"updated_at":"2026-10-01T22:33:18.542480Z"}]"#,
+        standardError: "")
+}
+
+@MainActor
+@Test("A retried guarded write whose first attempt landed is a success, not a conflict")
+func retryAfterLandedFirstAttemptSucceeds() async throws {
+    // The first attempt fails with "recovery in progress" but its write lands,
+    // moving updated_at; the retry carries the same stamp and is refused. The
+    // record already says what the edit wanted, so the edit is done.
+    let br = FakeBR { argv, call in
+        switch call {
+        case 1: .init(status: 2, standardOutput: recoveryStdout, standardError: recoveryStderr)
+        case 2: .init(status: 6, standardOutput: preconditionStdout, standardError: "")
+        default: argv.contains("show") ? shown(priority: 2) : .init(status: 1, standardOutput: "", standardError: "?")
+        }
+    }
+
+    try await br.writer().setPriority(2, for: "vbx-3", in: "/tmp/w", ifUnchangedSince: stamp)
+
+    let update = ["/fake/br"] + BeadWriter.priorityArguments(2, for: "vbx-3", ifUnchangedSince: stamp)
+    // The retry is guarded exactly as the first attempt was.
+    #expect(br.commands == [update, update, ["/fake/br", "show", "vbx-3", "--json"]])
+}
+
+@MainActor
+@Test("A retried guarded title whose first attempt landed is a success too")
+func retryAfterLandedTitleSucceeds() async throws {
+    let br = FakeBR { argv, call in
+        switch call {
+        case 1: .init(status: 2, standardOutput: recoveryStdout, standardError: recoveryStderr)
+        case 2: .init(status: 6, standardOutput: preconditionStdout, standardError: "")
+        default: shown(priority: 1, title: "Renamed")
+        }
+    }
+    try await br.writer().setTitle("Renamed", for: "vbx-3", in: "/tmp/w", ifUnchangedSince: stamp)
+}
+
+@MainActor
+@Test("A retried guarded write refused over someone else's change is still a conflict")
+func retryRefusedByAnotherWriterIsAConflict() async {
+    // Same sequence, but the record says something else: the first attempt did
+    // not land, another writer moved the record, and the edit must not pass.
+    let br = FakeBR { _, call in
+        switch call {
+        case 1: .init(status: 2, standardOutput: recoveryStdout, standardError: recoveryStderr)
+        case 2: .init(status: 6, standardOutput: preconditionStdout, standardError: "")
+        default: shown(priority: 4)
+        }
+    }
+    do {
+        try await br.writer().setPriority(2, for: "vbx-3", in: "/tmp/w", ifUnchangedSince: stamp)
+        Issue.record("a write refused over another writer's change was reported as success")
+    } catch BeadWriter.WriteError.changedSinceRead(let id) {
+        #expect(id == "vbx-3")
+    } catch {
+        Issue.record("expected changedSinceRead, got \(error)")
+    }
+}
+
+@MainActor
+@Test("A retried refusal whose record cannot be read back is a conflict, not a guess")
+func retryWithUnreadableRecordIsAConflict() async {
+    let br = FakeBR { _, call in
+        switch call {
+        case 1: .init(status: 2, standardOutput: recoveryStdout, standardError: recoveryStderr)
+        case 2: .init(status: 6, standardOutput: preconditionStdout, standardError: "")
+        default: .init(status: 3, standardOutput: "", standardError: "no such issue")
+        }
+    }
+    await #expect(throws: BeadWriter.WriteError.self) {
+        try await br.writer().setPriority(2, for: "vbx-3", in: "/tmp/w", ifUnchangedSince: stamp)
+    }
+}
+
+@Test("br show's array answer decodes to its first record")
+func shownRecordDecodes() {
+    #expect(
+        BeadWriter.shownRecord(in: #"[{"id":"t-1","title":"T","priority":3,"labels":["x"]}]"#)
+            == .init(title: "T", priority: 3))
+    #expect(BeadWriter.shownRecord(in: "[]") == nil)
+    #expect(BeadWriter.shownRecord(in: #"{"error":{"message":"nope"}}"#) == nil)
+}
+
+@MainActor
+@Test("Through the real process runner, a stub br 0.7 refuses a stale stamp and vbx reports a conflict")
+func guardThroughRealProcess() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vbx-7fh-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // Behaves like br 0.7.4 for the two commands vbx sends: advertises the
+    // flag, and refuses any stamp but the current one with exit 6.
+    let stub = dir.appendingPathComponent("br")
+    let script = """
+        #!/bin/sh
+        echo "$@" >> calls
+        if [ "$1 $2" = "update --help" ]; then
+          echo '      --if-unchanged <UPDATED_AT>'
+          exit 0
+        fi
+        if [ "$5" = "--if-unchanged" ] && [ "$6" != "2026-10-01T22:33:13.885481Z" ]; then
+          echo '{"error":{"code":"UPDATE_PRECONDITION_FAILED","message":"changed since you read it"}}'
+          exit 6
+        fi
+        echo '[]'
+        """
+    try script.write(to: stub, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+
+    let writer = BeadWriter(locate: { stub.path })
+    try await writer.setPriority(3, for: "vbx-6", in: dir.path, ifUnchangedSince: stamp)
+    await #expect(throws: BeadWriter.WriteError.self) {
+        try await writer.setPriority(3, for: "vbx-6", in: dir.path, ifUnchangedSince: "2026-10-01T22:33:13.885Z")
+    }
+
+    let calls = try String(contentsOf: dir.appendingPathComponent("calls"), encoding: .utf8)
+    #expect(
+        calls
+            == "update --help\n"
+            + "update vbx-6 --priority 3 --if-unchanged \(stamp) --json\n"
+            + "update vbx-6 --priority 3 --if-unchanged 2026-10-01T22:33:13.885Z --json\n")
+}
+
+// MARK: - The store's side of a conflict
+
+@MainActor
+@Test("A conflicting title edit reloads and says why, and passed the displayed updated_at")
+func storeConflictReloadsAndExplains() async throws {
+    let store = ProjectStore()
+    store.skipPhase2 = true
+    let fixture = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/demo").path
+    await store.open(path: fixture)
+    defer { Task { await store.close() } }
+
+    let bead = try #require(store.issues.first { !$0.status.isImmutable })
+    let displayed = try #require(bead.updatedAtStamp)
+
+    let br = FakeBR { _, _ in
+        .init(status: 6, standardOutput: preconditionStdout, standardError: "")
+    }
+    store.writer = br.writer()
+    let reloadedBefore = store.lastReloadAt
+
+    let wrote = await store.setTitle(bead.title + " (renamed)", for: bead.id)
+
+    #expect(!wrote)
+    #expect(
+        br.commands == [
+            ["/fake/br"]
+                + BeadWriter.titleArguments(
+                    bead.title + " (renamed)", for: bead.id, ifUnchangedSince: displayed)
+        ])
+    #expect(store.loadError == BeadWriter.WriteError.changedSinceRead(id: bead.id).errorDescription)
+    // Reloaded, so what is on screen is the newer record the message refers to.
+    #expect(store.lastReloadAt != nil && store.lastReloadAt != reloadedBefore)
+}
+
+@MainActor
+@Test("Each bead of a multi-bead priority change is guarded by its own updated_at")
+func storeGuardsEachBeadOfASelection() async throws {
+    let store = ProjectStore()
+    store.skipPhase2 = true
+    let fixture = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/demo").path
+    await store.open(path: fixture)
+    defer { Task { await store.close() } }
+
+    let beads = Array(store.issues.filter { !$0.status.isImmutable }.prefix(2))
+    try #require(beads.count == 2)
+    let br = FakeBR()
+    store.writer = br.writer()
+
+    let failed = await store.setPriority(4, for: Set(beads.map(\.id)))
+
+    #expect(failed.isEmpty)
+    let expected = beads.sorted { $0.id < $1.id }.map {
+        ["/fake/br"] + BeadWriter.priorityArguments(4, for: $0.id, ifUnchangedSince: $0.updatedAtStamp)
+    }
+    #expect(br.commands == expected)
+}

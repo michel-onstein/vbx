@@ -401,6 +401,16 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
     public var estimatedMinutes: Int?
     public var createdAt: Date?
     public var updatedAt: Date?
+    /// `updated_at` exactly as the source wrote it, not round-tripped through
+    /// a `Date`.
+    ///
+    /// This is the record's revision token for `br update --if-unchanged`,
+    /// which compares instants to the **microsecond or finer**. ``updatedAt``
+    /// cannot carry that: the ISO 8601 parser keeps milliseconds, and a
+    /// `Double` of seconds since 1970 cannot hold nanoseconds at today's
+    /// epoch. A stamp truncated to `.885Z` against a stored `.885481Z` is a
+    /// conflict every time — so the string is kept as it arrived.
+    public var updatedAtStamp: String?
     public var dueDate: Date?
     public var closedAt: Date?
     public var externalRef: String?
@@ -450,6 +460,7 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
         estimatedMinutes = try c.decodeIfPresent(Int.self, forKey: .estimatedMinutes)
         createdAt = try? c.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try? c.decodeIfPresent(Date.self, forKey: .updatedAt)
+        updatedAtStamp = try? c.decodeIfPresent(String.self, forKey: .updatedAt)
         dueDate = try? c.decodeIfPresent(Date.self, forKey: .dueDate)
         closedAt = try? c.decodeIfPresent(Date.self, forKey: .closedAt)
         externalRef = try c.decodeIfPresent(String.self, forKey: .externalRef)
@@ -473,7 +484,13 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
         try c.encodeIfPresent(assignee, forKey: .assignee)
         try c.encodeIfPresent(estimatedMinutes, forKey: .estimatedMinutes)
         try c.encodeIfPresent(createdAt, forKey: .createdAt)
-        try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        // The stamp when there is one, so a round trip keeps its precision
+        // rather than coming back truncated to whatever a `Date` encodes as.
+        if let updatedAtStamp, updatedAt != nil {
+            try c.encode(updatedAtStamp, forKey: .updatedAt)
+        } else {
+            try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        }
         try c.encodeIfPresent(dueDate, forKey: .dueDate)
         try c.encodeIfPresent(closedAt, forKey: .closedAt)
         try c.encodeIfPresent(externalRef, forKey: .externalRef)
@@ -508,6 +525,7 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
         self.estimatedMinutes = estimatedMinutes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.updatedAtStamp = nil
         self.labels = labels
         self.dependencies = dependencies
         self.comments = comments

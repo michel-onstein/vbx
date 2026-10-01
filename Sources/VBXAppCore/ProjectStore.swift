@@ -1209,17 +1209,40 @@ public final class ProjectStore: ObservableObject {
     /// Reloads afterwards rather than patching the in-memory bead: `br` owns
     /// the database and the export, so the file on disk is what is true and
     /// the copy in memory is stale the moment the command returns.
+    ///
+    /// Guarded by the displayed record's `updated_at` (``displayedStamp(of:)``),
+    /// so a bead another writer changed meanwhile is not overwritten.
     @discardableResult
     public func setPriority(_ priority: Int, for id: Issue.ID) async -> Bool {
         guard canEditBeads, let workspace = workspaceDirectory else { return false }
         do {
-            try await writer.setPriority(priority, for: id, in: workspace)
+            try await writer.setPriority(
+                priority, for: id, in: workspace, ifUnchangedSince: displayedStamp(of: id))
             await reload(force: true)
             return true
         } catch {
-            loadError = error.localizedDescription
+            await reportWriteFailure(error)
             return false
         }
+    }
+
+    /// The `updated_at` of the record vbx is showing for `id`, verbatim.
+    ///
+    /// What a single-bead edit passes to `br update --if-unchanged`: the edit
+    /// was decided against *this* version of the record, so it should land
+    /// only on this version.
+    func displayedStamp(of id: Issue.ID) -> String? {
+        issuesByID[id]?.updatedAtStamp
+    }
+
+    /// Shows why a write failed — and, when it failed because the bead moved
+    /// on, reloads first so the newer record is what the user is looking at
+    /// while they read the message.
+    private func reportWriteFailure(_ error: Error) async {
+        if case BeadWriter.WriteError.changedSinceRead = error {
+            await reload(force: true)
+        }
+        loadError = error.localizedDescription
     }
 
     /// Sets the priority of every bead in `ids`, through `br`.
@@ -1244,11 +1267,16 @@ public final class ProjectStore: ObservableObject {
             return ids
         }
 
+        // One `br update` per bead, so each is guarded by its own displayed
+        // `updated_at` — unlike a label change, which is one command for many.
+        // A bead that moved on is refused and counted as failed; the reload
+        // below then shows its newer record.
         var failed: Set<Issue.ID> = []
         var lastError: String?
         for id in ids.sorted() {
             do {
-                try await writer.setPriority(priority, for: id, in: workspace)
+                try await writer.setPriority(
+                    priority, for: id, in: workspace, ifUnchangedSince: displayedStamp(of: id))
             } catch {
                 failed.insert(id)
                 lastError = error.localizedDescription
@@ -1332,11 +1360,12 @@ public final class ProjectStore: ObservableObject {
         guard !trimmed.isEmpty else { return false }
         guard trimmed != issues.first(where: { $0.id == id })?.title else { return false }
         do {
-            try await writer.setTitle(trimmed, for: id, in: workspace)
+            try await writer.setTitle(
+                trimmed, for: id, in: workspace, ifUnchangedSince: displayedStamp(of: id))
             await reload(force: true)
             return true
         } catch {
-            loadError = error.localizedDescription
+            await reportWriteFailure(error)
             return false
         }
     }
