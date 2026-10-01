@@ -4,6 +4,35 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — Go 1.27 stamped the engine's `go.o` with macOS 13.0
+
+**Symptom:** after Homebrew moved Go to 1.27.1, `./scripts/build-engine.sh
+--check` failed with "archive objects target macOS 13.0 14.0, expected only
+14.0", on both bv v0.20.0 and v0.25.2. Go 1.26.6 passed. (vbx-yms)
+
+**Cause:** the archive's `go.o` is written by Go's own linker, not by the C
+compiler, so the `-mmacosx-version-min` cgo flags never reached it directly.
+Up to 1.26 the linker copied the platform load command from the cgo host
+objects, which is how it ended up at 14.0. Go 1.27 no longer copies a macOS
+platform and writes its built-in default — `macOS = {13, 0, 0}` in
+`cmd/link/internal/ld/macho.go` — unless `-macos=<version>` overrides it.
+
+**Fix:** pass `-ldflags=-macos=$MACOS_DEPLOYMENT_TARGET`. Go 1.26's linker has
+no `-macos` flag and refuses the build if handed one, so the script asks `go
+tool link -help` whether it is offered and passes it only then. That was chosen
+over pinning the toolchain to 1.26: a pin trades a red check today for a
+download and a stale compiler later, while this builds under both and
+`assert_archive_target` still checks the artefact either way. Verified with
+both installed toolchains, host-only and `--universal`.
+
+**Prevention:** `test_go_linker_gets_the_deployment_target` in
+`scripts/test-packaging.py` runs a copy of the script against a stub `go`, once
+with a linker that lists `-macos` and once without, and asserts the flag is
+passed in the first case and absent in the second. It fails on the unfixed
+script.
+
+---
+
 ## 2026-08-24 — Every row started 16pt in, and a test measured where the mark used to be
 
 Two findings, one measurement session. The first was reported; the second was

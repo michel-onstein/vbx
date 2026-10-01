@@ -5,6 +5,18 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — The engine builds under Go 1.27 again (vbx-yms)
+
+Go 1.27's linker stamps `go.o` with its own default of macOS 13.0 instead of
+copying the cgo objects' 14.0, which turned `build-engine.sh --check` red on
+every machine with the new Homebrew Go. `build-engine.sh` now passes
+`-ldflags=-macos=` with the deployment target, but only when `go tool link
+-help` lists the flag, so Go 1.26 keeps working. Fixing the flag was preferred
+to pinning the toolchain. Regression test in `scripts/test-packaging.py`; bug
+log entry of the same date.
+
+---
+
 ## 2026-08-24 — The table's leading margin, measured rather than nudged
 
 "Too much spacing between the status character and the left side of the table",

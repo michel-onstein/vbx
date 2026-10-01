@@ -28,7 +28,7 @@ end over bv's own Go analysis engine.
 | Tool | Version verified |
 |---|---|
 | Swift | 6.3.3 (Xcode 26.6), package builds in language mode 5 |
-| Go | 1.26.6 (`darwin/arm64`) |
+| Go | 1.26.6 and 1.27.1 (`darwin/arm64`) — 1.27 needs `-ldflags=-macos=`, which `build-engine.sh` passes only to a linker that offers it |
 | Minimum macOS | 14.0 |
 | Upstream `bv` | `github.com/Dicklesworthstone/beads_viewer v0.20.0` |
 

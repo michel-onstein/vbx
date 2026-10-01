@@ -606,6 +606,81 @@ def test_universal_is_implied_and_verified() -> None:
           < app.index('codesign --force --sign - "$APP"'))
 
 
+STUB_GO = """#!/usr/bin/env bash
+# A stand-in for `go`: answers the linker's -help as the toolchain under test
+# would, records the build's arguments, and fails the build so nothing runs on.
+case "$1 $2" in
+  "tool link")
+    echo "usage: link [options] main.o" >&2
+    echo "  -linkmode mode" >&2
+    if [[ "$STUB_LINK_HAS_MACOS" == 1 ]]; then
+      echo "  -macos value" >&2
+      echo "    	mac OS version to write in build info" >&2
+    fi
+    echo "  -o file" >&2
+    exit 2 ;;
+  "env GOARCH") echo arm64 ;;
+  build*) printf '%s\\n' "$@" > "$STUB_RECORD"; exit 1 ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+def engine_build_args(link_has_macos: bool) -> list[str]:
+    """Runs a copy of build-engine.sh against a stub `go`; returns its build argv.
+
+    The copy sits in a scratch root of its own, because the script removes the
+    archive before building and the real one must survive the test.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "scripts").mkdir()
+        (root / "Engine" / "bridge").mkdir(parents=True)
+        shutil.copy(BUILD_ENGINE, root / "scripts" / "build-engine.sh")
+        shutil.copy(ROOT / "Package.swift", root / "Package.swift")
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        stub = bin_dir / "go"
+        stub.write_text(STUB_GO)
+        stub.chmod(0o755)
+        record = root / "build-args"
+        env = {**os.environ,
+               "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+               "STUB_LINK_HAS_MACOS": "1" if link_has_macos else "0",
+               "STUB_RECORD": str(record)}
+        subprocess.run(["bash", str(root / "scripts" / "build-engine.sh")],
+                       env=env, capture_output=True, text=True)
+        return record.read_text().splitlines() if record.exists() else []
+
+
+def test_go_linker_gets_the_deployment_target() -> None:
+    """Go 1.27 stamps go.o with its own macOS 13.0 unless told otherwise.
+
+    Regression for 2026-10-01: Homebrew moved to Go 1.27, whose linker no longer
+    copies the platform from the cgo objects, so `--check` failed with
+    "archive objects target macOS 13.0 14.0". `-ldflags=-macos=` fixes it, but
+    Go 1.26's linker rejects that flag — so it has to follow what the linker
+    offers, and both directions are asserted.
+    """
+    print("\nGo linker deployment target")
+    target = re.search(r"^MACOS_DEPLOYMENT_TARGET=(\S+)$",
+                       BUILD_ENGINE.read_text(), re.M)
+    check("the script declares a deployment target", target is not None)
+    want = f"-ldflags=-macos={target.group(1) if target else '?'}"
+
+    with_flag = engine_build_args(link_has_macos=True)
+    check("the build was reached with a -macos linker",
+          bool(with_flag) and with_flag[0] == "build", str(with_flag))
+    check("a linker with -macos is given the deployment target",
+          want in with_flag, str(with_flag))
+
+    without = engine_build_args(link_has_macos=False)
+    check("the build was reached with an older linker",
+          bool(without) and without[0] == "build", str(without))
+    check("a linker without -macos is not handed a flag it rejects",
+          not any("-macos" in a for a in without), str(without))
+
+
 def git_repo(directory: Path, *, tag: str | None = None, commits: int = 1) -> None:
     """A throwaway repository, so version.sh can be driven at a known state."""
     env = {
@@ -1702,6 +1777,7 @@ def main() -> int:
     test_help_and_bad_flags()
     test_build_app_forwards()
     test_universal_is_implied_and_verified()
+    test_go_linker_gets_the_deployment_target()
     test_version_comes_from_the_tag()
     test_cask_and_release_script()
     test_version_bump()

@@ -62,6 +62,25 @@ assert_package_target() {
   fi
 }
 
+# go_link_ldflags prints the -ldflags that put the deployment target on the
+# Go-linked object, or nothing when this toolchain's linker cannot take it.
+#
+# The cgo flags below reach every cgo-compiled object, but `go.o` is written by
+# Go's own linker, which stamps its LC_BUILD_VERSION itself. Up to Go 1.26 it
+# copied the platform from the cgo host objects, so the cgo flags reached it
+# too. Go 1.27 stopped copying a macOS platform and writes its built-in default
+# (13.0) instead, unless `-ldflags=-macos=<version>` overrides it — and Go 1.26's
+# linker has no `-macos` flag and rejects it. So the flag is passed only when
+# the linker lists it: one script then builds under either toolchain, and
+# assert_archive_target still checks the result. See BUGS.md, 2026-10-01.
+go_link_ldflags() {
+  local help
+  help="$(go tool link -help 2>&1 || true)"
+  if grep -qE '^[[:space:]]*-macos[[:space:]]' <<<"$help"; then
+    printf '%s' "-macos=$MACOS_DEPLOYMENT_TARGET"
+  fi
+}
+
 build_slice() {
   local arch="$1" out="$2"
   echo "  building darwin/$arch (deployment target $MACOS_DEPLOYMENT_TARGET)"
@@ -75,13 +94,15 @@ build_slice() {
   # the flags are the ones that actually work: with this toolchain
   # MACOSX_DEPLOYMENT_TARGET alone leaves every object — the Go-linked `go.o`
   # and the cgo-compiled ones alike — carrying the host SDK's minimum.
-  # -mmacosx-version-min reaches both. The variable is kept because it is the
-  # conventional knob and costs nothing.
+  # -mmacosx-version-min reaches the cgo objects, and reached `go.o` too up to
+  # Go 1.26; from 1.27 `go.o` needs the linker flag in GO_LDFLAGS (see
+  # go_link_ldflags). The variable is kept because it is the conventional knob
+  # and costs nothing.
   CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" \
     MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET" \
     CGO_CFLAGS="-mmacosx-version-min=$MACOS_DEPLOYMENT_TARGET" \
     CGO_LDFLAGS="-mmacosx-version-min=$MACOS_DEPLOYMENT_TARGET" \
-    go build -buildmode=c-archive -trimpath -o "$out" ./cbridge
+    go build -buildmode=c-archive -trimpath -ldflags="$GO_LDFLAGS" -o "$out" ./cbridge
 }
 
 # assert_archive_target verifies the flag actually took effect.
@@ -127,6 +148,7 @@ assert_archive_universal() {
 }
 
 assert_package_target
+GO_LDFLAGS="$(go_link_ldflags)"
 
 echo "==> Building vbx engine archive"
 if [[ $UNIVERSAL -eq 1 ]]; then
