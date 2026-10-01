@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "libvbxengine.h"
+#include "libvbxgo.h"
 
 static int fail = 0;
 

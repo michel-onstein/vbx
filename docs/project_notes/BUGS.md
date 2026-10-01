@@ -4,6 +4,34 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — `-lvbxengine` linked SwiftPM's own `libVBXEngine.a`
+
+**Symptom:** under Swift 6.4's default build system, `swift build` and `swift
+test` failed to link `vbx-cli` with `_vbx_call`, `_vbx_open`, `_vbx_probe` and
+the rest undefined, although `Engine/build/libvbxengine.a` was freshly built.
+`--build-system native` linked, but that build system is deprecated. (vbx-lss)
+
+**Cause:** the new build system writes a static library per target into
+`.build/out/Products/Debug`, including `libVBXEngine.a` for the Swift
+`VBXEngine` target, and puts that directory on the search path ahead of
+`-L Engine/build`. On case-insensitive APFS `-lvbxengine` resolves to the first
+match, which was SwiftPM's Swift archive rather than the Go one.
+
+**Fix:** the Go archive is now `libvbxgo.a` (header `libvbxgo.h`), a name no
+Swift target folds to. Renaming the archive was preferred to renaming the
+target: `VBXEngine` is a module name imported throughout the sources and tests,
+while the archive name appears in a handful of build files. An existing
+checkout keeps a stale `Engine/build/libvbxengine.a` until it is deleted; it is
+gitignored and nothing links it.
+
+**Prevention:** `test_engine_archive_name_cannot_collide` in
+`scripts/test-packaging.py` fails when any `.linkedLibrary` in `Package.swift`
+case-folds to a target or product name, checks that the detector still flags
+the old pair, and asserts `build-engine.sh`, `Package.swift` and the module map
+agree on the archive and header names.
+
+---
+
 ## 2026-10-01 — Go 1.27 stamped the engine's `go.o` with macOS 13.0
 
 **Symptom:** after Homebrew moved Go to 1.27.1, `./scripts/build-engine.sh

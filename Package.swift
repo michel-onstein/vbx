@@ -8,10 +8,16 @@ import Foundation
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let engineBuildDir = "\(packageRoot)/Engine/build"
 
+// The Go archive is libvbxgo.a, and its name must not case-fold to any Swift
+// target's: SwiftPM writes libVBXEngine.a into its own Products directory,
+// which sits ahead of Engine/build on the search path, and on case-insensitive
+// APFS `-lvbxengine` found that instead (BUGS.md, 2026-10-01).
+// scripts/test-packaging.py asserts the names stay apart.
+//
 // Frameworks the Go runtime and modernc.org/sqlite need on darwin.
 let engineLinkerSettings: [LinkerSetting] = [
     .unsafeFlags(["-L\(engineBuildDir)"]),
-    .linkedLibrary("vbxengine"),
+    .linkedLibrary("vbxgo"),
     .linkedLibrary("resolv"),
     .linkedFramework("CoreFoundation"),
     .linkedFramework("Security"),

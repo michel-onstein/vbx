@@ -681,6 +681,47 @@ def test_go_linker_gets_the_deployment_target() -> None:
           not any("-macos" in a for a in without), str(without))
 
 
+def library_collisions(manifest: str) -> list[str]:
+    """Linked libraries whose name case-folds to a SwiftPM target or product.
+
+    SwiftPM writes a static library per target (`libVBXEngine.a`) into its
+    Products directory, which the linker searches before `Engine/build`. On
+    case-insensitive APFS `-lvbxengine` then resolves to SwiftPM's archive and
+    the link fails with every `_vbx_*` symbol undefined.
+    """
+    linked = re.findall(r'\.linkedLibrary\("([^"]+)"\)', manifest)
+    swift = re.findall(r'(?:\.target|\.executableTarget|\.testTarget|\.library|'
+                       r'\.executable)\(\s*name:\s*"([^"]+)"', manifest)
+    folded = {n.casefold() for n in swift}
+    return [lib for lib in linked if lib.casefold() in folded]
+
+
+def test_engine_archive_name_cannot_collide() -> None:
+    """Regression for 2026-10-01: `-lvbxengine` linked SwiftPM's libVBXEngine.a.
+
+    Swift 6.4's default build system puts every target's archive in
+    `.build/out/Products/Debug`, ahead of `-L Engine/build`; `swift build` and
+    `swift test` failed with `_vbx_call` undefined on a case-insensitive disk.
+    """
+    print("\nEngine archive name")
+    manifest = (ROOT / "Package.swift").read_text()
+    check("no linked library shares a Swift target's name (any case)",
+          library_collisions(manifest) == [], str(library_collisions(manifest)))
+    check("the collision check still detects the old name",
+          library_collisions('.target(name: "VBXEngine")\n'
+                             '.linkedLibrary("vbxengine")') == ["vbxengine"])
+
+    out = re.search(r'^OUT="\$BUILD/lib([^".]+)\.a"$', BUILD_ENGINE.read_text(), re.M)
+    linked = re.findall(r'\.linkedLibrary\("([^"]+)"\)', manifest)
+    check("build-engine.sh writes the archive Package.swift links",
+          out is not None and out.group(1) in linked,
+          f"{out.group(1) if out else None} not in {linked}")
+    header = f"lib{out.group(1) if out else '?'}.h"
+    check("the module map names the header build-engine.sh copies",
+          f'header "{header}"' in
+          (ROOT / "Sources" / "CVBXEngine" / "include" / "module.modulemap").read_text())
+
+
 def git_repo(directory: Path, *, tag: str | None = None, commits: int = 1) -> None:
     """A throwaway repository, so version.sh can be driven at a known state."""
     env = {
@@ -1778,6 +1819,7 @@ def main() -> int:
     test_build_app_forwards()
     test_universal_is_implied_and_verified()
     test_go_linker_gets_the_deployment_target()
+    test_engine_archive_name_cannot_collide()
     test_version_comes_from_the_tag()
     test_cask_and_release_script()
     test_version_bump()

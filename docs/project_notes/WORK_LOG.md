@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — `swift test` links under Swift 6.4's default build system (vbx-lss)
+
+The Go engine archive is renamed from `libvbxengine.a` to `libvbxgo.a`, because
+on case-insensitive APFS `-lvbxengine` resolved to the `libVBXEngine.a` that
+SwiftPM's new build system writes for the Swift target, and the link failed
+with every `_vbx_*` symbol undefined. Plain `swift build` / `swift test` now
+link without `--build-system native`. Regression test in
+`scripts/test-packaging.py`; bug log entry of the same date.
+
+---
+
 ## 2026-10-01 — The engine builds under Go 1.27 again (vbx-yms)
 
 Go 1.27's linker stamps `go.o` with its own default of macOS 13.0 instead of

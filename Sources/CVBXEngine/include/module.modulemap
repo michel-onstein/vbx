@@ -1,4 +1,4 @@
 module CVBXEngine {
-    header "libvbxengine.h"
+    header "libvbxgo.h"
     export *
 }
