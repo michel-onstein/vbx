@@ -265,6 +265,15 @@ the only one with sprints, where <code>--robot-sprint-show</code> and <code>--ro
 <code>--robot-insights</code>, because bv inlines <code>analysis.Insights</code>' untagged PascalCase
 fields at the top level, and <code>--robot-label-attention</code>, because bv projects a
 ranked subset where vbx returns the full result.</p>
+<p>Three known differences are declared too, on the <code>beads.db</code> form of the
+readiness fixture only (ADR-024): <code>data_hash</code> (and <code>scope_hash</code>, which hashes
+it) on <code>--robot-next</code>, <code>--robot-suggest</code> and <code>--robot-graph</code>, and the
+closed-time velocity in <code>--robot-label-health</code> and <code>--robot-triage</code>. bv 0.25.2
+reads a <code>br</code> database through a lossy fallback that drops <code>closed_at</code>, notes
+and design, and vbx deliberately does not copy it. Each is scoped to that
+fixture, that command and that exact path, printed as <code>declared</code> rather than
+as a match, compared normally on every JSONL fixture — and a declaration that
+stops firing fails the run.</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
 <p><strong>Mechanism legend</strong></p>

@@ -139,9 +139,65 @@ def test_envelope_only_keys_are_one_list(parity) -> None:
     check("a non-object output passes through", parity.strip_envelope_only([1]) == [1])
 
 
+def test_declared_differences_are_narrow(parity) -> None:
+    print("\nDeclared differences (ADR-024)")
+    declared = parity.DECLARED_DIFFERENCES
+    names = {fixture["name"] for fixture in parity.FIXTURES}
+    check("only the readiness beads.db declares differences",
+          set(declared) == {"readiness (beads.db)"}, str(sorted(declared)))
+    check("every declaring fixture is a real one", set(declared) <= names,
+          str(set(declared) - names))
+    sqlite_fixtures = {fixture["name"] for fixture in parity.FIXTURES if fixture.get("sqlite")}
+    check("every declaring fixture is read from a beads.db", set(declared) <= sqlite_fixtures,
+          str(set(declared) - sqlite_fixtures))
+    commands = {entry["vbx"] for entry in parity.COMPARISONS if entry.get("bv")}
+    for fixture, entries in declared.items():
+        for (command, path), reason in entries.items():
+            check(f"{fixture}: --{command} {path} names a compared command",
+                  command in commands, command)
+            check(f"{fixture}: --{command} {path} is one exact path",
+                  path.startswith(".") and "*" not in path, path)
+            check(f"{fixture}: --{command} {path} gives its reason, citing ADR-024",
+                  isinstance(reason, str) and "ADR-024" in reason, str(reason))
+
+    hash_diff = ".data_hash: 'a' vs 'b'"
+    velocity_diff = ".project_health.velocity.estimated: missing on the vbx side"
+    other_diff = ".project_health.counts.total: 21 vs 20"
+
+    undeclared, accepted, stale = parity.split_declared(
+        [hash_diff], "readiness (beads.db)", "robot-next")
+    check("a declared path is accepted on its own fixture",
+          undeclared == [] and [d for d, _ in accepted] == [hash_diff], f"{undeclared} {accepted}")
+    check("its reason travels with it", "ADR-024" in accepted[0][1] if accepted else False)
+
+    undeclared, accepted, _ = parity.split_declared([hash_diff], "readiness", "robot-next")
+    check("the same path still fails on the JSONL readiness fixture",
+          undeclared == [hash_diff] and accepted == [], f"{undeclared} {accepted}")
+    undeclared, accepted, _ = parity.split_declared([hash_diff], "demo", "robot-next")
+    check("and on the demo", undeclared == [hash_diff] and accepted == [], str(undeclared))
+
+    undeclared, accepted, _ = parity.split_declared(
+        [velocity_diff, other_diff], "readiness (beads.db)", "robot-triage")
+    check("an undeclared difference on the beads.db still fails",
+          undeclared == [other_diff], str(undeclared))
+    check("beside it the declared one is still reported",
+          [d for d, _ in accepted] == [velocity_diff], str(accepted))
+
+    undeclared, _, _ = parity.split_declared([hash_diff], "readiness (beads.db)", "robot-triage")
+    check("a path declared for one command is not declared for another",
+          undeclared == [hash_diff], str(undeclared))
+
+    _, _, stale = parity.split_declared([], "readiness (beads.db)", "robot-next")
+    check("a declaration that no longer fires is reported stale",
+          stale == [".data_hash", ".scope_hash"], str(stale))
+    _, _, stale = parity.split_declared([], "demo", "robot-next")
+    check("a fixture with no declarations has nothing stale", stale == [], str(stale))
+
+
 def main() -> int:
     parity = load_parity()
     test_envelope_only_keys_are_one_list(parity)
+    test_declared_differences_are_narrow(parity)
     test_sqlite_workspace_keeps_every_record(parity)
     test_every_difference_is_reported(parity)
     test_default_run_covers_every_fixture(parity)
