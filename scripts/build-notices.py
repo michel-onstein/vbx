@@ -160,6 +160,43 @@ def render() -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
+def acknowledged(text: str) -> dict[str, str]:
+    """Every module the notices name, with the version they name it at."""
+    return dict(re.findall(r"^### (\S+)\n\nVersion (\S+)$", text, re.M))
+
+
+def problems(text: str, listed: list[tuple[str, str]]) -> list[str]:
+    """Every way the notices disagree with go.mod; empty when they agree.
+
+    Versions are compared, not just names. A module's licence can change
+    between releases — and beads_viewer's rider is part of its licence — so
+    notices for v0.20.0 are not the notices for v0.25.2. Before this, a bump
+    of every module in go.mod passed with the old file.
+    """
+    found: list[str] = []
+    shown = acknowledged(text)
+    wanted = dict(listed)
+
+    missing = sorted(name for name in wanted if name not in shown)
+    if missing:
+        found.append("these modules are in go.mod but not in the notices: "
+                     + ", ".join(missing))
+    stale = sorted(f"{name} (notices {shown[name]}, go.mod {version})"
+                   for name, version in wanted.items()
+                   if name in shown and shown[name] != version)
+    if stale:
+        found.append("these modules are acknowledged at the wrong version: "
+                     + ", ".join(stale))
+    extra = sorted(name for name in shown if name not in wanted)
+    if extra:
+        found.append("these modules are in the notices but no longer in go.mod: "
+                     + ", ".join(extra))
+    # The obligation with teeth: bv's rider must travel unmodified.
+    if "ADDITIONAL RIDER / RESTRICTION" not in text:
+        found.append("beads_viewer's licence rider is missing from the notices")
+    return found
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -177,21 +214,14 @@ def main() -> int:
         # Checked against go.mod rather than by regenerating: --check has to work
         # on a clone with no module cache, which is most of the point of
         # committing the file.
-        listed = set(modules())
-        missing = [name for name, _ in listed if f"### {name}\n" not in text]
-        if missing:
-            print(
-                "these modules are in go.mod but not in the notices: "
-                + ", ".join(sorted(missing)),
-                file=sys.stderr,
-            )
+        listed = modules()
+        found = problems(text, listed)
+        if found:
+            for problem in found:
+                print(problem, file=sys.stderr)
             print("run ./scripts/build-notices.py", file=sys.stderr)
             return 1
-        # The obligation with teeth: bv's rider must travel unmodified.
-        if "ADDITIONAL RIDER / RESTRICTION" not in text:
-            print("beads_viewer's licence rider is missing from the notices", file=sys.stderr)
-            return 1
-        print(f"==> notices check ok ({len(listed)} modules, rider present)")
+        print(f"==> notices check ok ({len(listed)} modules at go.mod's versions, rider present)")
         return 0
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)

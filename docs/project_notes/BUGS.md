@@ -4,6 +4,32 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — Stale acknowledgements passed `build-notices.py --check`
+
+**Symptom:** after bumping `beads_viewer` from v0.20.0 to v0.25.2, which moved
+fourteen modules in `go.mod`, `python3 scripts/build-notices.py --check` still
+passed against `Resources/ACKNOWLEDGEMENTS.md` written for the old versions.
+The app would have shipped the licence texts of releases it does not contain.
+(vbx-ft9)
+
+**Cause:** `--check` only asserted that every `go.mod` module was *named* in
+the notices (`### <module>`) and that bv's rider was present. The `Version`
+line under each heading was never compared, and a module dropped from `go.mod`
+but still acknowledged was not noticed either.
+
+**Fix:** `problems()` reads each `### <module>` / `Version <v>` pair and reports
+missing modules, modules at the wrong version (naming both versions), modules
+no longer in `go.mod`, and a missing rider. Still offline: it reads only the
+committed file and `go.mod`.
+
+**Prevention:** `test_notices_check_catches_version_drift` in
+`scripts/test-packaging.py` runs the real script against a scratch `go.mod` and
+notices file and asserts that an old version, a missing module, a leftover
+module and a missing rider each fail and are named. The old-version and
+leftover cases pass under the previous check.
+
+---
+
 ## 2026-10-01 — An edit failed with `br` 0.7.4 after `bv` had read the workspace
 
 **Symptom:** with `br` 0.7.4, once any stock SQLite client (`bv`, `sqlite3`)

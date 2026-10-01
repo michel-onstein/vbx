@@ -5,6 +5,26 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — The engine is built on bv v0.25.2 (vbx-ft9)
+
+`Engine/bridge` now depends on `beads_viewer` v0.25.2 (was v0.20.0); its
+`go 1.26.0` directive raises the engine's minimum Go to 1.26, and `go mod tidy`
+moved thirteen other modules (modernc `sqlite` v1.58.0 among them) and made
+`go-git/v5` and `yaml.v3` direct. No vbx code changed: every imported API is
+unchanged. Numbers that come from bv's packages move with it — the demo's
+actionable count is 3, not 5, under bv 0.25's stricter readiness model
+(vbx's own copies of that logic are aligned separately, vbx-hjz). `Resources/ACKNOWLEDGEMENTS.md` regenerated;
+`build-notices.py --check` now compares versions as well as names (bug log
+entry of the same date). README and key facts say Go 1.26+ and v0.25.2.
+
+`parity-check.py` is red after the bump, against either bv. Against bv 0.20.0
+(still the Homebrew install) the differences are the 0.25 behaviour itself.
+Against bv 0.25.2 the remaining ones are each an open bead: the analysis clock
+for label health, alerts and priority (vbx-48y), issue origins for triage's
+`actions` (vbx-ut6), and the provenance envelope keys (vbx-v57).
+
+---
+
 ## 2026-10-01 — Edits survive `br` 0.7.4's "recovery in progress" (vbx-1sw)
 
 `BeadWriter` re-sends a write once when `br` 0.7.4 fails it with `database is
