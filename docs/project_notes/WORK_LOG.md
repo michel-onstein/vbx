@@ -5,6 +5,24 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Claim commands come from the live tracker, in vbx-cli only (vbx-ut6)
+
+The engine's open configuration gained `live_tracker_actions`. `vbx-cli` sets
+it, and the engine then calls bv 0.25's `loader.AttachIssueOrigins`, so triage
+recommendations carry bv's `actions` (`br show`, and the atomic
+`br update --claim` for a claimable bead). The app never sets it: its beads get
+an origin whose `unavailable_reason` says the actions are resolved by vbx-cli,
+and the engine never spawns `br` for a single-repository workspace.
+`--robot-next` is now a port of bv's `handleRobotNext` — source-authority,
+top-pick, claim-gate, metric and live-route gates in bv's order, claim command
+from the bead's actions instead of vbx's old `--status=in_progress` string. A
+load with a malformed record withdraws every claim. Parity with bv 0.25.2 on the
+demo: `--robot-triage` and `--robot-next` now match (robot-next is compared
+again, less the provenance keys vbx-v57 owns); suggest and graph still differ
+on those keys. ADR-020.
+
+---
+
 ## 2026-10-01 — The analysis clock is pinned everywhere bv pins it (vbx-48y)
 
 `robotNow()` (honouring `SOURCE_DATE_EPOCH`) now drives label health and

@@ -33,6 +33,13 @@ type OpenConfig struct {
 	Path string `json:"path"`
 	// SkipPhase2 disables the expensive centrality metrics entirely.
 	SkipPhase2 bool `json:"skip_phase2"`
+	// LiveTrackerActions binds each bead to the live tracker that supplied
+	// it, so triage and robot-next carry runnable `br show` and
+	// `br update --claim` commands, exactly as bv 0.25 does. Resolving that
+	// route runs `br update --help` as a subprocess, which the App Sandbox
+	// forbids, so only vbx-cli sets it. Off — the app's setting — every
+	// bead's actions say why they are unavailable instead. See ADR-020.
+	LiveTrackerActions bool `json:"live_tracker_actions"`
 }
 
 // Session holds one loaded workspace and its analysis state.
@@ -44,6 +51,10 @@ type Session struct {
 	kind     string // "jsonl" | "sqlite"
 	issues   []model.Issue
 	warnings []string
+	// complete is bv's claim-safety verdict on the load: every record parsed
+	// and every repository loaded. A partial load can make a blocked bead
+	// look ready, so no claim command is ever emitted from one.
+	complete bool
 
 	analyzer *analysis.Analyzer
 	stats    *analysis.GraphStats
@@ -188,16 +199,7 @@ func (s *Session) load() error {
 		return err
 	}
 
-	var issues []model.Issue
-	switch kind {
-	case "sqlite":
-		issues, err = LoadSQLite(src)
-	default:
-		opts := loader.ParseOptions{
-			WarningHandler: func(msg string) { warnings = append(warnings, msg) },
-		}
-		issues, err = loader.LoadIssuesFromFileWithOptions(src, opts)
-	}
+	issues, complete, err := s.readSource(src, kind, &warnings)
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", src, err)
 	}
@@ -209,8 +211,37 @@ func (s *Session) load() error {
 	s.source, s.kind, s.warnings = src, kind, warnings
 	s.workspacePath, s.repoLoads = "", nil
 	s.issues, s.analyzer, s.stats = issues, an, stats
+	s.complete = complete
 	s.loadedAt = time.Now()
 	return nil
+}
+
+// readSource parses one resolved source and binds every bead to its origin.
+//
+// complete is false when any record failed to parse: bv's datasource treats
+// that as incomplete source authority, and so does this.
+func (s *Session) readSource(src, kind string, warnings *[]string) ([]model.Issue, bool, error) {
+	var (
+		issues []model.Issue
+		err    error
+		parsed loader.ParseStats
+	)
+	switch kind {
+	case "sqlite":
+		issues, err = LoadSQLite(src)
+	default:
+		opts := loader.ParseOptions{
+			WarningHandler: func(msg string) { *warnings = append(*warnings, msg) },
+			Stats:          &parsed,
+		}
+		issues, err = loader.LoadIssuesFromFileWithOptions(src, opts)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	complete := parsed.Errors == 0
+	s.bindOrigins(issues, src, complete)
+	return issues, complete, nil
 }
 
 // analyse builds the analyzer and starts the metrics for one issue set.
@@ -564,16 +595,7 @@ func (s *Session) reload() ([]byte, error) {
 		return nil, err
 	}
 
-	var issues []model.Issue
-	switch kind {
-	case "sqlite":
-		issues, err = LoadSQLite(src)
-	default:
-		opts := loader.ParseOptions{
-			WarningHandler: func(msg string) { warnings = append(warnings, msg) },
-		}
-		issues, err = loader.LoadIssuesFromFileWithOptions(src, opts)
-	}
+	issues, complete, err := s.readSource(src, kind, &warnings)
 	if err != nil {
 		return nil, fmt.Errorf("reloading %s: %w", src, err)
 	}
@@ -608,6 +630,7 @@ func (s *Session) reload() ([]byte, error) {
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = src, kind, warnings
 	s.issues, s.analyzer, s.stats = issues, an, stats
+	s.complete = complete
 	s.loadedAt = time.Now()
 	s.mu.Unlock()
 
@@ -697,6 +720,9 @@ func (s *Session) triage() ([]byte, error) {
 
 	result := analysis.ComputeTriageWithOptionsAndTime(issues, opts, robotNow())
 	result.Meta.HistoryStatus = historyStatus
+	if !s.claimsProven() {
+		suppressUnprovenTriageClaims(&result)
+	}
 	return json.Marshal(result)
 }
 

@@ -17,7 +17,7 @@ box, the README title.
 | [FEATURE_PARITY.md](docs/FEATURE_PARITY.md) | — | Every bv capability mapped to a vbx surface and delivery phase | Living |
 | [RELEASES.md](docs/RELEASES.md) | ADR-013 | User-facing changes per release — generated from the git tags, never edited | Generated |
 | [project_notes/BUGS.md](docs/project_notes/BUGS.md) | — | Bug log with the regression test locking each fix in | Living |
-| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…019 | Architectural decisions and their trade-offs | Living |
+| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…020 | Architectural decisions and their trade-offs | Living |
 | [project_notes/KEY_FACTS.md](docs/project_notes/KEY_FACTS.md) | — | Toolchain, commands, layout, gotchas | Living |
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
@@ -213,6 +213,15 @@ them.
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable
   from a low one.
+- **Only vbx-cli resolves the live tracker.** Claim and show commands come from
+  bv's `loader.AttachIssueOrigins`, which runs `br update --help` — a
+  subprocess the App Sandbox forbids. The session's `live_tracker_actions`
+  open option turns it on; `vbx-cli` passes it and the app never does, so in
+  the app every bead's `actions` carry an `unavailable_reason` instead of a
+  command. Never sniff the sandbox, and never assemble a claim string in vbx:
+  the claim is bv's atomic `br update --claim`, taken from the bead's actions.
+  Multi-repository workspaces are the exception still open — bv's workspace
+  loader binds origins itself. See ADR-020.
 - **Analysis reads "now" from `robotNow()`, on every call.** It honours
   `SOURCE_DATE_EPOCH` everywhere bv 0.23+ does — label health, alerts, impact,
   ETA, readiness — which is what lets the parity check compare exactly. The

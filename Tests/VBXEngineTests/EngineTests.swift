@@ -80,6 +80,36 @@ func skipPhase2LeavesNoValues() async throws {
     await engine.close()
 }
 
+/// The first recommendation's `actions.unavailable_reason`, read raw.
+private func firstUnavailableReason(liveTrackerActions: Bool?) async throws -> String? {
+    let engine = BeadsEngine()
+    if let liveTrackerActions {
+        _ = try await engine.open(
+            path: fixturePath, skipPhase2: true, liveTrackerActions: liveTrackerActions)
+    } else {
+        _ = try await engine.open(path: fixturePath, skipPhase2: true)
+    }
+    defer { Task { await engine.close() } }
+    let data = try await engine.rawJSON("triage")
+    let triage = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let recommendations = try #require(triage["recommendations"] as? [[String: Any]])
+    let actions = try #require(recommendations.first?["actions"] as? [String: Any])
+    return actions["unavailable_reason"] as? String
+}
+
+@Test("The app's default open never resolves a live tracker; the CLI's does")
+func liveTrackerActionsCrossTheBridge() async throws {
+    // The default is the app's: the engine binds no tracker and says so.
+    let app = try await firstUnavailableReason(liveTrackerActions: nil)
+    #expect(app == "live tracker actions are resolved by vbx-cli, not the app")
+
+    // The CLI's setting reaches the engine and runs bv's own resolution, which
+    // refuses the demo fixture for want of tracker metadata — before it would
+    // ever run `br`. A different reason is the proof the flag crossed the ABI.
+    let cli = try await firstUnavailableReason(liveTrackerActions: true)
+    #expect(cli == "source has no readable tracker metadata")
+}
+
 @Test("Phase 2 metrics arrive and rank the deepest blocker highest")
 func phase2Metrics() async throws {
     let engine = BeadsEngine()

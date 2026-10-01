@@ -575,6 +575,10 @@ without re-analysing, so an incidental touch does not cost a re-render.
   object store directly; keep the subprocess path for `vbx-cli`, which is not sandboxed.
   This is the one place the engine needs an upstream-friendly patch, and it is worth
   contributing back.
+- bv 0.25 also spawns `br update --help` to bind each bead to its live tracker, which is
+  where claim and show commands come from. Only `vbx-cli` opens a session with
+  `live_tracker_actions`; in the app every bead's actions say why they are unavailable
+  ([ADR-020](project_notes/DECISIONS.md)).
 
 ---
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
@@ -81,70 +82,91 @@ func TestSuggestRejectsAnUnknownType(t *testing.T) {
 	}
 }
 
-func TestNextGatesOnClaimSafety(t *testing.T) {
+// nextPayload is the part of robot-next the tests read.
+type nextPayload struct {
+	Actionable        bool   `json:"actionable"`
+	ID                string `json:"id"`
+	ClaimCommand      string `json:"claim_command"`
+	ShowCommand       string `json:"show_command"`
+	Message           string `json:"message"`
+	DiagnosticTopPick *struct {
+		ID string `json:"id"`
+	} `json:"diagnostic_top_pick"`
+	Actions *struct {
+		LocalID           string `json:"local_id"`
+		UnavailableReason string `json:"unavailable_reason"`
+		Claim             *struct {
+			Argv []string `json:"argv"`
+		} `json:"claim"`
+	} `json:"actions"`
+	Degraded []struct {
+		Code     string `json:"code"`
+		Severity string `json:"severity"`
+		Message  string `json:"message"`
+	} `json:"degraded"`
+}
+
+// In the app the claim gate still runs, but the route to the tracker is never
+// resolved — so the answer is "this is the pick, and here is why there is no
+// command", never a command and never silence.
+func TestNextInTheAppNamesThePickButEmitsNoClaim(t *testing.T) {
 	s := openFixture(t)
+	out := call[nextPayload](t, s, "next", nil)
 
-	var out struct {
-		Actionable   bool   `json:"actionable"`
-		ID           string `json:"id"`
-		ClaimCommand string `json:"claim_command"`
-		Message      string `json:"message"`
-		Degraded     []struct {
-			Code     string   `json:"code"`
-			Severity string   `json:"severity"`
-			Reasons  []string `json:"reasons"`
-		} `json:"degraded"`
+	if out.Actionable || out.ClaimCommand != "" || out.ShowCommand != "" {
+		t.Fatalf("the app emitted a runnable command: %+v", out)
 	}
-	out = call[struct {
-		Actionable   bool   `json:"actionable"`
-		ID           string `json:"id"`
-		ClaimCommand string `json:"claim_command"`
-		Message      string `json:"message"`
-		Degraded     []struct {
-			Code     string   `json:"code"`
-			Severity string   `json:"severity"`
-			Reasons  []string `json:"reasons"`
-		} `json:"degraded"`
-	}](t, s, "next", nil)
-
-	if !out.Actionable {
-		t.Fatalf("nothing claimable in a fixture with two ready beads: %+v", out)
+	if out.DiagnosticTopPick == nil {
+		t.Fatal("no diagnostic top pick")
 	}
 	// Only c and d have nothing blocking them.
-	if out.ID != "c" && out.ID != "d" {
-		t.Errorf("offered %q, which is blocked", out.ID)
+	if pick := out.DiagnosticTopPick.ID; pick != "c" && pick != "d" {
+		t.Errorf("the pick is %q, which is blocked", pick)
 	}
-	// The command is emitted only alongside a claimable pick, so a caller
-	// cannot run it against a bead it should not touch.
-	if out.ClaimCommand != "br update "+out.ID+" --status=in_progress" {
-		t.Errorf("claim command is %q", out.ClaimCommand)
+	if out.Actions == nil || out.Actions.LocalID != out.DiagnosticTopPick.ID {
+		t.Fatalf("actions do not name the pick: %+v", out.Actions)
+	}
+	if out.Actions.UnavailableReason != appActionsUnavailable {
+		t.Errorf("unavailable reason is %q", out.Actions.UnavailableReason)
+	}
+	if len(out.Degraded) != 1 || out.Degraded[0].Code != "live_action_route_unavailable" {
+		t.Errorf("degraded is %+v", out.Degraded)
 	}
 }
 
-func TestClaimBlockersNameEveryReason(t *testing.T) {
-	byID := map[string]model.Issue{
-		"blocked": {
+func TestClaimabilityReasonsNameEveryReason(t *testing.T) {
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
+	issues := []model.Issue{
+		{
 			ID: "blocked", Status: model.StatusOpen, IssueType: model.TypeTask,
 			Dependencies: []*model.Dependency{
 				{IssueID: "blocked", DependsOnID: "open-one", Type: model.DepBlocks},
 			},
 		},
-		"open-one": {ID: "open-one", Status: model.StatusOpen},
-		"assigned": {ID: "assigned", Status: model.StatusOpen, Assignee: "ada"},
-		"epic":     {ID: "epic", Status: model.StatusOpen, IssueType: model.TypeEpic},
-		"closed":   {ID: "closed", Status: model.StatusClosed},
-		"clean":    {ID: "clean", Status: model.StatusOpen, IssueType: model.TypeTask},
+		{ID: "open-one", Status: model.StatusOpen},
+		{ID: "assigned", Status: model.StatusOpen, Assignee: "ada"},
+		{ID: "epic", Status: model.StatusOpen, IssueType: model.TypeEpic},
+		{ID: "closed", Status: model.StatusClosed},
+		{ID: "deferred", Status: model.StatusOpen, DeferUntil: &future},
+		{ID: "clean", Status: model.StatusOpen, IssueType: model.TypeTask},
 	}
+	byID := make(map[string]model.Issue, len(issues))
+	for _, issue := range issues {
+		byID[issue.ID] = issue
+	}
+	readiness := model.NewReadinessIndex(issues)
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 
 	cases := map[string]string{
-		"blocked":  "is blocked by",
+		"blocked":  "is blocked by open-one",
 		"assigned": "already assigned",
 		"epic":     "is an epic",
 		"closed":   "status is",
+		"deferred": "is deferred until",
 		"missing":  "absent from loaded Beads records",
 	}
 	for id, fragment := range cases {
-		reasons := claimBlockers(id, byID)
+		reasons := claimabilityReasons(id, byID, readiness, now)
 		if len(reasons) == 0 {
 			t.Errorf("%s was reported claimable", id)
 			continue
@@ -160,7 +182,7 @@ func TestClaimBlockersNameEveryReason(t *testing.T) {
 		}
 	}
 
-	if reasons := claimBlockers("clean", byID); len(reasons) != 0 {
+	if reasons := claimabilityReasons("clean", byID, readiness, now); len(reasons) != 0 {
 		t.Errorf("a clean bead reported %v", reasons)
 	}
 }

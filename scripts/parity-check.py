@@ -71,6 +71,20 @@ VOLATILE_KEYS = {
     "history_status",  # depends on whether a git walk was reachable
 }
 
+# The provenance envelope bv 0.25 builds in `cmd/bv`, which vbx cannot
+# import. Whether vbx ports it or the harness declares it envelope-only is
+# bead vbx-v57's call; until then a command that opts in with
+# `skip_top_level` is compared without these top-level keys. Only the top
+# level — a nested key of the same name is data and is still compared.
+PROVENANCE_KEYS = {
+    "output_format",
+    "source_path",
+    "source_kind",
+    "source_authority",
+    "authority_hash",
+    "scope_hash",
+}
+
 # How each command lines up. `bv_path` and `vbx_path` name the subtree to
 # compare, as a dotted path; None means the whole payload.
 COMPARISONS = [
@@ -100,8 +114,9 @@ COMPARISONS = [
      "note": "bv inlines Insights' PascalCase fields at the top level"},
     {"vbx": "robot-priority", "bv": "robot-priority", "bv_path": "recommendations",
      "vbx_path": "recommendations"},
-    {"vbx": "robot-next", "bv": "robot-next", "compare": False,
-     "note": "both gate on claim safety; bv adds fields vbx does not model"},
+    # The payload is compared whole, less bv's provenance envelope, which
+    # vbx-v57 decides for every command at once.
+    {"vbx": "robot-next", "bv": "robot-next", "skip_top_level": PROVENANCE_KEYS},
 ]
 
 
@@ -273,6 +288,11 @@ def main() -> int:
         if bv_payload is None:
             skipped.append((name, f"bv payload has no {entry.get('bv_path')}"))
             continue
+
+        skip_top_level = entry.get("skip_top_level", set())
+        if skip_top_level:
+            vbx_payload = {k: v for k, v in vbx_payload.items() if k not in skip_top_level}
+            bv_payload = {k: v for k, v in bv_payload.items() if k not in skip_top_level}
 
         difference = describe_difference(normalise(vbx_payload), normalise(bv_payload))
         if difference is None:

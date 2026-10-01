@@ -474,7 +474,10 @@ func run() async -> Int32 {
 
     let engine = BeadsEngine()
     do {
-        _ = try await engine.open(path: options.path)
+        // The CLI is never sandboxed, so it alone may ask `br` what it
+        // supports — which is what puts claim commands in triage and
+        // --robot-next (ADR-020). The app leaves this off.
+        _ = try await engine.open(path: options.path, liveTrackerActions: true)
     } catch {
         complain("Error: \(error.localizedDescription)")
         return 1
