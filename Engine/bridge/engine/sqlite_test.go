@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -204,6 +205,70 @@ func TestLoadSQLiteHonoursTheTombstoneColumn(t *testing.T) {
 	if len(issues) != 2 || issues[0].Status != "open" || issues[1].Status != "tombstone" {
 		t.Errorf("loaded %+v, want t-1 open and t-2 a tombstone", issues)
 	}
+}
+
+// TestLoadSQLiteOrdersAsBvDoes is the regression test for vbx-dj4: the
+// loader sorted by id, so on a beads.db every tie-break downstream (alerts,
+// a label's issue list and top issue) came out in a different order from
+// bv's. bv's reader orders by updated_at DESC, ties in SQLite's row order,
+// and by id only where the schema has no updated_at.
+func TestLoadSQLiteOrdersAsBvDoes(t *testing.T) {
+	open := func(t *testing.T, stmts ...string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "beads.db")
+		db, err := sql.Open("sqlite", "file:"+path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		for _, stmt := range stmts {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("exec %q: %v", stmt, err)
+			}
+		}
+		return path
+	}
+	ids := func(t *testing.T, path string) []string {
+		t.Helper()
+		issues, err := LoadSQLite(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, it := range issues {
+			out = append(out, it.ID)
+		}
+		return out
+	}
+
+	t.Run("newest update first, ties in row order", func(t *testing.T) {
+		// Inserted so that neither id order nor insertion order is the answer.
+		// o-9 and o-10 tie; id order would put o-10 first, bv puts o-9 first.
+		path := open(t,
+			`CREATE TABLE issues (id TEXT PRIMARY KEY, title TEXT, status TEXT, updated_at DATETIME)`,
+			`INSERT INTO issues VALUES ('o-2','Oldest','open','2026-01-01T00:00:00Z')`,
+			`INSERT INTO issues VALUES ('o-11','Newest','open','2026-03-01T00:00:00Z')`,
+			`INSERT INTO issues VALUES ('o-9','Tied A','open','2026-02-01T00:00:00Z')`,
+			`INSERT INTO issues VALUES ('o-10','Tied B','open','2026-02-01T00:00:00Z')`,
+		)
+		got := ids(t, path)
+		want := []string{"o-11", "o-9", "o-10", "o-2"}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("order = %v, want %v (bv's updated_at DESC)", got, want)
+		}
+	})
+
+	t.Run("by id without updated_at", func(t *testing.T) {
+		path := open(t,
+			`CREATE TABLE issues (id TEXT PRIMARY KEY, title TEXT, status TEXT)`,
+			`INSERT INTO issues VALUES ('o-2','B','open'), ('o-11','A','open')`,
+		)
+		got := ids(t, path)
+		want := []string{"o-11", "o-2"}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("order = %v, want %v (bv's fallback orders by id)", got, want)
+		}
+	})
 }
 
 func contains(haystack, needle string) bool {

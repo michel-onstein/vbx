@@ -4,6 +4,29 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — A beads.db listed equal-ranked beads in a different order from bv
+
+**Symptom:** on a beads.db workspace, lists whose entries tie (the 18 stale
+beads in `--robot-alerts`, a label's issue list and its `top_issue` in
+`--robot-label-health`) came out in a different order from bv's over the same
+database, while the JSONL form of the same beads matched. (vbx-dj4)
+
+**Cause:** `LoadSQLite` sorted the loaded beads by id (`rdy-11` before `rdy-7`).
+bv's SQLite reader returns them `ORDER BY updated_at DESC` (by id when there is
+no `updated_at`), and every stable sort downstream keeps the loader's order on
+ties.
+
+**Fix:** the query carries bv's `ORDER BY` clause, spelled as bv spells it and
+with no tie-break of vbx's own, so rows that tie on `updated_at` come back in
+the order SQLite yields to bv too. The id sort is gone.
+
+**Regression test:** `TestLoadSQLiteOrdersAsBvDoes` in
+`Engine/bridge/engine/sqlite_test.go` inserts beads whose update order is
+neither id nor insertion order, with a tie that id order would reverse, and
+checks the schema without `updated_at` falls back to id order.
+
+---
+
 ## 2026-10-01 — A failed edit showed br's log instead of br's error
 
 **Symptom:** when an edit failed under br 0.7.4, the alert read

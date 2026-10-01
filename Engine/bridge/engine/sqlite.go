@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -60,7 +59,18 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 		return nil, fmt.Errorf("%s issues table lacks id/title", path)
 	}
 
-	q := fmt.Sprintf("SELECT %s FROM issues", strings.Join(selected, ", "))
+	// Order as bv's reader does: newest update first, by id where there is no
+	// updated_at. Every tie-break downstream — the order of equal-scored
+	// alerts, a label's issue list and its top issue — follows the order the
+	// loader returns, so sorting by id here reordered them all (vbx-dj4).
+	// Rows that tie on updated_at come back in whatever order SQLite yields
+	// for this clause, which is bv's too: the clause is spelled exactly as
+	// bv spells it, deliberately without a tie-break of our own.
+	orderBy := "ORDER BY id"
+	if cols["updated_at"] {
+		orderBy = "ORDER BY updated_at DESC"
+	}
+	q := fmt.Sprintf("SELECT %s FROM issues %s", strings.Join(selected, ", "), orderBy)
 
 	rows, err := db.Query(q)
 	if err != nil {
@@ -108,8 +118,6 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
-	sort.Slice(issues, func(i, j int) bool { return issues[i].ID < issues[j].ID })
 	return issues, nil
 }
 

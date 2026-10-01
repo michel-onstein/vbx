@@ -5,6 +5,22 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — A beads.db lists beads in bv's order (vbx-dj4, part)
+
+`LoadSQLite` now orders rows `ORDER BY updated_at DESC`, as bv 0.25.2's reader
+spells it (by id where there is no `updated_at`), instead of sorting by id. On
+the readiness beads.db, `--robot-alerts` and the label-health ordering
+differences are gone; parity went from 10 differing commands to 9 and added
+none. `TestLoadSQLiteOrdersAsBvDoes` is the regression test; see BUGS.md.
+
+The velocity remainder (`avg_days_to_close` float vs int, `velocity.estimated`)
+is **not** fixed and is not a vbx bug: bv's main query selects `due_date`, which
+br's schema lacks, so it falls back to `loadIssuesSimple`, which drops
+`closed_at`. Matching it would mean copying that lossy read, which is vbx-tvi's
+open decision — as is the `data_hash` difference, from the same cause.
+
+---
+
 ## 2026-10-01 — A failed edit shows br's error message and hint (vbx-jmu)
 
 `BeadWriter` now reports the `message` and `hint` from br's JSON error on stdout
