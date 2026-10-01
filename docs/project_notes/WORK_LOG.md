@@ -5,6 +5,22 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — The sprint burndown flags at-risk beads and follows scope changes (vbx-e8n)
+
+Burndown re-ported from bv v0.25.2. `at_risk` is bv's own exported
+`analysis.DetectAtRisk` (blocked too long, no activity, critical blocked,
+blockers not closing), always present and `[]` when nothing is at risk. Scope
+changes — beads added to or removed from a sprint mid-flight — are read from the
+sprint file's history in the object store (`sprint_scope.go`, ADR-006) in place
+of bv's `git log -p`, and bend the ideal line as bv's `generateIdealLineScoped`
+does. The daily points no longer count a reopened bead (see BUGS.md). The
+Sprint dashboard shows an At-risk section (absent when unknown, a "none" line
+when empty) and a Scope-changes list. New `Fixtures/sprints`; `parity-check.py`
+now also compares `--robot-sprint-show` and `--robot-burndown` there, and both
+match bv 0.25.2.
+
+---
+
 ## 2026-10-01 — Edits no longer overwrite a bead someone else just changed (vbx-7fh)
 
 Priority and title edits pass the displayed record's `updated_at` to

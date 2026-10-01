@@ -13,9 +13,14 @@ import (
 
 // Sprints, burndown and capacity.
 //
-// `loader.LoadSprints` reads the sprint file; everything after it — the
-// burndown maths, the capacity simulation — lives in `cmd/bv` and is
-// reproduced here.
+// Ported from bv v0.25.2. `loader.LoadSprints` reads the sprint file and
+// `analysis.DetectAtRisk` flags at-risk sprint beads; both are bv's own,
+// called rather than copied. Everything else — the burndown maths
+// (`calculateBurndownAt`, `generateDailyBurndown`, `generateIdealLine`,
+// `generateIdealLineScoped`), the scope-change walk
+// (`computeSprintScopeChanges`, see sprint_scope.go) and the capacity
+// simulation — is still unexported in v0.25.2's `cmd/bv` (main.go and
+// robot_registry.go) and is reproduced here.
 
 // workspaceRoot is the directory sprints are loaded relative to.
 func (s *Session) workspaceRoot() string {
@@ -125,7 +130,8 @@ func (s *Session) sprintShow(req []byte) ([]byte, error) {
 	})
 }
 
-// burndown computes one sprint's burndown, ideal line and projection.
+// burndown computes one sprint's burndown, ideal line, projection, scope
+// changes and at-risk beads — bv's `--robot-burndown`.
 func (s *Session) burndown(req []byte) ([]byte, error) {
 	r, err := decodeSprintRequest(req)
 	if err != nil {
@@ -141,6 +147,27 @@ func (s *Session) burndown(req []byte) ([]byte, error) {
 	}
 
 	issues, _, _ := s.snapshot()
+	now := robotNow()
+	payload, total := burndownPayload(sprint, issues, now)
+
+	// Scope changes come from the sprint file's git history. As in bv, a
+	// workspace that is not itself a repository root has none, and an
+	// unreadable history is not a reason to fail the burndown.
+	byID := make(map[string]model.Issue, len(issues))
+	for _, issue := range issues {
+		byID[issue.ID] = issue
+	}
+	if changes, err := sprintScopeChanges(s.workspaceRoot(), sprint, byID, now); err == nil && len(changes) > 0 {
+		payload["scope_changes"] = changes
+		payload["ideal_line"] = idealLineScoped(sprint, total, changes)
+	}
+	return json.Marshal(payload)
+}
+
+// burndownPayload is bv's calculateBurndownAt: everything except the scope
+// changes, which need the repository. It returns the sprint's bead count too,
+// which the scope-aware ideal line starts from.
+func burndownPayload(sprint *model.Sprint, issues []model.Issue, now time.Time) (map[string]any, int) {
 	byID := make(map[string]model.Issue, len(issues))
 	for _, issue := range issues {
 		byID[issue.ID] = issue
@@ -153,7 +180,6 @@ func (s *Session) burndown(req []byte) ([]byte, error) {
 		}
 	}
 
-	now := robotNow()
 	total := len(members)
 	completed := 0
 	for _, issue := range members {
@@ -163,8 +189,13 @@ func (s *Session) burndown(req []byte) ([]byte, error) {
 	}
 	remaining := total - completed
 
-	totalDays := int(sprint.EndDate.Sub(sprint.StartDate).Hours()/24) + 1
-	elapsedDays, remainingDays := sprintProgress(sprint, now, totalDays)
+	// A sprint without both dates has no days to count, rather than the
+	// nonsense span between the zero time and a real date.
+	totalDays, elapsedDays, remainingDays := 0, 0, 0
+	if !sprint.StartDate.IsZero() && !sprint.EndDate.IsZero() {
+		totalDays = sprintDays(sprint)
+		elapsedDays, remainingDays = sprintProgress(sprint, now, totalDays)
+	}
 
 	idealRate := 0.0
 	if totalDays > 0 {
@@ -192,14 +223,23 @@ func (s *Session) burndown(req []byte) ([]byte, error) {
 		"actual_burn_rate": actualRate,
 		"on_track":         onTrack,
 		"daily_points":     dailyBurndown(members, sprint, now, total),
-		"ideal_line":       idealLine(total, totalDays, sprint.StartDate),
+		"ideal_line":       idealLine(sprint, total),
+		// bv's own detector, over the whole bead set so a blocker outside the
+		// sprint still counts. Always present: an empty list is a real answer
+		// — nothing is at risk — not a missing one.
+		"at_risk": analysis.DetectAtRisk(issues, sprint, now, analysis.DefaultAtRiskThresholds()),
 	}
 	// Absent rather than zero: with no progress there is no date to project,
 	// and the epoch would read as a real prediction.
 	if projected != nil {
 		payload["projected_complete"] = projected
 	}
-	return json.Marshal(payload)
+	return payload, total
+}
+
+// sprintDays is the sprint's length in days, both ends inclusive.
+func sprintDays(sprint *model.Sprint) int {
+	return int(sprint.EndDate.Sub(sprint.StartDate).Hours()/24) + 1
 }
 
 // sprintProgress reports days elapsed and remaining, clamped to the sprint.
@@ -239,12 +279,17 @@ func dailyBurndown(
 	members []model.Issue, sprint *model.Sprint, now time.Time, total int,
 ) []model.BurndownPoint {
 	points := []model.BurndownPoint{}
+	if sprint.StartDate.IsZero() || sprint.EndDate.IsZero() {
+		return points
+	}
 	for day := sprint.StartDate; !day.After(sprint.EndDate) && !day.After(now); day = day.AddDate(0, 0, 1) {
 		// Inclusive end-of-day, so a bead closed at 23:30 counts that day.
 		dayEnd := day.Add(24*time.Hour - time.Second)
 		done := 0
 		for _, issue := range members {
-			if issue.ClosedAt != nil && !issue.ClosedAt.After(dayEnd) {
+			// Closed now *and* closed by then: a reopened bead keeps a stale
+			// closed_at, and counting it would burn down work still open.
+			if issue.Status == model.StatusClosed && issue.ClosedAt != nil && !issue.ClosedAt.After(dayEnd) {
 				done++
 			}
 		}
@@ -258,21 +303,85 @@ func dailyBurndown(
 }
 
 // idealLine is the straight run from the full backlog down to zero.
-func idealLine(total, totalDays int, start time.Time) []model.BurndownPoint {
-	if total == 0 || totalDays <= 0 {
+func idealLine(sprint *model.Sprint, total int) []model.BurndownPoint {
+	if total == 0 {
 		// An empty sprint has no line to draw, and a flat zero would look
 		// like a sprint that finished before it began.
 		return []model.BurndownPoint{}
 	}
-	perDay := float64(total) / float64(totalDays)
-	points := make([]model.BurndownPoint, 0, totalDays+1)
-	for i := 0; i <= totalDays; i++ {
-		remaining := total - int(float64(i)*perDay)
+	return idealLineScoped(sprint, total, nil)
+}
+
+// idealLineScoped is bv's generateIdealLineScoped: the ideal line made
+// scope-aware. At each scope-change date the remaining count moves by the
+// beads added or removed, and the trajectory re-linearises from that day's
+// remaining count to zero at the sprint end — so a mid-sprint addition shows
+// as a change of slope rather than as a misleading "behind schedule" gap.
+// Without events it is the plain straight line, exactly as bv draws it.
+func idealLineScoped(sprint *model.Sprint, total int, events []scopeChange) []model.BurndownPoint {
+	points := []model.BurndownPoint{}
+	if sprint.StartDate.IsZero() || sprint.EndDate.IsZero() {
+		return points
+	}
+	totalDays := sprintDays(sprint)
+	if totalDays <= 0 {
+		return points
+	}
+	dayOf := func(t time.Time) int {
+		return int(t.Sub(sprint.StartDate).Hours() / 24)
+	}
+	// Net scope change per sprint day. A change on or before the first day
+	// is part of the starting scope; one after the end is not part of the
+	// plan at all.
+	delta := map[int]int{}
+	initial := total
+	for _, event := range events {
+		change := 0
+		switch event.Action {
+		case scopeAdded:
+			change = 1
+		case scopeRemoved:
+			change = -1
+		}
+		day := dayOf(event.Date)
+		if day <= 0 || day > totalDays {
+			continue
+		}
+		delta[day] += change
+		initial -= change
+	}
+	if initial < 0 {
+		initial = 0
+	}
+
+	// Each segment burns linearly from segRemaining at segStart to zero at
+	// the sprint end, with the same truncating arithmetic as the plain line,
+	// so a sprint whose events all fall outside the window draws the
+	// identical line.
+	segStart, segRemaining := 0, initial
+	idealAt := func(day int) int {
+		daysLeft := totalDays - segStart
+		if daysLeft <= 0 {
+			return segRemaining
+		}
+		perDay := float64(segRemaining) / float64(daysLeft)
+		remaining := segRemaining - int(float64(day-segStart)*perDay)
 		if remaining < 0 {
 			remaining = 0
 		}
+		return remaining
+	}
+	for i := 0; i <= totalDays; i++ {
+		if d, ok := delta[i]; ok && d != 0 && i > 0 {
+			segRemaining = idealAt(i) + d
+			if segRemaining < 0 {
+				segRemaining = 0
+			}
+			segStart = i
+		}
+		remaining := idealAt(i)
 		points = append(points, model.BurndownPoint{
-			Date:      start.AddDate(0, 0, i),
+			Date:      sprint.StartDate.AddDate(0, 0, i),
 			Remaining: remaining,
 			Completed: total - remaining,
 		})

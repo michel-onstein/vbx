@@ -256,9 +256,11 @@ an enumerated list of volatile fields — timestamps, wall-clock durations,
 absolute paths and build identity. It reports commands bv does not have and
 commands vbx has not implemented as coverage gaps rather than skipping them
 silently, and exits non-zero when any comparable command differs. It runs over
-the demo fixture and over <code>Fixtures/readiness</code> — the readiness and blocking
-cases bv 0.25 changed — the latter both as JSONL and as a <code>beads.db</code>, because
-vbx reads SQLite through its own loader rather than bv's.</p>
+the demo fixture, over <code>Fixtures/readiness</code> — the readiness and blocking
+cases bv 0.25 changed — both as JSONL and as a <code>beads.db</code>, because vbx reads
+SQLite through its own loader rather than bv's, and over <code>Fixtures/sprints</code>,
+the only one with sprints, where <code>--robot-sprint-show</code> and <code>--robot-burndown</code>
+(at-risk beads included) are compared.</p>
 <p>Two known non-comparisons are declared in the harness rather than hidden:
 <code>--robot-insights</code>, because bv inlines <code>analysis.Insights</code>' untagged PascalCase
 fields at the top level, and <code>--robot-label-attention</code>, because bv projects a
@@ -885,7 +887,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td>Sprint dashboard + burndown + at-risk</td>
-<td>Swift Charts</td>
+<td>Swift Charts; scope-aware ideal line, at-risk rows from <code>analysis.DetectAtRisk</code>, scope-change list (bv 0.25.2)</td>
 <td>Engine + Native</td>
 <td>4</td>
 </tr>

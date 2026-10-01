@@ -39,6 +39,103 @@ struct SprintTests {
         return (reopened, directory)
     }
 
+    /// `Fixtures/sprints`, with Sprint 2 selected. It holds a bead behind each
+    /// at-risk signal; the Go suite and parity-check.py read the same file.
+    private func sprintsFixtureStore() async -> ProjectStore {
+        let path = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/sprints")
+            .path
+        let store = ProjectStore()
+        store.skipPhase2 = true
+        await store.open(path: path)
+        // Named rather than `current`: the sprint is in the past by the wall
+        // clock, which is what `current` resolves against.
+        store.selectedSprintID = "spr-sprint-2"
+        await store.loadSprints()
+        return store
+    }
+
+    @Test("The burndown carries bv's at-risk beads")
+    func atRiskLoads() async {
+        let store = await sprintsFixtureStore()
+        let atRisk = store.burndown.atRisk ?? []
+        let byID = Dictionary(uniqueKeysWithValues: atRisk.map { ($0.id, $0) })
+
+        // Idleness only grows with the clock, so these stay flagged whenever
+        // the test runs.
+        #expect(byID["spr-6"]?.signals.contains("no_activity") == true)
+        #expect(byID["spr-5"]?.signals.contains("blockers_not_closing") == true)
+        #expect(byID["spr-5"]?.signals.contains("critical_blocked") == true)
+        // Closed beads are never at risk.
+        #expect(byID["spr-1"] == nil)
+        await store.close()
+    }
+
+    @Test("At-risk is unknown when absent, and none when empty")
+    func atRiskAbsentIsNotEmpty() throws {
+        let absent = try JSONDecoder().decode(
+            Burndown.self, from: Data(#"{"sprint_id":"s1"}"#.utf8))
+        #expect(absent.atRisk == nil)
+        #expect(absent.scopeChanges.isEmpty)
+
+        let empty = try JSONDecoder().decode(
+            Burndown.self, from: Data(#"{"sprint_id":"s1","at_risk":[]}"#.utf8))
+        #expect(empty.atRisk == [])
+    }
+
+    @Test("At-risk items and scope changes decode, unknown signals kept")
+    func atRiskAndScopeDecode() throws {
+        let json = """
+            {"sprint_id":"s1",
+             "at_risk":[{"id":"a","title":"A","status":"open","priority":1,
+                         "signals":["critical_blocked","from_a_later_engine"],
+                         "since":"2026-08-20T09:00:00Z","detail":"P1 status=blocked"}],
+             "scope_changes":[{"date":"2026-08-21T10:00:00Z","issue_id":"b",
+                               "issue_title":"B","action":"added"}]}
+            """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let burndown = try decoder.decode(Burndown.self, from: Data(json.utf8))
+        let item = try #require(burndown.atRisk?.first)
+        #expect(item.signals == ["critical_blocked", "from_a_later_engine"])
+        #expect(item.since != nil)
+        #expect(AtRiskItem.label(for: "critical_blocked") == "Critical, blocked")
+        #expect(AtRiskItem.label(for: "from_a_later_engine") == "from a later engine")
+        #expect(burndown.scopeChanges.first?.issueID == "b")
+        #expect(burndown.scopeChanges.first?.isAddition == true)
+    }
+
+    @Test("The at-risk section draws flagged beads, says when none are, and is absent when unknown")
+    func rendersAtRisk() async throws {
+        let store = await sprintsFixtureStore()
+        let items = try #require(store.burndown.atRisk)
+        #expect(!items.isEmpty)
+
+        let size = CGSize(width: 700, height: 220)
+        let flagged = try Snapshot.render(
+            SprintAtRiskSection(items: items), name: "sprint-at-risk", size: size)
+        let none = try Snapshot.render(
+            SprintAtRiskSection(items: []), name: "sprint-at-risk-none", size: size)
+        let unknown = try Snapshot.render(
+            SprintAtRiskSection(items: nil), name: "sprint-at-risk-unknown", size: size)
+
+        // A row per bead, with its signals, is more ink than the one-line
+        // "none" — and unknown draws nothing, rather than a reassuring "none".
+        #expect(flagged.inkCoverage() > none.inkCoverage() * 2)
+        #expect(none.inkCoverage() > 0.001)
+        #expect(unknown.inkCoverage() < 0.0005)
+
+        // The whole dashboard still draws with the section in it.
+        let dashboard = try Snapshot.render(
+            SprintView().environmentObject(store), name: "sprint-dashboard-at-risk",
+            size: CGSize(width: 900, height: 1000))
+        #expect(dashboard.inkCoverage() > 0.01)
+        await store.close()
+    }
+
     @Test("A workspace with no sprint file is an empty dashboard, not an error")
     func noSprintFile() async {
         let store = await Fixture.loadedStore()

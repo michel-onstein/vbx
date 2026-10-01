@@ -1,0 +1,3 @@
+{"id":"spr-sprint-1","name":"Sprint 1","start_date":"2026-08-03T00:00:00Z","end_date":"2026-08-16T23:59:59Z","bead_ids":["spr-11","spr-13"]}
+{"id":"spr-sprint-2","name":"Sprint 2","start_date":"2026-08-17T00:00:00Z","end_date":"2026-08-30T23:59:59Z","bead_ids":["spr-1","spr-2","spr-3","spr-4","spr-5","spr-6","spr-7","spr-8","spr-9","spr-10","spr-14","spr-ghost"]}
+{"id":"spr-sprint-3","name":"Sprint 3","start_date":"2026-08-31T00:00:00Z","end_date":"2026-09-13T23:59:59Z","bead_ids":["spr-15"]}
