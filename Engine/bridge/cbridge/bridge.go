@@ -3,7 +3,7 @@
 //
 // Build with:
 //
-//	go build -buildmode=c-archive -o libvbxengine.a ./cbridge
+//	go build -buildmode=c-archive -o libvbxgo.a ./cbridge
 //
 // ABI contract
 //

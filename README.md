@@ -36,7 +36,7 @@ flowchart LR
     S["ProjectStore<br/>VBXAppCore"]:::core
     E["BeadsEngine actor<br/>VBXEngine"]:::core
     C["C ABI<br/>CVBXEngine"]:::bridge
-    G["Go engine<br/>libvbxengine.a"]:::bridge
+    G["Go engine<br/>libvbxgo.a"]:::bridge
     D[".beads store"]:::data
 
     V --> S --> E --> C --> G --> D
@@ -207,7 +207,7 @@ python3 scripts/parity-check.py     # vbx-cli against bv, command by command (ne
 
 A fresh clone must run `./scripts/build-engine.sh` before `swift test` — the
 engine archive is deliberately not committed, and without it the link fails
-with `library 'vbxengine' not found`.
+with `library 'vbxgo' not found`.
 
 ## What works today
 

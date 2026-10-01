@@ -71,14 +71,14 @@ fi
 # archive left over from a development build is rebuilt rather than linked
 # against — the failure it causes otherwise is a linker error about a missing
 # architecture, a long way from the flag that caused it.
-if [[ ! -f Engine/build/libvbxengine.a ]]; then
+if [[ ! -f Engine/build/libvbxgo.a ]]; then
   echo "==> Engine archive missing; building it first"
   if [[ $UNIVERSAL -eq 1 ]]; then
     ./scripts/build-engine.sh --universal
   else
     ./scripts/build-engine.sh
   fi
-elif [[ $UNIVERSAL -eq 1 ]] && ! lipo -archs Engine/build/libvbxengine.a | grep -q x86_64; then
+elif [[ $UNIVERSAL -eq 1 ]] && ! lipo -archs Engine/build/libvbxgo.a | grep -q x86_64; then
   echo "==> Engine archive is host-only; rebuilding it universal"
   ./scripts/build-engine.sh --universal
 fi
