@@ -5,6 +5,19 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — The analysis clock is pinned everywhere bv pins it (vbx-48y)
+
+`robotNow()` (honouring `SOURCE_DATE_EPOCH`) now drives label health and
+attention, priority impact, drift alerts, ETA, burndown, capacity, recipes,
+history and orphan report timestamps and the robot envelope, as bv 0.23+ does.
+The long-lived analyzer has its clock set per call (`Session.pinClock`), never
+captured at load. Parity with bv 0.25.2: label-health, alerts and priority now
+match (6 differing before, 3 after; the rest belong to vbx-ut6 and vbx-v57).
+The `PINNED_CLOCK` comment in `parity-check.py` now gives the right date,
+2026-08-29. Bug log entry of the same date.
+
+---
+
 ## 2026-10-01 — `waits-for` and `conditional-blocks` block in Swift too (vbx-850)
 
 `DependencyType.isBlocking` follows bv v0.25's `IsBlocking()`: `blocks`,
