@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.4.0 — 2026-10-01
+
+### Features
+
+- The graph and inspector treat waits-for and conditional-blocks as blocking, as the engine does ([#85](https://github.com/michel-onstein/vbx/pull/85))
+
 ## 0.3.0 — 2026-10-01
 
 ### Features
