@@ -1199,6 +1199,74 @@ def test_beads_source_repo_check() -> None:
               "some-topic-branch" in drifted.stderr, drifted.stderr.strip())
 
 
+# Every file `br` writes beside its database. Names are the ones observed on
+# disk — not paraphrased from a glob — so a rule that stops matching a real
+# name fails here.
+BR_SIDE_FILES = (
+    # SQLite family, plus fsqlite 0.2+'s WAL durability sidecars (br 0.7).
+    "beads.db", "beads.db-journal", "beads.db-shm", "beads.db-wal",
+    "beads.db-wal-cert", "beads.db-wal-cert-head",
+    "beads.db-fsqlite-ns-gate", "beads.db-fsqlite-ns-use",
+    # fsqlite 0.3.6+ engine-upgrade bookkeeping.
+    "beads.db.fsqlite-migration-state",
+    # The vacuum copies `br doctor migrate-schema apply` leaves behind.
+    ".beads.db.schema-migration-20261001T190951.278593Z-58810-0.vacuum-fsqlite-ns-gate",
+    ".beads.db.schema-migration-20261001T190951.278593Z-58810-0.vacuum-fsqlite-ns-use",
+    ".beads.db.schema-migration-20261001T190951.278593Z-58810-0.vacuum-wal-cert",
+    ".beads.db.schema-migration-20261001T190951.278593Z-58810-0.vacuum-wal-cert-head",
+    ".beads.db.schema-migration-20261001T190951.278593Z-58810-0.vacuum.fsqlite-migration-state",
+    ".beads.vacuum.4242.tmp-fsqlite-ns-use",
+    # Locks, including br 0.7's per-resource and transition locks.
+    ".write.lock", ".sync.lock", ".beads.lock", ".bv.lock",
+    ".br-db-openers-6314d5bd16bc0083c899e1ba.lock",
+    ".br-db-openers-cac7a434a9d8fbe74e5abec6.transition.lock",
+    ".br-db-write-e57ffe5bef90950c44307cec.lock",
+    ".br-jsonl-write-a3726c57a39d2b6e1b871fb0.lock",
+    ".write-waiters.lock/waiter",
+    # Directories: history, recovery, and the WAL-index quarantines br 0.7
+    # leaves beside the database (not in br's own canonical .gitignore).
+    ".br_history/issues.20260823.jsonl",
+    ".br_recovery/run-1/beads.db-wal.truncated-wal",
+    ".br-wal-index-x7Q2a/receipt.json",
+    # Odds and ends.
+    "last-touched", "beads.base.jsonl", "sync_base.jsonl",
+)
+
+# What the workspace is: committed on purpose, and must stay committable.
+BEADS_TRACKED = (".gitignore", "config.yaml", "issues.jsonl")
+
+
+def test_beads_side_files_are_ignored() -> None:
+    """`.beads/.gitignore` covers what `br` writes, and nothing it should not.
+
+    br 0.7 added WAL-cert, migration-state and quarantine files the old rules
+    let through, so they sat untracked in every checkout — one `git add .beads`
+    from committing a machine's database state (vbx-1a7). `--no-index` asks
+    about the *patterns*, so a tracked file is judged by the rules too rather
+    than passing because it is already in the index.
+    """
+    print("\nbr's side files are ignored")
+
+    def ignored(name: str) -> bool:
+        return subprocess.run(
+            ["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index",
+             f".beads/{name}"]).returncode == 0
+
+    for name in BR_SIDE_FILES:
+        check(f".beads/{name} is ignored", ignored(name),
+              "a `git add .beads` would commit it")
+
+    tracked = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", ".beads"],
+        capture_output=True, text=True, check=True).stdout.split()
+    check("the tracked set is exactly the workspace files",
+          sorted(tracked) == sorted(f".beads/{n}" for n in BEADS_TRACKED),
+          f"tracked: {tracked}")
+    for name in BEADS_TRACKED:
+        check(f".beads/{name} is NOT ignored", not ignored(name),
+              "the rules would drop a file the workspace needs")
+
+
 def run_notices_check(gomod: str, notices: str) -> subprocess.CompletedProcess[str]:
     """Run build-notices.py --check against a scratch go.mod and notices file."""
     with tempfile.TemporaryDirectory() as raw:
@@ -1901,6 +1969,7 @@ def main() -> int:
     test_notices_check_catches_version_drift()
     test_docs_html_check()
     test_beads_source_repo_check()
+    test_beads_side_files_are_ignored()
     test_bump_regenerates_the_html()
     test_no_v_prefix()
     test_release_notes()

@@ -4,6 +4,36 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — br 0.7's database side files could be committed
+
+**Symptom:** after br 0.7, the main checkout showed
+`beads.db-wal-cert`, `beads.db-wal-cert-head`, `beads.db.fsqlite-migration-state`
+and, after `br doctor migrate-schema apply`, five
+`.beads.db.schema-migration-<run>.vacuum-*` files as untracked. Staging `.beads`
+would have committed one machine's database state. (vbx-1a7)
+
+**Cause:** `.beads/.gitignore` predates fsqlite 0.2/0.3. `*.db-wal` matches only
+that exact suffix, and the vacuum copies end in `.vacuum-…` where the existing
+globs want `.db-` or `.tmp-` — the suffix escape the file already records twice.
+br 0.7 also leaves `.br-wal-index-*/` quarantine directories, which br's own
+canonical `BEADS_GITIGNORE` does not list.
+
+**Fix:** the rules from br 0.7.4's `BEADS_GITIGNORE` (`*.db-wal*`,
+`*-fsqlite-ns-gate`, `*-fsqlite-ns-use`, `*.vacuum-wal-cert*`,
+`*.fsqlite-migration-state`, `.write-waiters.lock/`) plus `.br-wal-index-*/`.
+
+**Regression test:** `test_beads_side_files_are_ignored` in
+`scripts/test-packaging.py` runs `check-ignore --no-index` on every observed
+side-file name (failed on nine before the fix), and asserts the tracked set is
+exactly `.gitignore`, `config.yaml` and `issues.jsonl`, none of them ignored.
+
+**Prevention:** after a br upgrade, diff its `BEADS_GITIGNORE`
+(`src/cli/commands/init.rs`) against `.beads/.gitignore`, and add any new name
+seen untracked in `.beads/` to `BR_SIDE_FILES`. The file watch needs nothing:
+churn in these files reloads, and the reload is gated on the data hash.
+
+---
+
 ## 2026-10-01 — The app spawned trackers when opening a multi-repository workspace
 
 **Symptom:** opening a `.bv/workspace.yaml` workspace in the app ran

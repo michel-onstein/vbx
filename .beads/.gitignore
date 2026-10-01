@@ -2,7 +2,8 @@
 *.db
 *.db-journal
 *.db-shm
-*.db-wal
+# `-wal` plus fsqlite 0.2+'s `-wal-cert` / `-wal-cert-head` durability sidecars (br 0.7).
+*.db-wal*
 # fsqlite namespace sidecars — per-machine sqlite runtime state, written 0600 next to the DB
 # (`beads.db-fsqlite-ns-use`, `-ns-gate`). Exactly the escape the #271 note below describes: the
 # suffix clears `*.db-wal`/`*.db-shm`, and `*.db` only matches the bare filename, so both were
@@ -14,8 +15,24 @@
 # `*.tmp` only matches a trailing `.tmp`, so both globs miss and the pair lands untracked next
 # to the DB. That is how one machine's vacuum state got committed in #1474 by a `git add -A`.
 *.tmp-fsqlite-*
+# br 0.7 (fsqlite 0.3), matching br's own BEADS_GITIGNORE. The vacuum copies
+# `br doctor migrate-schema apply` leaves as
+# `.beads.db.schema-migration-<run>.vacuum-{fsqlite-ns-gate,fsqlite-ns-use,wal-cert,wal-cert-head}`
+# carry `.vacuum-` where the globs above want `.db-` or `.tmp-` — the same suffix
+# escape, a third time — so the namespace sidecars are matched by their tail.
+*-fsqlite-ns-gate
+*-fsqlite-ns-use
+*.vacuum-wal-cert*
+# fsqlite 0.3.6+ engine-upgrade bookkeeping, beside the DB and its vacuum copy.
+*.fsqlite-migration-state
+# WAL-index quarantines br 0.7 leaves beside the database
+# (`.br-wal-index-<random>/`). Not in br's canonical list; found on disk.
+.br-wal-index-*/
 
-# Lock files
+# Lock files — `*.lock` also covers br 0.7's `.br-db-openers-<h>.lock`,
+# `.br-db-write-<h>.lock`, `.br-jsonl-write-<h>.lock` and `*.transition.lock`.
+.write.lock
+.write-waiters.lock/
 *.lock
 
 # Temporary
