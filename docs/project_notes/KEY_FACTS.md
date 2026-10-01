@@ -156,6 +156,13 @@ view snapshots for inspection.
   fixture reported "Found 13 invalid issue record(s)", which was exactly the 13
   records carrying dependencies. Real `br` exports include it (along with
   `created_by`, `metadata`, `thread_id`); the hand-written fixture did not.
+- **`br` 0.7.4's first write after a stock SQLite reader fails once.** After
+  `bv` or `sqlite3` has opened `beads.db`, the next write retries for ~17 s and
+  exits 2 with `database is busy (recovery in progress)` — the error JSON on
+  stdout, 24 pager log lines on stderr — and the write after it succeeds. 0.6.0
+  is unaffected, and vbx's own `mode=ro&immutable=1` reader does not trigger
+  it. `BeadWriter` re-sends that one failure once (vbx-1sw), so an edit can
+  take ~17 s rather than failing.
 - **`Bundle.main` in the test process is SwiftPM's helper binary** —
   `…/XcodeDefault.xctoolchain/usr/libexec/swift/pm`, measured, not assumed. It
   has no `CFBundleShortVersionString` and no `CFBundleVersion`, so the About

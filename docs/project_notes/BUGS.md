@@ -4,6 +4,37 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — An edit failed with `br` 0.7.4 after `bv` had read the workspace
+
+**Symptom:** with `br` 0.7.4, once any stock SQLite client (`bv`, `sqlite3`)
+had opened `.beads/beads.db`, the next edit from vbx hung for ~17 s and then
+failed, showing a line of `fsqlite_pager` log as its message. Repeating the same
+edit succeeded. Reproduced against a copy of a real workspace: exit 2, stdout
+`{"error":{"code":"DATABASE_ERROR","message":"Database error: database is busy
+(recovery in progress)", … "retryable": false}}`, 24 `ERROR fsqlite_pager`
+lines on stderr; the next `br update` exited 0. (vbx-1sw)
+
+**Cause:** upstream, in `br` 0.7.4's pager — a stock reader leaves the WAL
+index in a state 0.7.4 recovers from only after failing the write that found
+it. 0.6.0 does not do this; vbx's own reader (`mode=ro&immutable=1`) does not
+trigger it.
+
+**Fix:** `BeadWriter` re-sends a write once when it fails with exactly that
+text (`isRecoveryInProgress`), and reports a second failure as usual. Every edit
+vbx sends is idempotent — set priority, set title, add or remove a label — so a
+re-send is safe whether or not the failed attempt landed. Any other failure,
+including a plain "database is busy", is still reported at once.
+
+**Prevention:** five tests in `Tests/VBXAppCoreTests/BeadWriterTests.swift`.
+`recoveryInProgressIsRetriedOnce` fails on the first attempt with the captured
+output and asserts the identical command is sent twice and succeeds;
+`recoveryRetryThroughRealProcess` does the same through the real `Process`
+runner with a stub `br` script; the others pin that it retries only once, never
+for another error, and only on a non-zero exit. Three fail with the retry
+removed.
+
+---
+
 ## 2026-10-01 — A copied fixture's first `br` write could not find any bead
 
 **Symptom:** every test that copied `Fixtures/demo` and then wrote through

@@ -148,3 +148,130 @@ func brCandidatesPreferPath() {
     let candidates = BeadWriter.brCandidates(path: "/a/bin:/b/bin", home: "/h")
     #expect(Array(candidates.prefix(3)) == ["/a/bin/br", "/b/bin/br", "/h/.local/bin/br"])
 }
+
+// MARK: - br 0.7.4's "recovery in progress" (vbx-1sw)
+
+/// What `br` 0.7.4 printed, verbatim, on the write after `sqlite3` had opened
+/// the database: the error JSON on stdout and the pager's retry log on stderr
+/// (one of the 24 lines kept, the hint shortened). Captured 2026-10-01.
+private let recoveryStdout = """
+    {
+      "error": {
+        "code": "DATABASE_ERROR",
+        "message": "Database error: database is busy (recovery in progress)",
+        "hint": "The WAL index (.beads/beads.db-shm) must be rebuilt before br can read the database.",
+        "retryable": false,
+        "context": null
+      }
+    }
+    """
+private let recoveryStderr = """
+    2026-10-01T19:37:05.737978Z ERROR fsqlite_pager::pager: group-commit callback failed \
+    after durable mutation started; retaining RESERVED and leaving epoch FLUSHING epoch=1 \
+    error=database is busy (recovery in progress)
+
+    """
+
+@MainActor
+@Test("A write that fails with 'recovery in progress' is sent again, once, and succeeds")
+func recoveryInProgressIsRetriedOnce() async throws {
+    var sent: [[String]] = []
+    let writer = BeadWriter(
+        locate: { "/fake/br" },
+        runner: { argv, _ in
+            sent.append(argv)
+            return sent.count == 1
+                ? .init(status: 2, standardOutput: recoveryStdout, standardError: recoveryStderr)
+                : .init(status: 0, standardOutput: "{}", standardError: "")
+        })
+
+    try await writer.setPriority(1, for: "vbx-3", in: "/tmp/w")
+
+    let command = ["/fake/br"] + BeadWriter.priorityArguments(1, for: "vbx-3")
+    #expect(sent == [command, command])
+}
+
+@MainActor
+@Test("A second 'recovery in progress' is reported, not retried forever")
+func recoveryInProgressRetriesOnlyOnce() async {
+    var calls = 0
+    let writer = BeadWriter(
+        locate: { "/fake/br" },
+        runner: { _, _ in
+            calls += 1
+            return .init(status: 2, standardOutput: recoveryStdout, standardError: recoveryStderr)
+        })
+
+    await #expect(throws: BeadWriter.WriteError.self) {
+        try await writer.setTitle("New", for: "vbx-3", in: "/tmp/w")
+    }
+    #expect(calls == 2)
+}
+
+@MainActor
+@Test("Any other failure is reported at once, without a retry")
+func otherFailuresAreNotRetried() async {
+    var calls = 0
+    let writer = BeadWriter(
+        locate: { "/fake/br" },
+        runner: { _, _ in
+            calls += 1
+            // Busy, but not the recovery case: a genuine lock is not this bug.
+            return .init(status: 2, standardOutput: "", standardError: "database is busy\n")
+        })
+
+    await #expect(throws: BeadWriter.WriteError.self) {
+        try await writer.addLabel("ui", to: ["vbx-3"], in: "/tmp/w")
+    }
+    #expect(calls == 1)
+}
+
+@Test("Only a failed run carrying the exact recovery text counts")
+func recoveryMatcher() {
+    typealias Output = BeadWriter.Output
+    #expect(
+        BeadWriter.isRecoveryInProgress(
+            Output(status: 2, standardOutput: recoveryStdout, standardError: "")))
+    #expect(
+        BeadWriter.isRecoveryInProgress(
+            Output(status: 2, standardOutput: "", standardError: recoveryStderr)))
+    // A success that happens to mention it is not a failure to retry.
+    #expect(
+        !BeadWriter.isRecoveryInProgress(
+            Output(status: 0, standardOutput: recoveryStdout, standardError: recoveryStderr)))
+    #expect(
+        !BeadWriter.isRecoveryInProgress(
+            Output(status: 2, standardOutput: "", standardError: "ISSUE_NOT_FOUND")))
+}
+
+@MainActor
+@Test("Through the real process runner, a stub br failing once with the recovery error is retried")
+func recoveryRetryThroughRealProcess() async throws {
+    // Exercises `BeadWriter.run` itself — exit status, both pipes — with a stub
+    // that behaves like br 0.7.4 minus the 17 s: fail once, then succeed.
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vbx-1sw-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let stub = dir.appendingPathComponent("br")
+    let script = """
+        #!/bin/sh
+        echo "$@" >> calls
+        if [ ! -e failed-once ]; then
+          touch failed-once
+          echo '{"error":{"code":"DATABASE_ERROR","message":"database is busy (recovery in progress)"}}'
+          echo 'ERROR fsqlite_pager::pager: error=database is busy (recovery in progress)' >&2
+          exit 2
+        fi
+        echo '{}'
+        """
+    try script.write(to: stub, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+
+    let writer = BeadWriter(locate: { stub.path })
+    try await writer.setPriority(3, for: "vbx-6", in: dir.path)
+
+    let calls = try String(contentsOf: dir.appendingPathComponent("calls"), encoding: .utf8)
+    #expect(calls == "update vbx-6 --priority 3 --json\n" + "update vbx-6 --priority 3 --json\n")
+}
