@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.3.0 — 2026-10-01
+
+### Features
+
+- Build the analysis engine on bv 0.25.2, so its numbers follow bv's current rules ([#84](https://github.com/michel-onstein/vbx/pull/84))
+
 ## 0.2.6 — 2026-10-01
 
 ### Fixes
