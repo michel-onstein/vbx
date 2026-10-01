@@ -114,8 +114,34 @@ def test_bv_zero_times_are_dropped_only_when_zero(parity) -> None:
           parity.strip_bv_zero_times(bv, set()) == bv)
 
 
+def test_envelope_only_keys_are_one_list(parity) -> None:
+    print("\nbv's envelope-only keys (ADR-023)")
+    keys = parity.ENVELOPE_ONLY_KEYS
+    check("exactly source_authority and authority_hash are declared envelope-only",
+          set(keys) == {"source_authority", "authority_hash"}, str(sorted(keys)))
+    check("every declared key gives its reason",
+          all(isinstance(reason, str) and reason.strip() for reason in keys.values()), str(keys))
+    # The provenance vbx ports must be compared, not hidden.
+    ported = {"output_format", "source_path", "source_kind", "scope_hash", "data_hash"}
+    check("the ported provenance is not declared away", not (ported & set(keys)),
+          str(ported & set(keys)))
+    check("no ported key is volatile either", not (ported & parity.VOLATILE_KEYS),
+          str(ported & parity.VOLATILE_KEYS))
+    ad_hoc = [entry["vbx"] for entry in parity.COMPARISONS if "skip_top_level" in entry]
+    check("no command strips keys of its own", not ad_hoc, str(ad_hoc))
+
+    bv = {"source_authority": {"state": "complete"}, "authority_hash": "x", "scope_hash": "s",
+          "triage": {"source_authority": "nested data"}}
+    stripped = parity.strip_envelope_only(bv)
+    check("the declared keys go from the top level",
+          stripped == {"scope_hash": "s", "triage": {"source_authority": "nested data"}},
+          str(stripped))
+    check("a non-object output passes through", parity.strip_envelope_only([1]) == [1])
+
+
 def main() -> int:
     parity = load_parity()
+    test_envelope_only_keys_are_one_list(parity)
     test_sqlite_workspace_keeps_every_record(parity)
     test_every_difference_is_reported(parity)
     test_default_run_covers_every_fixture(parity)

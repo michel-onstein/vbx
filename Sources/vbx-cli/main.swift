@@ -495,7 +495,8 @@ func run() async -> Int32 {
         let data = try await engine.rawJSON(command.method, request: request)
 
         if options.format == "toon" {
-            let object = try JSONSerialization.jsonObject(with: data)
+            let object = RobotEnvelope.stamping(
+                format: "toon", on: try JSONSerialization.jsonObject(with: data))
             let wrapped = try await engine.rawJSON("toon", request: ["value": object])
             struct Wrapper: Decodable { let toon: String }
             let decoded = try JSONDecoder().decode(Wrapper.self, from: wrapped)

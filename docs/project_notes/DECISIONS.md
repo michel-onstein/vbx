@@ -1066,7 +1066,7 @@ gates, in bv's order, with the claim command taken from the bead's actions.
   the fixture has no tracker metadata. Run in a real `br` workspace it emits
   bv's claim, byte for byte.
 - `parity-check.py` compares `--robot-next` again, less the provenance envelope
-  keys vbx-v57 owns.
+  keys vbx-v57 owns (since settled by ADR-023).
 
 ---
 
@@ -1192,3 +1192,66 @@ argument.
 - An edit costs one extra `br update --help` per writer, once.
 - Nothing in vbx reads `updatedAtStamp` for display or arithmetic; it is a
   token handed back to `br`.
+
+---
+
+## ADR-023 — vbx ports bv's provenance envelope, except the source-authority report
+
+**Date:** 2026-10-01 · **Status:** Accepted, implemented
+
+**Context.** bv 0.25 added six keys to the envelope of every issue-backed robot
+payload, all built in `cmd/bv`, which vbx cannot import: `output_format`,
+`source_path`, `source_kind`, `scope_hash`, `source_authority` and
+`authority_hash`. After the engine bump `--robot-suggest` and `--robot-graph`
+differed from bv on every fixture on these keys alone, and `--robot-next` and
+`--robot-burndown` were compared with them stripped, each command declaring its
+own list (vbx-v57).
+
+**Decision.** Per key, port it when vbx can compute it from what it already
+holds *and* it means what it means in bv; otherwise declare it envelope-only.
+
+- **Ported** (`Engine/bridge/engine/provenance.go`), on every payload that
+  carries vbx's envelope — suggest, priority, next, insights, graph and now
+  burndown, which also gained `generated_at` and `data_hash`:
+  - `output_format` — `json` from the engine; vbx-cli restamps it `toon` when
+    it re-encodes (`RobotEnvelope.stamping`).
+  - `source_path` — the file vbx loaded (the workspace config for a
+    workspace).
+  - `source_kind` — vbx's own kind in bv's vocabulary: its local JSONL is
+    `jsonl_local`, `sqlite` and `workspace` are as named.
+  - `scope_hash` — bv's `robotScopeHash` verbatim: label, recipe, repo, the
+    unscoped data hash and the sorted candidate ids. A label-scoped graph uses
+    the label's core beads as bv's `--label` does, and reports `scope.label`.
+- **Envelope-only**, in `parity-check.py`'s single `ENVELOPE_ONLY_KEYS`, each
+  with its reason:
+  - `source_authority` — bv's report of its multi-source selection: candidates
+    ranked by freshness, a stale fallback, per-source authority warnings. vbx
+    resolves one source and ranks none (that is vbx-tvi). Its fields could be
+    filled in, but `stale: false` and `state: complete` would then assert
+    checks vbx never ran.
+  - `authority_hash` — a hash of `source_authority`, so it goes with it.
+
+The values are always vbx's own. In a `br` 0.7 workspace bv reads `beads.db`
+where vbx reads `issues.jsonl`; `source_path`, `source_kind`, `data_hash` and
+so `scope_hash` then differ honestly, and that difference is vbx-tvi's, not
+something to fake here.
+
+**Alternatives.**
+
+- *Declare all six envelope-only.* Rejected: four are cheap, exact and useful
+  to an agent reading vbx's output with bv's contract, and a harness that hides
+  computable keys stops checking them.
+- *Port `source_authority` from the one load vbx does.* Rejected for the reason
+  above; vbx's claim-safety verdict is already visible as `--robot-next`'s
+  `source_authority_incomplete`.
+- *Keep per-command stripping.* Rejected: it is how the same key ended up
+  stripped for two commands and compared for two others.
+
+**Consequences.**
+
+- `Fixtures/demo`, `Fixtures/readiness` and `Fixtures/sprints` match bv 0.25.2
+  on every compared command; `--robot-burndown` is compared whole.
+- The readiness `beads.db` section differs only where vbx-tvi/vbx-dj4 already
+  did; `scope_hash` follows `data_hash` there because it hashes it.
+- When vbx-tvi ports bv's source ranking, `source_authority` becomes portable
+  and this decision should be revisited.

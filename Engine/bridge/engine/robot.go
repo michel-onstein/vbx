@@ -73,7 +73,8 @@ func (s *Session) suggest(req []byte) ([]byte, error) {
 
 	issues, _, _ := s.snapshot()
 	_, hash := s.robotEnvelope()
-	return json.Marshal(analysis.GenerateRobotSuggestOutput(issues, config, hash))
+	return s.withProvenance(
+		analysis.GenerateRobotSuggestOutput(issues, config, hash), hash, provenanceScope{})
 }
 
 // priority ranks beads whose priority looks wrong, with the reasoning.
@@ -158,7 +159,7 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 		filters["by_assignee"] = r.ByAssignee
 	}
 
-	return json.Marshal(map[string]any{
+	return s.withProvenance(map[string]any{
 		"generated_at":       generated,
 		"data_hash":          hash,
 		"recommendations":    filtered,
@@ -169,7 +170,7 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 			"recommendations": len(filtered),
 			"high_confidence": highConfidence,
 		},
-	})
+	}, hash, provenanceScope{})
 }
 
 func containsExact(values []string, needle string) bool {
@@ -199,7 +200,7 @@ type nextDiagnosticPick struct {
 }
 
 // nextOutput is bv 0.25's robot-next payload, field for field, under vbx's
-// envelope. The provenance keys bv adds to its envelope are vbx-v57's.
+// envelope; next() adds the provenance vbx ports (provenance.go, ADR-023).
 type nextOutput struct {
 	GeneratedAt       string                `json:"generated_at"`
 	DataHash          string                `json:"data_hash"`
@@ -291,7 +292,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Message: "Readiness is provisional; inspect source_authority for failed sources, dropped records, or stale fallback.",
 			Repair:  "Restore or refresh the affected sources and rerun the command before claiming work.",
 		}}
-		return json.Marshal(output)
+		return s.withProvenance(output, hash, provenanceScope{})
 	}
 
 	if len(picks) == 0 {
@@ -302,7 +303,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Message:  "No open, unblocked, unassigned non-epic recommendation passed the robot-next claimability filter.",
 			Repair:   "Use br ready --json or scripts/br_retry.sh actionable --json for authoritative claim candidates.",
 		}}
-		return json.Marshal(output)
+		return s.withProvenance(output, hash, provenanceScope{})
 	}
 
 	byID := make(map[string]model.Issue, len(issues))
@@ -332,7 +333,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Message:  strings.Join(unsafeReasons, "; "),
 			Repair:   "Use the authoritative Beads actionable queue plus claim gate before claiming work.",
 		}}
-		return json.Marshal(output)
+		return s.withProvenance(output, hash, provenanceScope{})
 	}
 
 	if reasons := triage.Status.ClaimUnsafeReasons(); len(reasons) > 0 {
@@ -344,7 +345,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Message:  strings.Join(reasons, "; "),
 			Repair:   "Retry bv --robot-next after graph metrics are available, or use the authoritative Beads actionable queue plus claim gate.",
 		}}
-		return json.Marshal(output)
+		return s.withProvenance(output, hash, provenanceScope{})
 	}
 
 	actions := byID[top.ID].Actions(true)
@@ -359,7 +360,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 			Code: "live_action_route_unavailable", Severity: "info",
 			Message: actions.UnavailableReason,
 		}}
-		return json.Marshal(output)
+		return s.withProvenance(output, hash, provenanceScope{})
 	}
 
 	output.Actionable = true
@@ -369,7 +370,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 	output.Reasons = top.Reasons
 	output.Unblocks = top.Unblocks
 	output.ClaimCmd = actions.Claim.Shell
-	return json.Marshal(output)
+	return s.withProvenance(output, hash, provenanceScope{})
 }
 
 // claimabilityReasons lists why a bead cannot be claimed, in bv's order — an
@@ -430,7 +431,7 @@ func (s *Session) insights(req []byte) ([]byte, error) {
 	stats.WaitForPhase2()
 
 	generated, hash := s.robotEnvelope()
-	return json.Marshal(map[string]any{
+	return s.withProvenance(map[string]any{
 		"generated_at": generated,
 		"data_hash":    hash,
 		"insights":     stats.GenerateInsights(50),
@@ -448,7 +449,7 @@ func (s *Session) insights(req []byte) ([]byte, error) {
 			"slack":               limitFloatMap(stats.Slack(), limit),
 			"articulation_points": limitSlice(stats.ArticulationPoints(), limit),
 		},
-	})
+	}, hash, provenanceScope{})
 }
 
 // limitFloatMap keeps the highest-valued entries.
@@ -553,7 +554,7 @@ func (s *Session) graphExport(req []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("exporting the graph: %w", err)
 	}
-	return json.Marshal(result)
+	return s.withProvenance(result, analyzer.DataHash(), labelScope(issues, r.Label))
 }
 
 // fileImpact rates the risk of touching a set of files.

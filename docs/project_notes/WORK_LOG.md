@@ -5,6 +5,21 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Robot output carries bv 0.25's provenance envelope (vbx-v57)
+
+bv 0.25's six provenance keys decided one by one (ADR-023). `output_format`,
+`source_path`, `source_kind` and `scope_hash` are ported in
+`Engine/bridge/engine/provenance.go` onto suggest, priority, next, insights,
+graph and burndown (which also gained `generated_at`/`data_hash`); vbx-cli
+restamps `output_format` as `toon` when it re-encodes. `source_authority` and
+`authority_hash` describe bv's multi-source ranking, which vbx does not do
+(vbx-tvi), so `parity-check.py` declares them in one `ENVELOPE_ONLY_KEYS` list
+with reasons, applied to every command; the per-command `skip_top_level` is
+gone. Parity with bv 0.25.2: 11 differing commands before, 5 after — demo,
+readiness and sprints match fully; the readiness `beads.db` section keeps only
+vbx-tvi/vbx-dj4's `data_hash` and velocity differences (`scope_hash` follows
+`data_hash`).
+
 ## 2026-10-01 — The sprint burndown flags at-risk beads and follows scope changes (vbx-e8n)
 
 Burndown re-ported from bv v0.25.2. `at_risk` is bv's own exported
