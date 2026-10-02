@@ -5,6 +5,21 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — bv 0.21–0.25 capabilities mapped and the remaining work filed (vbx-htg)
+
+Each capability the epic lists was checked against main and bv 0.25.2 and
+given an honest row in `FEATURE_PARITY.md`. Already built: the six new alert
+types with `suggested_action` in the engine and `vbx-cli` (bv's
+`drift.Calculator`), `defer_until` in readiness, `.beads/recipes/*.yaml`
+listing, the multi-repo loader port. Filed as children of vbx-htg, P3:
+vbx-im9 (`--export` in four formats), vbx-52c (`--search-min-score`, exact-ID
+guarantee), vbx-upz (`defer_until` in the app), vbx-dv5 (`load_stats`),
+vbx-fc7 (suggested actions in the Alerts panel), vbx-7d5 (`--recipe` scope,
+paths, and editing a `.beads/recipes` file, which `recipe_save` writes to the
+shadowed `.bv/recipes.yaml`), vbx-1y5 (bv's `.beads`-first workspace discovery
+and `--workspace`). `source_authority` stays unported by ADR-023 and is now a
+§9 divergence. The epic stays open until its children close.
+
 ## 2026-10-01 — Accept / Not now on triage recommendations (vbx-442)
 
 Each recommendation in the triage panel has Accept / Not now (thumbs up and
