@@ -83,6 +83,9 @@ type Session struct {
 	// single-repository case.
 	workspacePath string
 	repoLoads     []repoLoad
+	// watchDirs is every directory a workspace session reads from; see
+	// workspaceWatchDirs. Unused for a single repository.
+	watchDirs []string
 
 	// Correlation state, guarded separately: walking the object store is slow
 	// enough that it must not hold the analysis lock, and it is only built on
@@ -529,6 +532,10 @@ type infoPayload struct {
 	DataHash  string   `json:"data_hash"`
 	Warnings  []string `json:"warnings"`
 	LoadedAt  string   `json:"loaded_at"`
+	// WatchPaths is the directories the app's file watch follows: what was
+	// read, and what is read alongside it. One for a single repository; for a
+	// workspace, every member's beads directory as well (vbx-zot).
+	WatchPaths []string `json:"watch_paths"`
 }
 
 func (s *Session) info() ([]byte, error) {
@@ -543,13 +550,31 @@ func (s *Session) info() ([]byte, error) {
 		w = []string{}
 	}
 	return json.Marshal(infoPayload{
-		Source:    s.source,
-		Kind:      s.kind,
-		IssueCoun: len(s.records),
-		DataHash:  hash,
-		Warnings:  w,
-		LoadedAt:  s.loadedAt.Format(time.RFC3339),
+		Source:     s.source,
+		Kind:       s.kind,
+		IssueCoun:  len(s.records),
+		DataHash:   hash,
+		Warnings:   w,
+		LoadedAt:   s.loadedAt.Format(time.RFC3339),
+		WatchPaths: s.watchPathsLocked(),
 	})
+}
+
+// watchPathsLocked reports the directories to watch. Callers hold s.mu.
+//
+// A single repository's feedback.json sits beside its data (feedbackDir), so
+// the source's directory covers both.
+func (s *Session) watchPathsLocked() []string {
+	if s.kind == "workspace" {
+		if s.watchDirs == nil {
+			return []string{}
+		}
+		return s.watchDirs
+	}
+	if s.source == "" {
+		return []string{}
+	}
+	return []string{filepath.Dir(s.source)}
 }
 
 // issuesPayload returns every decoded record, tombstones included: the

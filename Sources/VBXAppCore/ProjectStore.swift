@@ -746,6 +746,12 @@ public final class ProjectStore: ObservableObject {
         do {
             let fresh = try await engine.reload()
             info = fresh
+            // Before the hash gate: a workspace can gain or lose a member
+            // without its bead set changing, and the watch has to follow the
+            // membership either way or the new member is never heard from.
+            if isWatching, watcher.paths != fresh.watchDirectories {
+                startBeadWatch()
+            }
             guard fresh.changed || force else { return false }
 
             try await refreshAll()
@@ -787,12 +793,8 @@ public final class ProjectStore: ObservableObject {
     /// Restarting is cheap, and `FileWatchService.start` stops its own stream
     /// first, so this is safe to call again for the same source.
     public func startWatching() {
-        guard let source = info?.source else { return }
-        watcher.start(watching: source) { [weak self] in
-            Task { @MainActor in
-                await self?.reload()
-            }
-        }
+        guard info != nil else { return }
+        startBeadWatch()
         // A commit does not touch the export, so the watch above cannot see
         // one. This does — and only the dirty state is recomputed, because
         // nothing about the beads themselves has changed.
@@ -815,6 +817,32 @@ public final class ProjectStore: ObservableObject {
         }
         isWatching = watcher.isWatching
     }
+
+    /// Points the bead watch at every directory the engine reads from.
+    ///
+    /// For a multi-repository workspace the source is `.bv/workspace.yaml`,
+    /// and watching only its directory meant an edit to any member's beads —
+    /// or to the root's `feedback.json` — never reloaded anything (vbx-zot).
+    /// The list comes from the engine, which knows the members; reloads stay
+    /// gated on its hash, so a busy member costs a hash and nothing more.
+    private func startBeadWatch() {
+        guard let directories = info?.watchDirectories, !directories.isEmpty else {
+            // Nothing to follow here, and a stream left on the previous
+            // workspace would be vbx-d9p again.
+            watcher.stop()
+            isWatching = false
+            return
+        }
+        watcher.start(directories: directories) { [weak self] in
+            Task { @MainActor in
+                await self?.reload()
+            }
+        }
+        isWatching = watcher.isWatching
+    }
+
+    /// The directories the bead watch is following, for tests.
+    var watchedDirectories: [String] { watcher.paths }
 
     public func stopWatching() {
         watcher.stop()

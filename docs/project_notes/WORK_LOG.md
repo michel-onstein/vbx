@@ -5,6 +5,16 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Live reload follows every member of a workspace (vbx-zot)
+
+A multi-repository workspace now reloads when any member's beads change, when
+the root `.beads/feedback.json` changes, and after a member is added to
+`.bv/workspace.yaml`. The engine's `info`/`reload` payloads carry
+`watch_paths`, the directories the session reads from; `FileWatchService`
+watches a list of directories in one stream; `ProjectStore` re-establishes the
+watch when the list changes. Reloads stay hash-gated and debounced. Parity with
+bv 0.25.2: 0 differing commands before and after (`--robot-info` is vbx-only).
+
 ## 2026-10-01 — Triage feedback and not-ready labels, as in bv (vbx-5ba)
 
 Triage, `--robot-next` and `--robot-priority` now score with the factor

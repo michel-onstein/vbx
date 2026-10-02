@@ -39,15 +39,25 @@ public final class FileWatchService: @unchecked Sendable {
     /// rename replaces the inode, and a file-level watch would silently go
     /// deaf after the first write.
     public func start(watching source: String, onChange: @escaping @Sendable () -> Void) {
-        stop()
-
         let directory = URL(fileURLWithPath: source)
             .deletingLastPathComponent()
             .path
-        guard !directory.isEmpty else { return }
+        start(directories: [directory], onChange: onChange)
+    }
+
+    /// Starts one stream over every directory in `directories`, recursively.
+    ///
+    /// One stream rather than one per directory, so a burst that touches two
+    /// members at once — a `br` run in each, a checkout — still collapses into
+    /// a single notification through the one debouncer.
+    public func start(directories: [String], onChange: @escaping @Sendable () -> Void) {
+        stop()
+
+        let directories = directories.filter { !$0.isEmpty }
+        guard !directories.isEmpty else { return }
 
         self.onChange = onChange
-        self.watchedPaths = [directory]
+        self.watchedPaths = directories
         let debouncer = Debouncer(
             window: debounce, scheduler: QueueDebounceScheduler(queue: queue)
         ) { [weak self] in
@@ -74,7 +84,7 @@ public final class FileWatchService: @unchecked Sendable {
             kCFAllocatorDefault,
             callback,
             &context,
-            [directory] as CFArray,
+            directories as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             debounce / 2,  // FSEvents' own latency; the debounce below does the rest
             FSEventStreamCreateFlags(

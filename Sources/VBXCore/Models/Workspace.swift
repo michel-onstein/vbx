@@ -28,12 +28,18 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     /// Set by `reload`: false means the data hash was unchanged and nothing was
     /// re-analysed, so the UI can skip republishing.
     public var changed: Bool
+    /// The directories the engine reads from, which is what live reload must
+    /// watch. For a multi-repository workspace that is every member's beads
+    /// directory and the root `.beads`, not just the `.bv/` holding the
+    /// source — see ``watchDirectories`` and vbx-zot.
+    public var watchPaths: [String]
 
     private enum CodingKeys: String, CodingKey {
         case source, kind, warnings, changed
         case issueCount = "issue_count"
         case dataHash = "data_hash"
         case loadedAt = "loaded_at"
+        case watchPaths = "watch_paths"
     }
 
     public init(from decoder: Decoder) throws {
@@ -45,6 +51,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
         warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
         // Absent on a plain open; only reload reports it.
         changed = try c.decodeIfPresent(Bool.self, forKey: .changed) ?? true
+        watchPaths = try c.decodeIfPresent([String].self, forKey: .watchPaths) ?? []
         if let raw = try c.decodeIfPresent(String.self, forKey: .loadedAt) {
             loadedAt = ISO8601DateFormatter().date(from: raw)
         }
@@ -53,7 +60,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     public init(
         source: String, kind: SourceKind, issueCount: Int,
         dataHash: String, warnings: [String] = [], loadedAt: Date? = nil,
-        changed: Bool = true
+        changed: Bool = true, watchPaths: [String] = []
     ) {
         self.source = source
         self.kind = kind
@@ -62,6 +69,20 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
         self.warnings = warnings
         self.loadedAt = loadedAt
         self.changed = changed
+        self.watchPaths = watchPaths
+    }
+
+    /// What live reload watches: the engine's list, or the source's directory
+    /// when it reported none.
+    ///
+    /// The engine owns the list because it owns discovery — which members a
+    /// workspace has, and where each one's data actually lives once a redirect
+    /// is followed. Re-parsing `workspace.yaml` here would be a second copy of
+    /// those rules. The fallback covers a payload from before the field.
+    public var watchDirectories: [String] {
+        if !watchPaths.isEmpty { return watchPaths }
+        guard !source.isEmpty else { return [] }
+        return [URL(fileURLWithPath: source).deletingLastPathComponent().path]
     }
 
     /// Directory shown in the window title.

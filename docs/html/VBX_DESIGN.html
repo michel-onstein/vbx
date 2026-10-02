@@ -870,6 +870,16 @@ so it is tested on a virtual clock. Network volumes are detected via <code>getat
 back to 2 s polling, mirroring <code>BV_FORCE_POLLING</code>.</p>
 <p>Reload is <strong>hash-gated</strong>: the engine recomputes the data hash and returns "unchanged"
 without re-analysing, so an incidental touch does not cost a re-render.</p>
+<p><strong>What is watched comes from the engine</strong>, as the <code>watch_paths</code> of every <code>info</code> and
+<code>reload</code> payload, so the app never re-derives discovery. For one repository that is the
+source's directory, which also holds <code>feedback.json</code>. For a multi-repository workspace
+the source is <code>.bv/workspace.yaml</code>, so the list is <code>.bv/</code> itself, the root <code>.beads</code> that
+feedback is read from, and every enabled member's beads directory — only those that
+exist, with a member that has none watched at its repository root. One FSEvents stream
+covers the lot, through one debouncer. The app compares the list on every reload,
+before the hash gate, and re-establishes the stream when it changes, so a member added
+to <code>workspace.yaml</code> is watched from then on even if it brought no beads. The <code>.git</code>
+watch for uncommitted marks stays on the repository the workspace root is in.</p>
 <h3 id="83-sandboxing"><a class="toclink" href="#83-sandboxing">8.3 Sandboxing</a></h3>
 <p><code>vbx</code> ships <strong>sandboxed</strong> with:</p>
 <ul>
