@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Uncommitted marks follow each member of a workspace (vbx-d1c)
+
+In a multi-repository workspace, `snapshot_at` for `HEAD` now reads each
+member's beads from its own repository at its own `HEAD`, namespaced as the
+loader namespaces them, and reports a member with no history as `unknown_ids`
+instead of letting its beads read as added. `info` gains `git_watch_paths`,
+every member's git directory, and the app's repository watch covers them, so a
+commit in a member clears its marks. A non-`HEAD` revision in a workspace is
+unchanged and still reads the root repository only (filed separately). Parity
+with bv 0.25.2: 0 differing commands before and after (6 workspaces).
+
 ## 2026-10-01 — vbx-cli records triage feedback, as bv does (vbx-rt3)
 
 `vbx-cli --feedback-accept ID`, `--feedback-ignore ID`, `--feedback-reset` and

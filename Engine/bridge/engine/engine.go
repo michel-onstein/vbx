@@ -545,6 +545,12 @@ type infoPayload struct {
 	// read, and what is read alongside it. One for a single repository; for a
 	// workspace, every member's beads directory as well (vbx-zot).
 	WatchPaths []string `json:"watch_paths"`
+	// GitWatchPaths is the git directories of a workspace's members, where a
+	// commit moves a HEAD the root repository's watch cannot see. A different
+	// list from WatchPaths because a commit changes no bead: it calls for the
+	// uncommitted marks to be recomputed, not a reload (vbx-d1c). Empty for a
+	// single repository.
+	GitWatchPaths []string `json:"git_watch_paths"`
 }
 
 func (s *Session) info() ([]byte, error) {
@@ -559,13 +565,14 @@ func (s *Session) info() ([]byte, error) {
 		w = []string{}
 	}
 	return json.Marshal(infoPayload{
-		Source:     s.source,
-		Kind:       s.kind,
-		IssueCoun:  len(s.records),
-		DataHash:   hash,
-		Warnings:   w,
-		LoadedAt:   s.loadedAt.Format(time.RFC3339),
-		WatchPaths: s.watchPathsLocked(),
+		Source:        s.source,
+		Kind:          s.kind,
+		IssueCoun:     len(s.records),
+		DataHash:      hash,
+		Warnings:      w,
+		LoadedAt:      s.loadedAt.Format(time.RFC3339),
+		WatchPaths:    s.watchPathsLocked(),
+		GitWatchPaths: s.gitWatchPathsLocked(),
 	})
 }
 

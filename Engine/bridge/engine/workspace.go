@@ -31,6 +31,13 @@ type repoLoad struct {
 	Prefix     string `json:"prefix"`
 	IssueCount int    `json:"issue_count"`
 	Error      string `json:"error,omitempty"`
+
+	// sourcePath is the beads file the member's records were read from, after
+	// any redirect; disabled marks a member the configuration switched off.
+	// Neither is reported: they are what the per-member HEAD snapshot and the
+	// git watch need to find each member's own repository (vbx-d1c).
+	sourcePath string
+	disabled   bool
 }
 
 // findWorkspaceConfig looks for a workspace configuration at or above path.
@@ -74,6 +81,8 @@ func loadWorkspace(configPath string, reader workspaceReader) (
 			Name:       result.RepoName,
 			Prefix:     result.Prefix,
 			IssueCount: len(result.Issues),
+			sourcePath: result.SourcePath,
+			disabled:   result.Disabled,
 		}
 		if result.Error != nil {
 			// A repository that fails to load is reported rather than
