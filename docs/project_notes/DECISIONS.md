@@ -1643,11 +1643,58 @@ and feedback applies at once.
 - **The app sees bv's report.** Commits now carry `methods`, events carry
   `before` and `after`, and temporal-author links appear. A confirmation pins
   a link at 1.0 and marks it `confirmed`, where ADR-006's port raised it to
-  its method's ceiling. Explicit-id matching is bv's patterns. Those require a
-  numeric suffix, so a commit that names a `br` id like `vbx-8ou` without
-  touching its record is no longer linked; bv's `--id-pattern` is the remedy,
-  not yet ported. Orphans are bv's detector at its default minimum score of 30.
-  Tombstoned beads have no history, as in bv. Triage's staleness counts every
-  strategy's commits, as bv 0.25.2's does (BUGS.md, 2026-10-02).
+  its method's ceiling. Explicit-id matching is bv's patterns, plus the app's
+  id-prefix patterns below. Orphans are bv's detector at its default minimum
+  score of 30. Tombstoned beads have no history, as in bv. Triage's staleness
+  counts every strategy's commits, as bv 0.25.2's does (BUGS.md, 2026-10-02).
 - **The copy carries bv's licence.** Its `LICENSE`, rider included, is
   copied unmodified beside it, as the licence requires of any distribution.
+
+**Custom id patterns (vbx-znj, 2026-10-02).** bv's built-in id patterns need
+a numeric suffix (`[A-Za-z]+-\d+` after a keyword, an uppercase
+`PROJECT-123`). A commit that names a `br`-minted id such as `vbx-8ou`
+without touching its record is therefore invisible to the explicit-id
+strategy and to the orphan detector. bv's remedy is `--id-pattern`, which
+registers extra regexes through `correlation.SetCustomIDPatterns`.
+
+- **`vbx-cli --id-pattern` is bv's flag.** It is repeatable, takes
+  `--id-pattern=REGEX` too, and is compiled by Go's `regexp` in the engine.
+  Capture group 1 is the id, else the whole match. A pattern that does not
+  compile fails with bv's line, `Invalid --id-pattern "(": error parsing
+  regexp: …`, and exit 2, before anything is read. The patterns are an open
+  option (`OpenConfig.IDPatterns`), so they reach every command bv's global
+  reaches: the nine history commands and triage's staleness walk. No
+  substitution in the vendored copy was needed.
+- **The global is set per use, under a lock.** `SetCustomIDPatterns` is a
+  package global in bv, written once at startup. One vbx process serves a
+  session per window, each with its own patterns, so the engine sets the
+  global under `idPatternsMu`, runs the code that reads it, and puts back
+  what was there. Two places read it. `NewCorrelator` copies the patterns
+  into its explicit matcher, so the lock covers construction and the walk
+  runs unlocked. The orphan detector reads them while it scores, so the lock
+  covers `DetectOrphans`. The extraction cache is keyed by the pattern
+  strings, because the explicit strategy runs during extraction.
+- **The app registers one pattern per id prefix: a deliberate app-side
+  default.** bv has no default derived from a prefix. A user without a
+  pattern gets no `br` links in bv. The app has no command line to pass
+  `--id-pattern` on, and every workspace it opens was minted by `br`. So
+  `ProjectStore` and the Shortcuts intents open with
+  `IDPatternsFromPrefix`. The engine then registers
+  `\b(<prefix>-[0-9a-z]+(?:\.[0-9]+)*)\b` for `.beads/config.yaml`'s
+  `issue_prefix`, or for each enabled workspace member's prefix. That is
+  `br`'s id shape with any `.N` child suffix. It is read per request, so an
+  edited prefix applies on the next report. Without a prefix nothing is
+  registered and the app answers as bv does. A word of the same shape that
+  is no bead, such as `vbx-cli`, links nothing, because the matcher keeps
+  only ids in the bead set. bv's orphan detector does count any match as a
+  message signal. On this repository's 150-commit window, that changed no
+  remaining candidate's score, and five commits stopped being orphans.
+  `vbx-cli` never sets the default, so its answers stay bv's.
+- **bv's disk cache ignores the patterns.** bv's persistent history cache
+  hashes the walk options but not the registered patterns (`hashOptions`
+  in cache.go). A run with `--id-pattern` can therefore be answered from a
+  run without one. vbx keeps no disk cache (the env shim above), and its
+  in-memory cache is keyed by the patterns. The parity runs with a pattern
+  set `BV_NO_CACHE=1` on both sides, so bv computes rather than recalls.
+  On this repository's 200-commit history, `--robot-history --id-pattern`
+  with `br`'s shape adds 157 links, identical to bv's.

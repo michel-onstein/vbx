@@ -34,7 +34,9 @@ private func withSession<T>(
     _ path: String?, _ body: (BeadsEngine) async throws -> T
 ) async throws -> T {
     let engine = BeadsEngine()
-    _ = try await engine.open(path: resolveWorkspace(path))
+    // The app's id-prefix patterns too, so an intent's triage scores
+    // staleness from the same history the app shows (ADR-027).
+    _ = try await engine.open(path: resolveWorkspace(path), idPatternsFromPrefix: true)
     defer { Task { await engine.close() } }
     return try await body(engine)
 }

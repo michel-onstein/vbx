@@ -5,6 +5,33 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — A commit naming a br-minted id links to it, in vbx-cli and the app (vbx-znj)
+
+bv's explicit-id patterns need a numeric suffix, so since vbx-k7j a commit
+that named `vbx-8ou` without touching its record was linked nowhere. bv's
+remedy is `--id-pattern`, which `vbx-cli` now takes. It is repeatable, takes
+`--id-pattern=REGEX` too, and is compiled by Go. A pattern that does not
+compile prints bv's line and exits 2 before anything is read. The patterns
+are an open option. bv's `SetCustomIDPatterns` is a package global, so the
+engine sets it per use under a lock and restores it. It covers the
+correlator's construction and the orphan detector's scoring. The extraction
+cache is keyed by the patterns. The app opens every workspace with
+`IDPatternsFromPrefix`, which registers `br`'s id shape for
+`.beads/config.yaml`'s `issue_prefix` or each workspace member's prefix.
+That is a deliberate app-side default bv does not have (ADR-027).
+
+bv's own disk cache ignores the patterns, so a run with `--id-pattern` can
+be answered from one without; parity runs with a pattern set `BV_NO_CACHE=1`.
+Parity: 0 differing commands before and after; the `history` fixture gains
+`hist-q7x` and a commit naming it, and 16 compared runs (history, orphans,
+causality, related and file-beads under one and two patterns, and two
+refused patterns). On this repository's 200-commit history the pattern adds
+157 links, identical to bv's. Tests: `idpatterns_test.go` (bv's patterns
+miss the id, `--id-pattern` and the prefix default link it, bv's error text,
+no leak between concurrent sessions, a prefix edit reaches the next report),
+`BRIDHistoryTests` (the app links it through `ProjectStore`; `vbx-cli`'s
+engine option), and the fixture checks in `test-parity-check.py`.
+
 ## 2026-10-02 — The nine history commands are bv's correlator, and answer over --label and --recipe (vbx-k7j)
 
 `vbx-cli`'s history, causality, related, impact-network, orphans, file-beads,

@@ -154,6 +154,9 @@ func (s *Session) historyPlace() (historyPlace, error) {
 // held through an extraction, so two requests arriving together walk once.
 func (s *Session) historyArtifact(place historyPlace, opts correlation.CorrelatorOptions, refresh bool) (*correlation.HistoryArtifact, error) {
 	head := "unborn"
+	// The explicit-id strategy runs during extraction, so the id patterns
+	// are part of what an extraction depends on.
+	patterns, _ := s.historyIDPatterns()
 	var out strings.Builder
 	if err := objgit.Run(context.Background(), place.workDir, []string{"rev-parse", "HEAD"}, nil, &out); err == nil {
 		head = strings.TrimSpace(out.String())
@@ -163,8 +166,8 @@ func (s *Session) historyArtifact(place historyPlace, opts correlation.Correlato
 		if o.Since != nil {
 			since = o.Since.UTC().Format(time.RFC3339)
 		}
-		return fmt.Sprintf("%s|%s|%s|%d|%s|%s|%s", place.workDir, place.beadsPath, head, o.Limit,
-			since, o.BeadID, o.CausalityBeadID)
+		return fmt.Sprintf("%s|%s|%s|%d|%s|%s|%s|%q", place.workDir, place.beadsPath, head, o.Limit,
+			since, o.BeadID, o.CausalityBeadID, patterns)
 	}
 
 	s.historyMu.Lock()
@@ -172,7 +175,7 @@ func (s *Session) historyArtifact(place historyPlace, opts correlation.Correlato
 	if refresh || s.historyArtifacts == nil {
 		s.historyArtifacts = map[string]*correlation.HistoryArtifact{}
 	}
-	c := correlation.NewCorrelator(place.workDir, place.beadsPath)
+	c := s.newCorrelator(place)
 
 	// The walk is shared by every report over the same options; causality
 	// adds its target's full record to it rather than walking again.
@@ -231,7 +234,7 @@ func (s *Session) historyReport(issues []model.Issue, opts correlation.Correlato
 	if err != nil {
 		return nil, place, err
 	}
-	c := correlation.NewCorrelator(place.workDir, place.beadsPath)
+	c := s.newCorrelator(place)
 	if !raw {
 		store := correlation.NewFeedbackStore(place.beadsDir)
 		if err := store.Load(); err != nil {
@@ -412,8 +415,14 @@ func (s *Session) orphans(req []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	orphanReport, err := correlation.NewOrphanDetectorAt(report, place.workDir, robotNow()).
-		DetectOrphans(correlation.ExtractOptions{Limit: limit})
+	// The detector reads the custom id patterns while it scores, so it runs
+	// with the session's registered.
+	_, patterns := s.historyIDPatterns()
+	var orphanReport *correlation.OrphanReport
+	withIDPatterns(patterns, func() {
+		orphanReport, err = correlation.NewOrphanDetectorAt(report, place.workDir, robotNow()).
+			DetectOrphans(correlation.ExtractOptions{Limit: limit})
+	})
 	if err != nil {
 		return nil, fmt.Errorf("detecting orphans: %w", err)
 	}

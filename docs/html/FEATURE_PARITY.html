@@ -359,6 +359,13 @@ file under 64 KB it filters with a <code>\s</code> regex that macOS's regex engi
 as a literal <code>s</code>, so a record written <code>"id": "x"</code> is never found. vbx always
 takes the extraction bv itself uses above 64 KB, so <code>vbx-cli --robot-history
 --id X</code> finds the record.</p>
+<p>bv's <code>--id-pattern</code> is compared on the same workspace (vbx-znj). Its
+<code>hist-q7x</code> is a <code>br</code>-shaped id, and a commit names it without touching the
+beads. The harness runs history (unscoped and under <code>--label</code>), orphans
+(with and without a minimum score), causality, related and file-beads with
+one pattern, and again with two. It also checks bv's error and exit 2 for a
+pattern that does not compile. Those runs set <code>BV_NO_CACHE=1</code>, because bv's
+disk cache does not key on the patterns (ADR-027).</p>
 <p><code>--save-baseline</code> is the one post-load command still unscoped: bv saves the
 scoped issues and vbx the whole workspace, so <code>vbx-cli</code> refuses <code>--label</code> and
 <code>--recipe</code> with it (exit 2) rather than answer over every bead as if scoped.
@@ -799,6 +806,12 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 <tr>
 <td>Bead ↔ commit correlation (co-commit, explicit id, temporal author)</td>
 <td>History view — bv 0.25.2's own correlator, its git calls answered from the object store (ADR-027)</td>
+<td>Engine + Native</td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>--id-pattern</code> (custom bead-id regexes for explicit-id matching and orphan detection)</td>
+<td>✓ <code>vbx-cli --id-pattern</code>, repeatable, bv's error and exit 2 (vbx-znj). The app registers one pattern per id prefix from <code>.beads/config.yaml</code> — an app-side default bv does not have (ADR-027)</td>
 <td>Engine + Native</td>
 <td>5</td>
 </tr>
