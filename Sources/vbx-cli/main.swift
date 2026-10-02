@@ -654,6 +654,10 @@ struct Options {
     var relatedMaxResults: Int?
     var relatedIncludeClosed = false
     var orphansMinScore: Int?
+    /// bv's --id-pattern, repeatable: extra bead-id regexes for the history's
+    /// explicit-id strategy and orphan detector. The engine compiles them, so
+    /// the syntax and the error text are Go's, as in bv.
+    var idPatterns: [String] = []
     var byLabel: String?
     var byAssignee: String?
     var notReadyLabels: String?
@@ -708,8 +712,11 @@ func parseArguments() throws -> Options {
         // pflag's `--flag=value` spelling, for the report flags: bv's
         // `--export-include-graph` is a boolean that takes its value only that
         // way, and `--export-template=` is how an empty template is written.
+        // `--id-pattern=REGEX` too, since a pattern is easier quoted whole.
         var inline: String?
-        if arg.hasPrefix("--export"), let equals = arg.firstIndex(of: "=") {
+        if arg.hasPrefix("--export") || arg.hasPrefix("--id-pattern="),
+            let equals = arg.firstIndex(of: "=")
+        {
             inline = String(arg[arg.index(after: equals)...])
             arg = String(arg[..<equals])
         }
@@ -785,6 +792,7 @@ func parseArguments() throws -> Options {
             options.relatedMaxResults = try intValue(try next(arg), flag: arg)
         case "--related-include-closed": options.relatedIncludeClosed = true
         case "--orphans-min-score": options.orphansMinScore = try intValue(try next(arg), flag: arg)
+        case "--id-pattern": options.idPatterns.append(try value(arg))
         case "--by-label": options.byLabel = try next(arg)
         case "--by-assignee": options.byAssignee = try next(arg)
         // A modifier spelled like a command, so it is matched before the
@@ -992,6 +1000,9 @@ func usageText() -> String {
         "  --relations-threshold T / --network-depth N (1-3)",
         "  --related-min-relevance P / --related-max-results N",
         "  --related-include-closed / --orphans-min-score N",
+        "  --id-pattern REGEX   A bead-id shape commit messages are matched for,",
+        "                       e.g. 'vbx-[a-z0-9]{3,}' for br's ids (repeatable;",
+        "                       capture group 1 is the id, else the whole match)",
         "",
         "FORECAST (--robot-forecast):",
         "  --id ID|all          One bead's ETA, or every open bead's with a summary",
@@ -1116,6 +1127,19 @@ func recipeResolves(_ argument: String, engine: BeadsEngine) async -> Bool {
     }
 }
 
+/// bv's line for an `--id-pattern` that does not compile — `Invalid
+/// --id-pattern "(": error parsing regexp: …` — which it prints to stderr
+/// before exiting 2, ahead of any load. The engine refuses the open with that
+/// text; nil for every other failure.
+func idPatternError(_ error: Error) -> String? {
+    if case EngineError.openFailed(let message) = error,
+        message.hasPrefix("Invalid --id-pattern ")
+    {
+        return message
+    }
+    return nil
+}
+
 // MARK: - Main
 
 func run() async -> Int32 {
@@ -1161,8 +1185,12 @@ func run() async -> Int32 {
             // them; the CLI is never sandboxed, and the app never asks.
             info = try await engine.open(
                 path: options.path, liveTrackerActions: true, exportHooks: !options.noHooks,
-                workspace: options.workspace)
+                workspace: options.workspace, idPatterns: options.idPatterns)
         } catch {
+            if let message = idPatternError(error) {
+                complain(message)
+                return 2
+            }
             complain("Error: \(error.localizedDescription)")
             return 1
         }
@@ -1203,8 +1231,13 @@ func run() async -> Int32 {
         // graph is loaded (vbx-15s); the app reads a workspace's root.
         info = try await engine.open(
             path: options.path, liveTrackerActions: true, workspace: options.workspace,
-            feedbackCommand: command.answersBeforeDiscovery, feedbackFromPath: true)
+            feedbackCommand: command.answersBeforeDiscovery, feedbackFromPath: true,
+            idPatterns: options.idPatterns)
     } catch {
+        if let message = idPatternError(error) {
+            complain(message)
+            return 2
+        }
         complain("Error: \(error.localizedDescription)")
         return 1
     }

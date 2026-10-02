@@ -271,6 +271,16 @@ them.
   upgrade that adds a git call fails the differential tests instead of
   approximating. Never make `objgit` guess at an invocation. Port git's
   behaviour, and prove it against real git in a test. See ADR-027.
+- **bv's custom id patterns are a package global, and the engine holds a
+  lock whenever it sets them.** `correlation.SetCustomIDPatterns` is how
+  `--id-pattern` reaches the explicit matcher and the orphan detector. One
+  process serves a session per window, each with its own patterns. So
+  `withIDPatterns` sets them, runs the reader and restores them. A new caller
+  of `NewCorrelator` or the orphan detector goes through
+  `Session.newCorrelator` / `withIDPatterns`, or it runs with whichever
+  window's patterns happen to be registered. The app registers `br`'s id
+  shape for the workspace's prefix; `vbx-cli` registers only `--id-pattern`,
+  as bv does. See ADR-027.
 - **Triage includes a bounded git-history walk**, because bv's does and it
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable

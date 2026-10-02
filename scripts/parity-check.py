@@ -469,6 +469,41 @@ HISTORY_SCOPED_RUNS = (
     ("robot-impact", ["--files", "src/parser.go,src/cache.go"], ["src/parser.go,src/cache.go"]),
 )
 HISTORY_BEAD_COMMANDS = {"robot-causality", "robot-related"}
+# bv's --id-pattern over the history fixture (vbx-znj). hist-q7x is a
+# br-shaped id — a base36 token, no numeric suffix — which bv's built-in
+# patterns cannot see, and commit 14 names it without touching the beads
+# file, so only the pattern links it. Each run is compared with and without
+# the pattern, and under a scope, and with two patterns, one capturing group 1.
+#
+# bv's persistent history cache keys a report by HEAD, the beads and the walk
+# options, but not by the registered patterns, so a run with a pattern can be
+# answered from a run without one (its cache.go hashOptions). These runs set
+# BV_NO_CACHE=1, given identically to both sides; vbx keeps no disk cache and
+# keys its in-memory one by the patterns too (ADR-027).
+HISTORY_ID_PATTERN = r"hist-[a-z][a-z0-9]{2}"
+HISTORY_ID_PATTERN_RUNS = tuple(
+    (command, [*args, *patterns], [*bv_args, *patterns])
+    for command, args, bv_args in (
+        ("robot-history", [], []),
+        ("robot-history", ["--label", "engine"], ["--label", "engine"]),
+        ("robot-orphans", [], []),
+        ("robot-orphans", ["--orphans-min-score", "0"], ["--orphans-min-score", "0"]),
+        ("robot-causality", ["--id", "hist-q7x"], ["hist-q7x"]),
+        ("robot-related", ["--id", "hist-q7x"], ["hist-q7x"]),
+        ("robot-file-beads", ["--file", "src/cache.go"], ["src/cache.go"]),
+    )
+    for patterns in (
+        ["--id-pattern", HISTORY_ID_PATTERN],
+        ["--id-pattern", r"\b(hist-[0-9]+)\b", f"--id-pattern={HISTORY_ID_PATTERN}"],
+    )
+)
+# An --id-pattern that does not compile: bv's line on stderr and exit 2,
+# before anything is read.
+HISTORY_ID_PATTERN_REJECTS = (
+    ("robot-history", ["--id-pattern", "("], ["--id-pattern", "("]),
+    ("robot-orphans", ["--id-pattern", "ok", "--id-pattern", "[z-a]"],
+     ["--id-pattern", "ok", "--id-pattern", "[z-a]"]),
+)
 # bv's errors for a bead the history does not hold: one that never existed,
 # and hist-1, closed, which an actionable recipe leaves out.
 HISTORY_REJECTS = tuple(
@@ -838,6 +873,15 @@ COMPARISONS = [
     {"vbx": command, "bv": command, "name": f"{command} {' '.join(bv_args)}",
      "vbx_args": vbx_args, "bv_args": bv_args, "rejects": True, "only": {"history"}}
     for command, vbx_args, bv_args in HISTORY_REJECTS
+] + [
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join(bv_args)}",
+     "vbx_args": vbx_args, "bv_args": bv_args, "only": {"history"},
+     "env": {"BV_NO_CACHE": "1"}}
+    for command, vbx_args, bv_args in HISTORY_ID_PATTERN_RUNS
+] + [
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join(bv_args)}",
+     "vbx_args": vbx_args, "bv_args": bv_args, "rejects": True, "only": {"history"}}
+    for command, vbx_args, bv_args in HISTORY_ID_PATTERN_REJECTS
 ]
 
 
@@ -1505,6 +1549,11 @@ HISTORY_BEADS = [
     ("hist-6", "Tidy the build scripts", ["docs"], 3, 1, [("hist-7", 13)]),
     ("hist-7", "Split the build script", ["build"], 2, 13, [("hist-6", 13)]),
     ("hist-8", "Abandoned spike", ["engine"], 3, 1, []),
+    # A br-shaped id, for --id-pattern (vbx-znj): commit 14 names it. It is
+    # blocked by hist-5 so that the five PageRank leaders --save-baseline
+    # prints end on a whole tie (hist-2, hist-5). Unblocked, it tied hist-3
+    # for fifth place, and bv picked between the two in map order.
+    ("hist-q7x", "Profile the cache", ["engine"], 2, 13, [("hist-5", 13)]),
 ]
 HISTORY_AUTHORS = [("Ada Lovelace", "ada@example.com"), ("Alan Turing", "alan@example.com")]
 # (day, author, message, {bead: new status}, {path: version}).
@@ -1525,6 +1574,7 @@ HISTORY_COMMITS = [
     (11, 0, "Drop the spike", {"hist-8": "tombstone"}, {"src/cache.go": 2}),
     (12, 1, "Fix view refresh for hist-3", {}, {"ui/view.swift": 2, "ui/model.swift": 2}),
     (13, 1, "Plan the build split", {}, {"scripts/build.sh": 1}),
+    (14, 1, "Count the cache misses for hist-q7x", {}, {"src/cache.go": 3}),
 ]
 # The drift baseline is the beads as they stood after this commit's day.
 HISTORY_BASELINE_DAY = 4

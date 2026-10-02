@@ -66,6 +66,20 @@ type OpenConfig struct {
 	// root's, which the app both shows and writes (vbx-15s). Only vbx-cli
 	// sets it. See sessionFeedbackDir.
 	FeedbackFromPath bool `json:"feedback_from_path,omitempty"`
+	// IDPatterns are bv's --id-pattern values: extra bead-id regexes the
+	// history's explicit-id strategy and orphan detector recognise, for ids
+	// bv's built-in patterns miss — a br-minted vbx-8ou has no numeric
+	// suffix. Capture group 1 is the id, else the whole match. Open refuses
+	// one that does not compile, with bv's text, before anything else, as bv
+	// does. vbx-cli passes its --id-pattern flags here.
+	IDPatterns []string `json:"id_patterns,omitempty"`
+	// IDPatternsFromPrefix adds a pattern for each id prefix the session
+	// loads — `.beads/config.yaml`'s issue_prefix, or each workspace
+	// member's prefix — so a commit naming any of the workspace's br-minted
+	// ids is linked. bv has no such default; it is the app's, which has no
+	// command line to pass --id-pattern on. vbx-cli leaves it off and
+	// answers as bv does. See idpatterns.go and ADR-027.
+	IDPatternsFromPrefix bool `json:"id_patterns_from_prefix,omitempty"`
 }
 
 // Session holds one loaded workspace and its analysis state.
@@ -154,6 +168,11 @@ type Session struct {
 // background and is observable through the "metrics" method's phase2_ready
 // flag, matching bv's two-phase contract.
 func Open(cfg OpenConfig) (*Session, error) {
+	// bv compiles --id-pattern before it reads anything, and exits on the
+	// first that does not compile.
+	if _, err := compileIDPatterns(cfg.IDPatterns); err != nil {
+		return nil, err
+	}
 	s := &Session{config: cfg}
 	if cfg.FeedbackCommand {
 		s.openForFeedback()

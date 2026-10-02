@@ -141,6 +141,14 @@ as a literal `s`, so a record written `"id": "x"` is never found. vbx always
 takes the extraction bv itself uses above 64 KB, so `vbx-cli --robot-history
 --id X` finds the record.
 
+bv's `--id-pattern` is compared on the same workspace (vbx-znj). Its
+`hist-q7x` is a `br`-shaped id, and a commit names it without touching the
+beads. The harness runs history (unscoped and under `--label`), orphans
+(with and without a minimum score), causality, related and file-beads with
+one pattern, and again with two. It also checks bv's error and exit 2 for a
+pattern that does not compile. Those runs set `BV_NO_CACHE=1`, because bv's
+disk cache does not key on the patterns (ADR-027).
+
 `--save-baseline` is the one post-load command still unscoped: bv saves the
 scoped issues and vbx the whole workspace, so `vbx-cli` refuses `--label` and
 `--recipe` with it (exit 2) rather than answer over every bead as if scoped.
@@ -247,6 +255,7 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 | `bv` capability | `vbx` surface | Mechanism | Phase |
 |---|---|---|---|
 | Bead ↔ commit correlation (co-commit, explicit id, temporal author) | History view — bv 0.25.2's own correlator, its git calls answered from the object store (ADR-027) | Engine + Native | 5 |
+| `--id-pattern` (custom bead-id regexes for explicit-id matching and orphan detection) | ✓ `vbx-cli --id-pattern`, repeatable, bv's error and exit 2 (vbx-znj). The app registers one pattern per id prefix from `.beads/config.yaml` — an app-side default bv does not have (ADR-027) | Engine + Native | 5 |
 | Confidence scoring | Confidence badges on each link | Engine + Native | 5 |
 | Correlation feedback: explain / confirm / reject | Inline controls in the History view | Engine + Native | 5 |
 | Correlation statistics | History view header | Engine + Native | 5 |

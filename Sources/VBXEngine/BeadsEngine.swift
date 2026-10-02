@@ -124,10 +124,23 @@ public actor BeadsEngine {
     /// the folder's own `.beads`, not the root's. Only `vbx-cli` passes it.
     /// The app leaves it off: it opens a workspace by its configuration, and
     /// shows and records feedback in the root's `.beads` (vbx-15s, ADR-026).
+    ///
+    /// `idPatterns` are bv's `--id-pattern` values: extra bead-id regexes the
+    /// history's explicit-id strategy and orphan detector recognise. One that
+    /// does not compile fails the open with bv's text, `Invalid --id-pattern
+    /// …`, before anything is read. Only `vbx-cli` passes them.
+    ///
+    /// `idPatternsFromPrefix` registers one pattern per id prefix the
+    /// workspace declares (`.beads/config.yaml`'s `issue_prefix`, or each
+    /// workspace member's prefix), so a commit naming a `br`-minted id such as
+    /// `vbx-8ou` is linked. bv has no such default; it is the app's, which has
+    /// no command line to pass `--id-pattern` on (ADR-027). `vbx-cli` leaves
+    /// it off and answers as bv does.
     public func open(
         path: String, skipPhase2: Bool = false, liveTrackerActions: Bool = false,
         exportHooks: Bool = false, workspace: String? = nil, feedbackCommand: Bool = false,
-        feedbackFromPath: Bool = false
+        feedbackFromPath: Bool = false, idPatterns: [String] = [],
+        idPatternsFromPrefix: Bool = false
     ) throws -> WorkspaceInfo {
         close()
 
@@ -140,6 +153,8 @@ public actor BeadsEngine {
         if let workspace { config["workspace"] = workspace }
         if feedbackCommand { config["feedback_command"] = true }
         if feedbackFromPath { config["feedback_from_path"] = true }
+        if !idPatterns.isEmpty { config["id_patterns"] = idPatterns }
+        if idPatternsFromPrefix { config["id_patterns_from_prefix"] = true }
         let configData = try JSONSerialization.data(withJSONObject: config)
         let configString = String(decoding: configData, as: UTF8.self)
 

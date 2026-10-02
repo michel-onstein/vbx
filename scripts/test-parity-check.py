@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -204,6 +205,9 @@ def test_history_workspace(parity) -> None:
             count = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=workspace,
                                    capture_output=True, text=True, check=True).stdout.strip()
             heads.append(head)
+            named = subprocess.run(
+                ["git", "log", "--format=%s", "--name-only", "-1", "--grep", "hist-q7x"],
+                cwd=workspace, capture_output=True, text=True, check=True).stdout.split()
         beads = [json.loads(line) for line in
                  (workspace / ".beads" / "issues.jsonl").read_text().splitlines()]
         baseline = workspace / ".bv" / "baseline.json"
@@ -228,6 +232,22 @@ def test_history_workspace(parity) -> None:
           and not any(bead.get("dependencies") and bead["id"] == "hist-6" for bead in day_four),
           str(day_four))
     check("no bv, no baseline: nothing to compare against", not baseline.exists())
+    # vbx-znj: a commit names a br-shaped id without touching the beads, so
+    # only --id-pattern can link it.
+    check("a commit names hist-q7x and changes only code",
+          "hist-q7x" in status and named[-1:] == ["src/cache.go"]
+          and not any(".beads" in part for part in named), str(named))
+    check("hist-q7x has no numeric suffix for bv's own patterns to find",
+          not re.search(r"-\d+\b", "hist-q7x")
+          and re.fullmatch(parity.HISTORY_ID_PATTERN, "hist-q7x")
+          and not re.fullmatch(parity.HISTORY_ID_PATTERN, "hist-1"))
+    pattern_runs = [entry for entry in parity.COMPARISONS
+                    if any(arg.startswith("--id-pattern") for arg in entry.get("bv_args", []))]
+    check("--id-pattern runs exist, and every one that is answered bypasses bv's cache",
+          pattern_runs and all(entry.get("rejects") or entry.get("env") == {"BV_NO_CACHE": "1"}
+                               for entry in pattern_runs), str(len(pattern_runs)))
+    check("history and orphans are compared under --id-pattern",
+          {"robot-history", "robot-orphans"} <= {entry["vbx"] for entry in pattern_runs})
 
     # bv's drift exits 1 or 2 when it finds drift, so its runs compare the
     # exit status rather than skipping bv's non-zero one.

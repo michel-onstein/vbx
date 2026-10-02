@@ -702,7 +702,11 @@ public final class ProjectStore: ObservableObject {
         historyTask?.cancel()
 
         do {
-            let info = try await engine.open(path: path, skipPhase2: skipPhase2)
+            // The app links a commit naming any of the workspace's br-minted
+            // ids, which bv's own patterns miss; bv needs --id-pattern for
+            // that, and the app has no command line (ADR-027, vbx-znj).
+            let info = try await engine.open(
+                path: path, skipPhase2: skipPhase2, idPatternsFromPrefix: true)
             self.info = info
             // Before refreshAll, so the first render of the new workspace is
             // already unfiltered rather than briefly showing someone else's
