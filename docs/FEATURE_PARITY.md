@@ -26,18 +26,17 @@ the robot protocol with TOON output.
 
 **Except the bv 0.21–0.25 additions.** The engine runs on bv v0.25.2, and the
 capabilities bv gained between 0.21 and 0.25 are mapped below with their real
-state. Built: the six new alert types with `suggested_action` (engine and
-`vbx-cli`), `defer_until` in readiness and in the app (vbx-upz),
-`.beads/recipes/*.yaml` recipe files, the multi-repository loader, triage
-feedback, `--export` reports in four formats (vbx-im9), and
-`--search-min-score` with bv's guaranteed exact-ID hit (vbx-52c). Not yet
-built, each with a child bead of epic vbx-htg: the app's search threshold
-control (vbx-c1j), export hooks around `vbx-cli --export` (vbx-uos),
-`load_stats` in the robot envelope (vbx-dv5), suggested
-actions in the Alerts panel (vbx-fc7), `--recipe` as a robot scope and recipe
-file paths (vbx-7d5), and bv's `.beads`-first workspace discovery with
-`--workspace` (vbx-1y5). A row naming a bead is not built until that bead
-closes.
+state. Built: the six new alert types with `suggested_action` and `labels`
+(engine, `vbx-cli` and the Alerts panel, vbx-fc7), `defer_until` in readiness
+and in the app (vbx-upz), `.beads/recipes/*.yaml` recipe files, the
+multi-repository loader, triage feedback, `--export` reports in four formats
+(vbx-im9), and `--search-min-score` with bv's guaranteed exact-ID hit
+(vbx-52c). Not yet built, each with a child bead of epic vbx-htg: the app's
+search threshold control (vbx-c1j), export hooks around `vbx-cli --export`
+(vbx-uos), `load_stats` in the robot envelope (vbx-dv5), `--recipe` as a robot
+scope and recipe file paths (vbx-7d5), and bv's `.beads`-first workspace
+discovery with `--workspace` (vbx-1y5). A row naming a bead is not built until
+that bead closes.
 
 **Verified rather than asserted.** `scripts/parity-check.py` runs `vbx-cli` and
 `bv` over the same workspace and diffs them command by command, stripping only
@@ -164,7 +163,7 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 | Cross-label flow matrix and bottleneck scores | Flow Matrix heat map with drill-down | Engine + Native | 4 |
 | Label attention ranking | Attention view | Engine + Native | 4 |
 | Alerts (drift + proactive health) | Alerts list, severity-grouped | Engine + Native | 4 |
-| bv 0.25 alert types (`velocity_drop`, `high_impact_unblock`, `abandoned_claim`, `potential_duplicate`, `priority_mismatch`, `scope_creep`) with `suggested_action` and `labels` | **Engine and `vbx-cli`: built** — bv's `drift.Calculator` emits them, parity-checked. Alerts panel lists the new types (its type picker is data-driven). **Not built:** the panel shows neither `suggested_action` nor `labels` (vbx-fc7) | Engine + Native | — |
+| bv 0.25 alert types (`velocity_drop`, `high_impact_unblock`, `abandoned_claim`, `potential_duplicate`, `priority_mismatch`, `scope_creep`) with `suggested_action` and `labels` | **Built** — bv's `drift.Calculator` emits them through the engine and `vbx-cli`, parity-checked. The Alerts panel names each type with its own symbol (unknown types fall back to a generic one), shows `suggested_action` verbatim under each alert, `labels` as chips, and `related_issue_id` as a bead link; its label picker offers the bead labels `--alert-label` matches; a notification carries the action (vbx-fc7) | Engine + Native | — |
 | Baseline save / show / drift check | Toolbar menu + Alerts integration | Engine + Native | 4 |
 | Duplicate detection | Inspector "Possible duplicates" | Engine + Native | 4 |
 | Dependency suggestions | Inspector "Suggested dependencies" | Engine + Native | 4 |

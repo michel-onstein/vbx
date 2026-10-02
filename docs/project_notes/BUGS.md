@@ -4,6 +4,25 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — The Alerts label picker was empty on bv 0.25 alerts
+
+**Symptom:** the Alerts panel's label picker offered only "All labels" over
+`Fixtures/demo` — and over any workspace — so the engine's `alert_label`
+filter (vbx-jnm, PR #102) could not be reached from the app. (vbx-fc7)
+
+**Cause:** `AlertReport.labels` collected each alert's `label`, which bv sets
+only on label-level alerts. bv 0.25 puts a bead's labels in a separate `labels`
+list, which `HealthAlert` did not decode, and which `--alert-label` matches
+along with `label`. Every demo alert carries `labels` and none `label`.
+
+**Fix:** `HealthAlert` decodes `labels`; `allLabels` is `label` plus `labels`
+without repeats, and the picker offers the union over the report — the same
+set the engine's filter matches.
+
+**Regression test:** `labelPickerIncludesBeadLabels` and
+`labelFilterFromPicker` in `Tests/VBXUITests/AlertActionTests.swift`; the first
+fails on the old `labels`, the second finds no label to pick.
+
 ## 2026-10-01 — `beads-check.py --fix` rewrote the main checkout from a worktree
 
 **Symptom:** run from `.claude/worktrees/<topic>`, `--fix` reported "rewrote N

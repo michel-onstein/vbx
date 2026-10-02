@@ -39,6 +39,14 @@ public actor AlertNotifier {
         return granted
     }
 
+    /// A notification's body: the message, then bv's suggested action on its
+    /// own line when there is one — the remedy is what makes a notification
+    /// worth acting on from where it lands.
+    public nonisolated static func body(for alert: HealthAlert) -> String {
+        guard let action = alert.suggestedAction else { return alert.message }
+        return "\(alert.message)\n\(action)"
+    }
+
     /// Posts one notification per alert, worst first.
     public func deliver(_ alerts: [HealthAlert]) async {
         guard !alerts.isEmpty, await ensureAuthorised() else { return }
@@ -47,7 +55,7 @@ public actor AlertNotifier {
         for alert in alerts.prefix(5) {
             let content = UNMutableNotificationContent()
             content.title = alert.typeDisplayName
-            content.body = alert.message
+            content.body = Self.body(for: alert)
             if !alert.issueID.isEmpty {
                 content.subtitle = alert.issueID
                 // The bead id rides along so a tap can select it.
