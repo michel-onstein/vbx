@@ -4,6 +4,37 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — vbx-cli spelled a symlinked working directory by its resolved path
+
+**Symptom:** From a shell in a directory reached through a symlink — every
+temporary directory on macOS, where `/var` is a link to `/private/var` — bv
+printed `/var/folders/…` and `vbx-cli` printed `/private/var/folders/…`: in
+the envelope's `source_path`, in `load_stats.source_path`, and in the discovery
+notice `No .beads directory found; using workspace <path>` an export prints
+(vbx-1l6). (vbx-9g1.)
+
+**Cause:** `vbx-cli` defaulted `--path` to `FileManager.default
+.currentDirectoryPath`, which is `getcwd()` and resolves symlinks. bv uses Go's
+`os.Getwd`, which returns `$PWD` when it names the same directory. The parity
+harness could not see it: `subprocess.run(cwd=…)` changes the directory but
+leaves `PWD` as the harness's own, so bv's `os.Getwd` fell back to `getcwd` too
+and both sides resolved alike.
+
+**Fix:** `vbx-cli` passes an empty path when `--path` is not given, and the
+engine resolves it with `os.Getwd`, as bv does — the engine already handled
+`""` everywhere it reads the path. A relative `--path` was already right,
+because `filepath.Abs` also goes through `os.Getwd`. The harness's `run()`
+now sets `PWD` to each subprocess's working directory, unresolved.
+
+**Regression tests:** Go `TestEmptyPathKeepsPWDsSpellingOfTheSource` and
+`TestEmptyPathKeepsPWDsSpellingOfTheWorkspaceConfig` enter a fixture through a
+symlink and check the link's spelling survives. `parity-check.py` compares two
+new fixtures, `dropped (symlinked)` and `dropped (workspace, symlinked)`, from
+a symlink with no path rewritten — against the old `vbx-cli` they differ on
+`source_path` and on the export's discovery notice (10 commands).
+`test-parity-check.py` asserts `run()` sets `PWD` and that both fixtures are
+compared.
+
 ## 2026-10-02 — vbx-cli --robot-metrics ignored --label and --recipe
 
 **Symptom:** Over `Fixtures/demo`, `bv --robot-metrics --label engine` reports
