@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — A workspace member's dropped record withholds the claim, as bv's does (vbx-koc)
+
+The workspace claim-safety verdict is now bv's `newRobotSourceAuthority` rule
+(`workspaceClaimSafe`): any enabled member that failed, dropped a record or
+read a stale fallback withholds every claim from `--robot-next`, triage and
+export provenance. It used to count only failed members (see BUGS.md). New
+`Fixtures/dropped-workspace` and two `workspace claim gate` parity comparisons
+(robot-next, robot-triage) — parity 0 differences before and after, 2 more
+matches. Tests: `origins_test.go`, `loadstats_test.go`,
+`test-parity-check.py`.
+
 ## 2026-10-02 — Dropped records reported as bv's `load_stats`, and counted in the app (vbx-dv5)
 
 bv 0.25.2 adds `load_stats {source_path, valid, errors, skipped, warnings}` to

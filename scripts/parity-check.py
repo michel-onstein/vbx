@@ -48,7 +48,10 @@ enough verdicts for bv to apply its weights and one without, and
 `Fixtures/search`, whose text buries a bead below a query for its own id — the
 case bv's guaranteed exact-id hit exists for — and which runs only the search
 comparisons, and `Fixtures/dropped`, as JSONL and as a beads.db, whose
-malformed line and invalid record make every envelope carry `load_stats`. `--workspace` narrows the run to one.
+malformed line and invalid record make every envelope carry `load_stats`,
+and `Fixtures/dropped-workspace`, two repositories under one
+`.bv/workspace.yaml` with a malformed line in one member, which runs only the
+workspace claim-gate comparisons. `--workspace` narrows the run to one.
 
 Each differing command reports its first difference and how many more there
 are; `--verbose` lists every one.
@@ -129,6 +132,12 @@ FIXTURES = [
     {"name": "dropped", "workspace": "Fixtures/dropped", "skip_feedback": _NO_LOAD_WARNINGS},
     {"name": "dropped (beads.db)", "workspace": "Fixtures/dropped", "sqlite": True,
      "skip_feedback": _NO_LOAD_WARNINGS},
+    # A multi-repository workspace whose `web` member holds a line cut off
+    # mid-record (vbx-koc). bv withholds every claim when any member dropped a
+    # record, not only when one failed to load; vbx used to count only the
+    # failures. `only_named`: just the claim-gate comparisons run over it.
+    {"name": "dropped (workspace)", "workspace": "Fixtures/dropped-workspace",
+     "only_named": True},
 ]
 
 # The recipe files of the `recipes` fixture, by path relative to the
@@ -578,6 +587,17 @@ COMPARISONS = [
         ("robot-search", ["--search", "import"], ["--search", "import"]),
         ("robot-blocker-chain", ["--id", "drop-2"], ["drop-2"]),
     )
+] + [
+    # The claim gate over a multi-repository workspace with a dropped record
+    # (vbx-koc): no claim, bv's source_authority_incomplete diagnostic, and
+    # every recommendation unclaimable. The configuration is named on both
+    # sides because bv's discovery prefers any `.beads` reachable upward —
+    # this repository's own — to a workspace.yaml in the working directory.
+    {"vbx": command, "bv": command, "name": f"{command} workspace claim gate",
+     "only": {"dropped (workspace)"}, **paths,
+     "vbx_args": ["--path", ".bv/workspace.yaml"],
+     "bv_args": ["--workspace", ".bv/workspace.yaml"]}
+    for command, paths in (("robot-triage", TRIAGE_PATHS), ("robot-next", {}))
 ] + [
     # bv's opt-in not-ready label-class keeps a bead out of the claimable top
     # picks of triage and --robot-next, from the flag or, failing that, the

@@ -4,6 +4,30 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — A workspace member that dropped a record still let `--robot-next` claim
+
+**Symptom:** in a multi-repository workspace whose member held a malformed
+line, `vbx-cli --robot-next` emitted a claim command and triage marked its
+recommendations claimable, while bv 0.25.2 withheld every claim with
+`source_authority_incomplete`. The same envelope reported the dropped record
+in `load_stats`. (vbx-koc)
+
+**Cause:** the workspace's claim-safety verdict was `len(warnings) == 0`, and
+the warnings list only the members that failed to load. bv's
+`newRobotSourceAuthority` marks `claim_safe` false when any enabled member
+failed, has `errors > 0`, or read a stale fallback. The single-repository path
+already followed bv.
+
+**Fix:** `workspaceClaimSafe` in `loadstats.go` is bv's verdict over the
+members' accounting — disabled members ignored, at least one member loaded —
+and both workspace load paths, including the unchanged-hash reload, use it.
+Robot-next, triage and export provenance all read it through `claimsProven`.
+
+**Regression test:** `TestAWorkspaceMemberThatDroppedARecordClaimsNothing`,
+`TestAWorkspaceReloadThatDropsARecordWithdrawsTheClaim`,
+`TestWorkspaceClaimSafeFollowsBVsSourceAuthority`; parity over
+`Fixtures/dropped-workspace` (`workspace claim gate`).
+
 ## 2026-10-02 — A reload could not see a record being dropped
 
 **Symptom:** appending a malformed line to `issues.jsonl` in an open

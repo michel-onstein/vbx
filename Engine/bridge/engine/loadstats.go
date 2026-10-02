@@ -43,7 +43,12 @@ type sourceLoad struct {
 	// disabled is a workspace member the configuration switched off: listed,
 	// but counted in nothing.
 	disabled bool
-	stats    loader.ParseStats
+	// failed is a workspace member that did not load at all.
+	failed bool
+	// stale is a workspace member whose data came from a fallback source —
+	// bv's `Stale: len(AuthorityWarnings) > 0`.
+	stale bool
+	stats loader.ParseStats
 	// warnings are the source's first maxSourceWarnings messages, in order.
 	warnings []string
 }
@@ -80,12 +85,35 @@ func workspaceSourceLoads(results []workspace.LoadResult) []sourceLoad {
 			repoPath:   result.RepoPath,
 			sourcePath: result.SourcePath,
 			disabled:   result.Disabled,
+			failed:     result.Error != nil,
+			stale:      len(result.AuthorityWarnings) > 0,
 			stats:      result.ParseStats,
 			warnings: append(append([]string(nil), result.AuthorityWarnings...),
 				result.ParseWarnings...),
 		})
 	}
 	return loads
+}
+
+// workspaceClaimSafe is bv's ClaimSafe verdict from newRobotSourceAuthority
+// over robotWorkspaceAuthority: a workspace may back a claim only when every
+// member that is not disabled loaded, dropped no record and read no stale
+// fallback, and at least one member loaded. A member that loaded but dropped a
+// malformed line withholds the claim exactly as a member that failed does —
+// counting only the failures let `--robot-next` claim from a partial graph
+// (vbx-koc).
+func workspaceClaimSafe(sources []sourceLoad) bool {
+	loaded := 0
+	for _, source := range sources {
+		if source.disabled {
+			continue
+		}
+		if source.failed || source.stats.Errors > 0 || source.stale {
+			return false
+		}
+		loaded++
+	}
+	return loaded > 0
 }
 
 // boundedWarning is bv's boundedSourceMessage.

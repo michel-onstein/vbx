@@ -132,13 +132,37 @@ def test_default_run_covers_every_fixture(parity) -> None:
     names = [fixture["name"] for fixture in parity.FIXTURES]
     check("the demo, the readiness fixture, its beads.db form, the sprints, both feedback"
           " fixtures, the search fixture, the recipes workspace and the dropped records in"
-          " both forms are all compared",
+          " both forms and as a workspace member are all compared",
           names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
-                    "feedback-few", "search", "recipes", "dropped", "dropped (beads.db)"],
+                    "feedback-few", "search", "recipes", "dropped", "dropped (beads.db)",
+                    "dropped (workspace)"],
           str(names))
     for fixture in parity.FIXTURES:
-        path = ROOT / fixture["workspace"] / ".beads" / "issues.jsonl"
+        root = ROOT / fixture["workspace"]
+        path = root / ".beads" / "issues.jsonl"
+        if (root / ".bv" / "workspace.yaml").exists():
+            path = root / ".bv" / "workspace.yaml"
         check(f"{fixture['workspace']} exists", path.exists(), str(path))
+
+    # The multi-repository fixture (vbx-koc): every member it names holds an
+    # export, and one of them a line that does not parse — the dropped record
+    # the claim gate must see.
+    members = ROOT / "Fixtures" / "dropped-workspace"
+    exports = {name: members / name / ".beads" / "issues.jsonl" for name in ("api", "web")}
+    check("both dropped-workspace members hold an export",
+          all(path.exists() for path in exports.values()), str(exports))
+
+    def parses(line: str) -> bool:
+        try:
+            json.loads(line)
+            return True
+        except ValueError:
+            return False
+
+    broken = [name for name, path in exports.items() if path.exists()
+              and not all(parses(line) for line in path.read_text().splitlines() if line)]
+    check("exactly one dropped-workspace member holds a malformed line",
+          broken == ["web"], str(broken))
 
     # A command scoped to one fixture must name one that exists, or it is
     # skipped everywhere and never compared at all.
