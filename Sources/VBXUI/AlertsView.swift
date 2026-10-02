@@ -103,8 +103,11 @@ struct AlertsView: View {
             Picker("Type", selection: $store.alertTypeFilter) {
                 Text("All types").tag(String?.none)
                 ForEach(store.alerts.types, id: \.self) { type in
-                    Text(type.replacingOccurrences(of: "_", with: " ").capitalized)
-                        .tag(String?.some(type))
+                    Label(
+                        HealthAlert.displayName(forType: type),
+                        systemImage: HealthAlert.symbolName(forType: type)
+                    )
+                    .tag(String?.some(type))
                 }
             }
             .pickerStyle(.menu)
@@ -152,65 +155,16 @@ struct AlertsView: View {
                         .foregroundStyle(tint(group.severity))
 
                         ForEach(group.alerts) { alert in
-                            row(alert)
+                            AlertRow(alert: alert) { id in
+                                store.select(id: id)
+                                store.surface = .list
+                            }
                         }
                     }
                 }
             }
             .padding(12)
         }
-    }
-
-    private func row(_ alert: HealthAlert) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(alert.message).font(.callout)
-                Spacer(minLength: 8)
-                Text(alert.typeDisplayName)
-                    .font(.caption2)
-                    .padding(.horizontal, 5)
-                    .background(.quaternary, in: Capsule())
-            }
-
-            HStack(spacing: 10) {
-                if !alert.issueID.isEmpty {
-                    Button {
-                        store.select(id: alert.issueID)
-                        store.surface = .list
-                    } label: {
-                        Text(alert.issueID).font(.caption.monospaced())
-                    }
-                    .buttonStyle(.link)
-                }
-                if !alert.label.isEmpty {
-                    Text(alert.label).font(.caption2).foregroundStyle(.secondary)
-                }
-                // Shown only when there is a real before-and-after; a zero
-                // delta on an issue-derived alert is the absence of a
-                // measurement, not a measurement of zero.
-                if alert.hasDelta {
-                    Text(
-                        String(
-                            format: "%.3f → %.3f", alert.baselineValue, alert.currentValue)
-                    )
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                }
-                if alert.unblocksCount > 0 {
-                    Text("unblocks \(alert.unblocksCount)")
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
-                }
-                Spacer()
-            }
-
-            ForEach(alert.details, id: \.self) { detail in
-                Text(detail).font(.caption2).foregroundStyle(.tertiary)
-            }
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint(alert.severity).opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var baselineSheet: some View {
@@ -240,11 +194,107 @@ struct AlertsView: View {
         .frame(width: 420)
     }
 
-    private func tint(_ severity: AlertSeverity) -> Color {
-        switch severity {
+    private func tint(_ severity: AlertSeverity) -> Color { severity.tint }
+}
+
+extension AlertSeverity {
+    var tint: Color {
+        switch self {
         case .critical: .red
         case .warning: .orange
         case .info: .blue
         }
+    }
+}
+
+/// One alert: what is wrong, which beads, and bv's suggested remedy.
+///
+/// Its own view, rather than a method on the panel, so a snapshot can render
+/// one alert at a known size and measure where its lines land.
+struct AlertRow: View {
+    let alert: HealthAlert
+    /// Selects a bead in the list. The alert's bead and its related bead both
+    /// go through it, so the two links cannot navigate differently.
+    var open: (String) -> Void = { _ in }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(alert.message).font(.callout)
+                Spacer(minLength: 8)
+                Label(alert.typeDisplayName, systemImage: alert.typeSymbolName)
+                    .font(.caption2)
+                    .padding(.horizontal, 5)
+                    .background(.quaternary, in: Capsule())
+            }
+
+            HStack(spacing: 10) {
+                if !alert.issueID.isEmpty {
+                    beadLink(alert.issueID)
+                }
+                if !alert.relatedIssueID.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        beadLink(alert.relatedIssueID)
+                    }
+                    .help("Related bead")
+                }
+                ForEach(alert.allLabels, id: \.self) { label in
+                    Text(label)
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                }
+                // Shown only when there is a real before-and-after; a zero
+                // delta on an issue-derived alert is the absence of a
+                // measurement, not a measurement of zero.
+                if alert.hasDelta {
+                    Text(
+                        String(
+                            format: "%.3f → %.3f", alert.baselineValue, alert.currentValue)
+                    )
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+                if alert.unblocksCount > 0 {
+                    Text("unblocks \(alert.unblocksCount)")
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                }
+                Spacer()
+            }
+
+            ForEach(alert.details, id: \.self) { detail in
+                Text(detail).font(.caption2).foregroundStyle(.tertiary)
+            }
+
+            // Last, because it is the answer to everything above it. bv's text
+            // is shown verbatim and selectable — it is advice, never run.
+            if let action = alert.suggestedAction {
+                Label {
+                    Text(action).textSelection(.enabled)
+                } icon: {
+                    Image(systemName: "lightbulb")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alert.severity.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func beadLink(_ id: String) -> some View {
+        Button {
+            open(id)
+        } label: {
+            Text(id).font(.caption.monospaced())
+        }
+        .buttonStyle(.link)
     }
 }

@@ -5,6 +5,26 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Alerts panel shows bv's suggested action and labels (vbx-fc7)
+
+`HealthAlert` now decodes bv 0.25's `suggested_action`, `labels` and
+`related_issue_id`, each with `try?`, so a shape bv changes later costs the
+field and never the alert; an absent or blank action stays `nil`. Each alert
+row (now its own `AlertRow` view) shows the action last, verbatim and
+selectable, with a lightbulb; the bead's labels as chips; and the related bead
+as a second link that navigates like the first. All fifteen bv 0.25.2 alert
+types have a name and an SF Symbol, used in the row's type capsule and the type
+picker, with `bell` and a prose name for any type vbx does not know. The label
+picker now offers the alerts' `labels` as well as `label` — the set the
+engine's `alert_label` filter matches — which also fixes it being empty on
+every workspace whose alerts carry only `labels` (see BUGS.md). A critical
+alert's notification puts the action under the message. Tests:
+`AlertActionTests` (demo JSON decode, related bead, absent and wrong-shaped
+fields, every type's symbol exists, fallback, picker labels, notification body,
+store over the demo, label filter from the picker, per-row ink band for the
+action on `abandoned_claim` and `high_impact_unblock`, label chips, panel
+snapshot).
+
 ## 2026-10-01 — A bead's `defer_until` shows in the list and the Inspector (vbx-upz)
 
 The engine already withheld a bead deferred into the future from Ready, but
