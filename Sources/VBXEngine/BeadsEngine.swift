@@ -117,9 +117,17 @@ public actor BeadsEngine {
     /// `feedback.json` in the beads directory bv resolves for `path`. A load
     /// that fails does not fail the open — bv's show and reset never load —
     /// but fails a recorded verdict, with bv's text. Only `vbx-cli` passes it.
+    ///
+    /// `feedbackFromPath` reads `feedback.json` where bv's robot commands do:
+    /// in the beads directory bv resolves for `path` as the working directory,
+    /// whichever graph was loaded — so from a folder below a workspace root,
+    /// the folder's own `.beads`, not the root's. Only `vbx-cli` passes it.
+    /// The app leaves it off: it opens a workspace by its configuration, and
+    /// shows and records feedback in the root's `.beads` (vbx-15s, ADR-026).
     public func open(
         path: String, skipPhase2: Bool = false, liveTrackerActions: Bool = false,
-        exportHooks: Bool = false, workspace: String? = nil, feedbackCommand: Bool = false
+        exportHooks: Bool = false, workspace: String? = nil, feedbackCommand: Bool = false,
+        feedbackFromPath: Bool = false
     ) throws -> WorkspaceInfo {
         close()
 
@@ -131,6 +139,7 @@ public actor BeadsEngine {
             ] as [String: Any]
         if let workspace { config["workspace"] = workspace }
         if feedbackCommand { config["feedback_command"] = true }
+        if feedbackFromPath { config["feedback_from_path"] = true }
         let configData = try JSONSerialization.data(withJSONObject: config)
         let configString = String(decoding: configData, as: UTF8.self)
 

@@ -1016,10 +1016,12 @@ func run() async -> Int32 {
     do {
         // The CLI is never sandboxed, so it alone may ask `br` what it
         // supports — which is what puts claim commands in triage and
-        // --robot-next (ADR-020). The app leaves this off.
+        // --robot-next (ADR-020). The app leaves this off. Feedback is read
+        // as bv reads it, from the working directory's `.beads` whichever
+        // graph is loaded (vbx-15s); the app reads a workspace's root.
         info = try await engine.open(
             path: options.path, liveTrackerActions: true, workspace: options.workspace,
-            feedbackCommand: command.answersBeforeDiscovery)
+            feedbackCommand: command.answersBeforeDiscovery, feedbackFromPath: true)
     } catch {
         complain("Error: \(error.localizedDescription)")
         return 1

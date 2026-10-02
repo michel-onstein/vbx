@@ -57,6 +57,14 @@ type OpenConfig struct {
 	// the open, because bv's show and reset never load; it fails a verdict
 	// instead, with bv's text (vbx-v1t). See openForFeedback.
 	FeedbackCommand bool `json:"feedback_command,omitempty"`
+	// FeedbackFromPath reads feedback.json the way bv's robot commands do:
+	// from the beads directory bv resolves for Path, standing in for the
+	// working directory — loader.GetBeadsDir("") — whichever graph the session
+	// loaded. Below a workspace root that is the folder's own `.beads`, not
+	// the root's. Off — the app's setting — a workspace's feedback is its
+	// root's, which the app both shows and writes (vbx-15s). Only vbx-cli
+	// sets it. See sessionFeedbackDir.
+	FeedbackFromPath bool `json:"feedback_from_path,omitempty"`
 }
 
 // Session holds one loaded workspace and its analysis state.
@@ -110,6 +118,11 @@ type Session struct {
 	feedbackCommandDir    string
 	feedbackCommandDirErr error
 	feedbackLoadErr       error
+	// pathFeedbackDir is, for a FeedbackFromPath session, the beads
+	// directory bv resolves for Path — empty when it cannot be resolved,
+	// where bv scores without feedback. Resolved once, at open, because the
+	// resolution may run git.
+	pathFeedbackDir string
 
 	loadedAt time.Time
 
@@ -145,6 +158,12 @@ func Open(cfg OpenConfig) (*Session, error) {
 	if cfg.FeedbackCommand {
 		s.openForFeedback()
 		return s, nil
+	}
+	if cfg.FeedbackFromPath {
+		// bv's loadRobotFeedback swallows a failure to resolve the
+		// directory and scores with the defaults; an empty directory here
+		// reads no feedback.
+		s.pathFeedbackDir, _ = bvFeedbackBeadsDir(cfg.Path)
 	}
 	if err := s.load(); err != nil {
 		return nil, err

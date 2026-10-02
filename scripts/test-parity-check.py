@@ -751,6 +751,20 @@ def test_workspace_discovery(parity) -> None:
         check("its members and a plain folder sit below the root",
               (built / "api" / ".beads").is_dir() and (built / "notes").is_dir()
               and not (built / "notes" / ".beads").exists())
+        # vbx-15s: bv reads feedback from the working directory's .beads, so
+        # a root feedback.json that applies is what tells the rules apart.
+        feedback = built / ".beads" / "feedback.json"
+        check("the root's .beads holds enough verdicts for the weights to apply",
+              feedback.exists()
+              and len(json.loads(feedback.read_text()).get("events", [])) >= 3)
+
+    scored = {(entry["vbx"], entry.get("cwd"), "--workspace" in entry["vbx_args"])
+              for entry in found}
+    check("triage, next and priority are each compared from the folder below the root,"
+          " with and without --workspace (vbx-15s)",
+          {(command, "notes", workspace)
+           for command in ("robot-triage", "robot-next", "robot-priority")
+           for workspace in (False, True)} <= scored, str(sorted(scored, key=str)))
 
 
 def test_search(parity) -> None:
