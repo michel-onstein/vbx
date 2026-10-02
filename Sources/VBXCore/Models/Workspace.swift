@@ -33,6 +33,15 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     /// directory and the root `.beads`, not just the `.bv/` holding the
     /// source — see ``watchDirectories`` and vbx-zot.
     public var watchPaths: [String]
+    /// The git directories of a multi-repository workspace's members.
+    ///
+    /// A member is normally its own repository, so a commit there moves a
+    /// `HEAD` the watch on the root repository never sees, and its uncommitted
+    /// marks would never clear. Kept apart from ``watchPaths`` because a commit
+    /// changes no bead: it calls for the marks to be recomputed, which the
+    /// hash-gated reload would skip (vbx-d1c). Empty for a single repository,
+    /// whose git directory the store finds itself.
+    public var gitWatchPaths: [String]
 
     private enum CodingKeys: String, CodingKey {
         case source, kind, warnings, changed
@@ -40,6 +49,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
         case dataHash = "data_hash"
         case loadedAt = "loaded_at"
         case watchPaths = "watch_paths"
+        case gitWatchPaths = "git_watch_paths"
     }
 
     public init(from decoder: Decoder) throws {
@@ -52,6 +62,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
         // Absent on a plain open; only reload reports it.
         changed = try c.decodeIfPresent(Bool.self, forKey: .changed) ?? true
         watchPaths = try c.decodeIfPresent([String].self, forKey: .watchPaths) ?? []
+        gitWatchPaths = try c.decodeIfPresent([String].self, forKey: .gitWatchPaths) ?? []
         if let raw = try c.decodeIfPresent(String.self, forKey: .loadedAt) {
             loadedAt = ISO8601DateFormatter().date(from: raw)
         }
@@ -60,8 +71,9 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     public init(
         source: String, kind: SourceKind, issueCount: Int,
         dataHash: String, warnings: [String] = [], loadedAt: Date? = nil,
-        changed: Bool = true, watchPaths: [String] = []
+        changed: Bool = true, watchPaths: [String] = [], gitWatchPaths: [String] = []
     ) {
+        self.gitWatchPaths = gitWatchPaths
         self.source = source
         self.kind = kind
         self.issueCount = issueCount

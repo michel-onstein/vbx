@@ -4,6 +4,41 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — Uncommitted marks ignored a workspace's member repositories
+
+**Symptom:** in a `.bv/workspace.yaml` workspace whose members are repositories
+of their own, the uncommitted marks were wrong: with the root in no repository
+there were none at all ("No commit to compare against"), and a commit in a
+member never cleared anything, because only the root's `.git` was watched.
+Found by reading code under vbx-zot. (vbx-d1c)
+
+**Cause:** `refreshDirtyState` compared against `snapshot_at` for `HEAD`, whose
+extractor opens the object store of the session's source — for a workspace,
+`.bv/workspace.yaml` — and looks for a beads file at that path. The members'
+beads are in other repositories. `gitHeadPath` likewise walked up from the
+workspace root alone.
+
+**Fix:** for a workspace session, `snapshot_at` with `HEAD` (or no revision)
+reads each enabled member's beads file from its own object store at its own
+`HEAD`, drops tombstones and namespaces the records with the loader's own
+`namespaceIssues`, and returns the union. A member with no repository or no
+commits reports its loaded records as `unknown_ids`, which the store leaves out
+of the comparison instead of marking them added; with no member readable the
+call fails and the state is `unknown`, as before. `info` carries
+`git_watch_paths` — each member's git directory, following a worktree's
+`gitdir:` pointer — and the store's git watch covers those plus the root's,
+re-established on reload when membership changes. A separate list from
+`watch_paths`, because a commit changes no bead and the hash-gated reload would
+not recompute the marks.
+
+**Regression test:** `workspace_head_test.go` (an edit in one member marks
+exactly that bead and a commit in that member clears it; ids are namespaced per
+member; a member with no repository is unknown; members of one repository share
+a `HEAD`; `git_watch_paths` names each member's `.git`) and
+`WorkspaceUncommittedTests.swift` (each member's `.git` is watched; an edit is
+marked and a commit in the member clears it through the watch; a member with no
+repository is not marked as added).
+
 ## 2026-10-01 — A multi-repository workspace never reloaded on a member's edit
 
 **Symptom:** with a `.bv/workspace.yaml` workspace open, a bead written to any

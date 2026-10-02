@@ -574,8 +574,16 @@ feedback is read from, and every enabled member's beads directory — only those
 exist, with a member that has none watched at its repository root. One FSEvents stream
 covers the lot, through one debouncer. The app compares the list on every reload,
 before the hash gate, and re-establishes the stream when it changes, so a member added
-to `workspace.yaml` is watched from then on even if it brought no beads. The `.git`
-watch for uncommitted marks stays on the repository the workspace root is in.
+to `workspace.yaml` is watched from then on even if it brought no beads.
+
+The `.git` watch for uncommitted marks is a second stream, because a commit changes no
+bead and the hash-gated reload would skip it; it recomputes the marks rather than
+reloading. It covers the repository the workspace root is in and, for a
+multi-repository workspace, every member's git directory, which the engine reports as
+`git_watch_paths` (vbx-d1c). The marks themselves are per member too: `snapshot_at`
+for `HEAD` in a workspace session reads each member's beads from its own object store
+at its own `HEAD`, namespaced as the loader namespaces them, and reports the records of
+a member with no history as `unknown_ids` rather than leaving them to read as added.
 
 ### 8.3 Sandboxing
 

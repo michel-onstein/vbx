@@ -72,6 +72,15 @@ func (s *Session) snapshotAt(req []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A workspace's members are separate repositories with a HEAD each; the
+	// session's source is the workspace yaml, whose repository holds none of
+	// their beads (vbx-d1c).
+	s.mu.RLock()
+	isWorkspace := s.kind == "workspace"
+	s.mu.RUnlock()
+	if isWorkspace && isHeadRevision(r.Revision) {
+		return s.workspaceHeadSnapshot(r)
+	}
 	extractor, err := s.extractor()
 	if err != nil {
 		return nil, err

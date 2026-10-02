@@ -114,7 +114,11 @@ them.
   engine's `snapshot_at` — the object store directly, as ADR-006 requires. No
   side file to fall out of step with an external `br` run or a checkout. See
   ADR-015. Note `HEAD` moving is invisible to the bead-file watch, so `.git` is
-  watched too.
+  watched too. **In a multi-repository workspace every member has its own
+  `HEAD`**: `snapshot_at` for `HEAD` reads each member's own object store, and
+  the engine's `git_watch_paths` names each member's `.git` — a separate list
+  from `watch_paths`, because a commit needs the marks recomputed, which the
+  hash-gated reload would skip. See BUGS.md, 2026-10-01 (vbx-d1c).
 - **The graph's camera is ``GraphCamera``, and nothing recomputes its
   arithmetic.** Drawing, hit-testing, the zoom buttons and both trackpad
   gestures go through the one value — a click that lands on the node that *was*

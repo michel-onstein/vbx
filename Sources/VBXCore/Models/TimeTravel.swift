@@ -72,9 +72,17 @@ public struct WorkspaceSnapshot: Codable, Sendable, Hashable {
     public var issueCount: Int
     public var dataHash: String
     public var issues: [Issue]
+    /// Beads whose committed state could not be read: in a multi-repository
+    /// workspace, the records of a member with no repository or no commits.
+    ///
+    /// Not in ``issues`` and not the same as absent from it — left out of the
+    /// comparison, they would all read as added. Absent, never zero
+    /// (vbx-d1c, ADR-015).
+    public var unknownIDs: Set<String>
 
     private enum CodingKeys: String, CodingKey {
         case timestamp, issues
+        case unknownIDs = "unknown_ids"
         case requestedRevision = "requested_revision"
         case resolvedRevision = "resolved_revision"
         case shortRevision = "short_revision"
@@ -93,6 +101,7 @@ public struct WorkspaceSnapshot: Codable, Sendable, Hashable {
         issueCount = try c.decodeIfPresent(Int.self, forKey: .issueCount) ?? 0
         dataHash = try c.decodeIfPresent(String.self, forKey: .dataHash) ?? ""
         issues = try c.decodeIfPresent([Issue].self, forKey: .issues) ?? []
+        unknownIDs = Set(try c.decodeIfPresent([String].self, forKey: .unknownIDs) ?? [])
     }
 }
 

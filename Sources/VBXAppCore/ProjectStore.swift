@@ -752,6 +752,10 @@ public final class ProjectStore: ObservableObject {
             if isWatching, watcher.paths != fresh.watchDirectories {
                 startBeadWatch()
             }
+            // Likewise the repositories: a new member brings its own `.git`.
+            if isWatching, gitWatcher.paths != gitWatchDirectories {
+                startGitWatch()
+            }
             guard fresh.changed || force else { return false }
 
             try await refreshAll()
@@ -795,28 +799,60 @@ public final class ProjectStore: ObservableObject {
     public func startWatching() {
         guard info != nil else { return }
         startBeadWatch()
-        // A commit does not touch the export, so the watch above cannot see
-        // one. This does — and only the dirty state is recomputed, because
-        // nothing about the beads themselves has changed.
-        if let head = gitHeadPath {
-            gitWatcher.start(watching: head) { [weak self] in
-                Task { @MainActor in
-                    await self?.refreshDirtyState()
-                    // A commit changes which commits are attributed to which
-                    // beads, so the report describes a repository that no
-                    // longer exists. Re-walked rather than marked stale: the
-                    // whole point of this watch is that nothing has to ask.
-                    self?.startHistoryWalk(refresh: true)
-                }
-            }
-        } else {
+        startGitWatch()
+        isWatching = watcher.isWatching
+    }
+
+    /// Points the repository watch at every git directory behind the open
+    /// workspace.
+    ///
+    /// A commit does not touch the export, so the bead watch cannot see one.
+    /// This does — and only the dirty state is recomputed, because nothing
+    /// about the beads themselves has changed.
+    private func startGitWatch() {
+        let directories = gitWatchDirectories
+        guard !directories.isEmpty else {
             // The workspace being opened is in no repository. Left running,
             // the previous workspace's `.git` watch would go on recomputing
             // this one's dirty state against a repository it is not in.
             gitWatcher.stop()
+            return
         }
-        isWatching = watcher.isWatching
+        gitWatcher.start(directories: directories) { [weak self] in
+            Task { @MainActor in
+                await self?.refreshDirtyState()
+                // A commit changes which commits are attributed to which
+                // beads, so the report describes a repository that no
+                // longer exists. Re-walked rather than marked stale: the
+                // whole point of this watch is that nothing has to ask.
+                self?.startHistoryWalk(refresh: true)
+            }
+        }
     }
+
+    /// The git directories a commit can move for this workspace.
+    ///
+    /// The repository the workspace root is in, plus — for a multi-repository
+    /// workspace — each member's own, which the engine names because it owns
+    /// membership. A member is normally a repository of its own, and a commit
+    /// in it used to leave its uncommitted marks standing (vbx-d1c).
+    /// Deduplicated on the resolved path: a member inside the root repository
+    /// names the same `.git` the root does.
+    var gitWatchDirectories: [String] {
+        var directories: [String] = []
+        var seen: Set<String> = []
+        let candidates =
+            [gitHeadPath.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path }]
+            + (info?.gitWatchPaths ?? []).map(Optional.some)
+        for case let directory? in candidates {
+            let key = URL(fileURLWithPath: directory).resolvingSymlinksInPath().standardizedFileURL.path
+            if seen.insert(key).inserted { directories.append(directory) }
+        }
+        return directories
+    }
+
+    /// The directories the repository watch is following, for tests.
+    var watchedGitDirectories: [String] { gitWatcher.paths }
 
     /// Points the bead watch at every directory the engine reads from.
     ///
@@ -1223,7 +1259,13 @@ public final class ProjectStore: ObservableObject {
         }
         do {
             let head = try await engine.snapshot(at: "HEAD")
-            dirtyBeads = BeadDirtyState.compare(working: issues, committed: head.issues)
+            // In a multi-repository workspace each member is compared against
+            // its own HEAD; one with no history to compare against reports its
+            // beads as unknown, and they are left unmarked rather than shown
+            // as added (vbx-d1c).
+            let working =
+                head.unknownIDs.isEmpty ? issues : issues.filter { !head.unknownIDs.contains($0.id) }
+            dirtyBeads = BeadDirtyState.compare(working: working, committed: head.issues)
         } catch {
             dirtyBeads = .unknown
         }

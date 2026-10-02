@@ -646,6 +646,12 @@ works in a sandbox where shelling out to `git` would not
   export: `HEAD` moves and every dirty bead becomes clean while the watched file
   sits unchanged. Without the second watch the list would keep marking rows that
   are no longer dirty.
+- **In a multi-repository workspace, `HEAD` is each member's own** (amended
+  2026-10-01, `vbx-d1c`). A member is normally a repository of its own, so the
+  committed set is the union of each member's beads at its own `HEAD`,
+  namespaced as the loader namespaces them, and each member's `.git` is watched.
+  A member with no history is `unknown` for its beads alone, not for the
+  workspace — and not "added", which leaving it out would make it.
 - **A mark in a gutter, not a tint across the row** (amended 2026-08-23,
   `vbx-r0m`). The row was originally tinted with a low-alpha accent. That could
   say only *something here is uncommitted*: it collapsed the three cases above
