@@ -1233,6 +1233,15 @@ holds *and* it means what it means in bv; otherwise declare it envelope-only.
     (vbx-7d5, the same step) the ids are what the recipe selected, of the
     label's beads when both are given; the recipe is hashed and reported in
     `scope.recipe` exactly as it was given, a path included.
+  - Since vbx-shz the label commands, the blocker chain, search and the sprint
+    commands carry the envelope too, through `withEnvelope`, which adds
+    `generated_at` and `data_hash` beside the provenance keys wherever the
+    payload has no field of that name. Their payloads stay the analysis
+    result the app decodes, with the envelope at its top level, so
+    `parity-check.py` lifts bv's envelope keys into the subtree it compares.
+    `data_hash` follows bv per command: the unscoped hash for the label
+    commands and search (`ctx.Envelope()`), the scoped issues' hash for the
+    blocker chain and the sprint commands (`ComputeDataHash(ctx.Issues)`).
 - **Envelope-only**, in `parity-check.py`'s single `ENVELOPE_ONLY_KEYS`, each
   with its reason:
   - `source_authority` — bv's report of its multi-source selection: candidates
@@ -1321,7 +1330,9 @@ fails; a declaration that stops firing fails the run; and each is printed as
 **Consequences.**
 
 - `parity-check.py` exits 0 against bv 0.25.2 on every fixture, with five
-  commands on the `beads.db` fixture reported as `declared`.
+  commands on the `beads.db` fixture reported as `declared` — nine since
+  capacity and then the label commands (vbx-shz) gained the envelope, whose
+  `data_hash` and `scope_hash` differ there for the same reason.
 - `source_authority`/`authority_hash` stay envelope-only (ADR-023): vbx still
   ranks no sources.
 - **Revisit** when bv fixes its main SQLite query against `br`'s schema

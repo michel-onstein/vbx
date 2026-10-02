@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
@@ -122,6 +123,23 @@ func (s *Session) provenance(dataHash string, scope provenanceScope) map[string]
 // level. A key the payload already has is left alone: the payload's own
 // field is data, and the envelope must never overwrite it.
 func (s *Session) withProvenance(payload any, dataHash string, scope provenanceScope) ([]byte, error) {
+	return mergeTopLevel(payload, s.provenance(dataHash, scope))
+}
+
+// withEnvelope is withProvenance for a payload that has no envelope of its
+// own: bv's generated_at and data_hash join the provenance keys. Each is
+// added only where the payload has no field of that name, so label health
+// keeps its own generated_at.
+func (s *Session) withEnvelope(payload any, dataHash string, scope provenanceScope) ([]byte, error) {
+	keys := s.provenance(dataHash, scope)
+	keys["generated_at"] = robotNow().UTC().Format(time.RFC3339)
+	keys["data_hash"] = dataHash
+	return mergeTopLevel(payload, keys)
+}
+
+// mergeTopLevel marshals payload, which must encode as a JSON object, and
+// adds keys at its top level, leaving every key the payload already has.
+func mergeTopLevel(payload any, keys map[string]any) ([]byte, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -130,7 +148,10 @@ func (s *Session) withProvenance(payload any, dataHash string, scope provenanceS
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, fmt.Errorf("provenance needs a JSON object: %w", err)
 	}
-	for key, value := range s.provenance(dataHash, scope) {
+	if object == nil {
+		return nil, fmt.Errorf("provenance needs a JSON object, not null")
+	}
+	for key, value := range keys {
 		if _, taken := object[key]; taken {
 			continue
 		}

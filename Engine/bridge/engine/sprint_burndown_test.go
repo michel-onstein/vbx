@@ -242,9 +242,14 @@ func TestIdealLineWithoutScopeChangesIsStraight(t *testing.T) {
 		t.Error("out-of-window scope changes bent the ideal line")
 	}
 
-	// An empty sprint has no line, rather than a flat zero.
-	if line := idealLine(sprint, 0); len(line) != 0 {
-		t.Errorf("an empty sprint drew %d ideal points", len(line))
+	// An empty sprint has no line, rather than a flat zero — and no line is
+	// null, as bv writes it, not an empty list (vbx-shz: a scope that leaves
+	// none of a sprint's beads is the case that showed it).
+	if line := idealLine(sprint, 0); line != nil {
+		t.Errorf("an empty sprint drew %d ideal points, want nil", len(line))
+	}
+	if line := idealLineScoped(&model.Sprint{ID: "undated"}, 3, nil); line != nil {
+		t.Errorf("an undated sprint drew %d ideal points, want nil", len(line))
 	}
 }
 

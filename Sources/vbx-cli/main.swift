@@ -18,6 +18,31 @@ import Foundation
 
 // MARK: - Robot command table
 
+/// What `--label` and `--recipe` do to a command. bv 0.25.2 applies both as
+/// one global scope (`scopeLoadedIssues`) after it loads issues and before
+/// any post-load handler runs, so the rule follows from where bv answers the
+/// command — read from `cmd/bv`, never assumed.
+enum ScopeRule {
+    /// bv answers before it resolves a recipe or loads issues (the recipe
+    /// list, triage feedback), or the command is vbx's own: both flags are
+    /// ignored, as bv ignores them.
+    case ignored
+    /// bv's global scope: the engine answers over the label's subgraph,
+    /// narrowed to what the recipe selects, and says so in the envelope.
+    /// Alerts and capacity take a filter of their own too, as bv does:
+    /// `--label` scopes the issue set, and `--alert-label` filters the alerts
+    /// computed over it, `--capacity-label` the beads simulated.
+    case scoped
+    /// bv resolves the recipe and loads issues, but the output reads neither:
+    /// a recipe that does not resolve fails the command, and otherwise the
+    /// flags change nothing.
+    case validated
+    /// bv scopes the command and vbx does not yet (vbx-9gl). Either flag is
+    /// refused rather than answered over every bead, which would look like a
+    /// scoped answer and not be one.
+    case unported
+}
+
 /// One robot command: the flag, the engine method it calls, and how its
 /// companion flags become a request.
 struct RobotCommand {
@@ -29,23 +54,23 @@ struct RobotCommand {
     let request: (Options) throws -> [String: Any]?
     /// True when the command needs the expensive metrics before it can answer.
     var waitsForPhase2 = false
-    /// True when `--label` and `--recipe` are bv's global scope for this
-    /// command: the engine answers over the label's subgraph, narrowed to
-    /// what the recipe selects, and says so in the envelope. Set here rather
-    /// than in each `request`, so a scope-aware command cannot forget to
-    /// forward either. Alerts and capacity take a filter of their own too, as
-    /// bv does: `--label` scopes the issue set, and `--alert-label` filters
-    /// the alerts computed over it, `--capacity-label` the beads simulated.
-    var scoped = false
+    /// What `--label` and `--recipe` do here. Set in the table rather than in
+    /// each `request`, so a scope-aware command cannot forget to forward
+    /// either.
+    var scope = ScopeRule.ignored
     /// True when the command prints the engine's `message` — bv's own text
     /// for the same flag — rather than the payload. The feedback commands are
     /// the only ones: bv prints prose for them whatever `--format` says, and
     /// its errors are plain lines on stderr.
     var printsMessage = false
+    /// True when the engine's error is bv's own stderr line for the same
+    /// failure, so it is printed bare rather than wrapped — an unknown
+    /// `--robot-blocker-chain` bead, which a scope can also leave out.
+    var bvErrorText = false
 
     init(
         _ flag: String, method: String, summary: String, waitsForPhase2: Bool = false,
-        scoped: Bool = false, printsMessage: Bool = false,
+        scope: ScopeRule = .ignored, printsMessage: Bool = false, bvErrorText: Bool = false,
         request: @escaping (Options) throws -> [String: Any]? = { _ in nil }
     ) {
         self.flag = flag
@@ -53,14 +78,20 @@ struct RobotCommand {
         self.summary = summary
         self.request = request
         self.waitsForPhase2 = waitsForPhase2
-        self.scoped = scoped
+        self.scope = scope
         self.printsMessage = printsMessage
+        self.bvErrorText = bvErrorText
     }
+
+    /// True when a `--recipe` must resolve before the command runs: bv
+    /// resolves it before loading issues, so it fails every command that
+    /// loads them.
+    var resolvesRecipe: Bool { scope == .scoped || scope == .validated }
 
     /// The engine request: the command's own, plus the scope.
     func payload(_ options: Options) throws -> [String: Any]? {
         var payload = try request(options)
-        guard scoped else { return payload }
+        guard scope == .scoped else { return payload }
         var scope: [String: Any] = [:]
         if let label = options.label, !label.isEmpty { scope["label"] = label }
         if let recipe = options.recipe, !recipe.isEmpty { scope["recipe"] = recipe }
@@ -109,16 +140,16 @@ let robotCommands: [RobotCommand] = [
     // Triage and planning
     RobotCommand(
         "robot-triage", method: "triage", summary: "Ranked recommendations",
-        waitsForPhase2: true, scoped: true, request: notReadyRequest),
+        waitsForPhase2: true, scope: .scoped, request: notReadyRequest),
     RobotCommand(
         "robot-next", method: "next", summary: "The single claim-safe next bead",
-        waitsForPhase2: true, scoped: true, request: notReadyRequest),
+        waitsForPhase2: true, scope: .scoped, request: notReadyRequest),
     RobotCommand(
         "robot-plan", method: "plan", summary: "Parallel execution tracks",
-        scoped: true),
+        scope: .scoped),
     RobotCommand(
         "robot-priority", method: "priority", summary: "Priority misalignment",
-        waitsForPhase2: true, scoped: true,
+        waitsForPhase2: true, scope: .scoped,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.minConfidence { request["min_confidence"] = value }
@@ -129,7 +160,7 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-insights", method: "insights", summary: "Deep graph metrics",
-        waitsForPhase2: true, scoped: true,
+        waitsForPhase2: true, scope: .scoped,
         request: { options in options.limit.map { ["limit": $0] } }),
     RobotCommand(
         "robot-actionable", method: "actionable", summary: "Beads with nothing blocking them"),
@@ -142,7 +173,7 @@ let robotCommands: [RobotCommand] = [
     // Hygiene and health
     RobotCommand(
         "robot-suggest", method: "suggest", summary: "Duplicates, deps, labels, cycles",
-        scoped: true,
+        scope: .scoped,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.suggestType { request["type"] = value }
@@ -152,7 +183,7 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-alerts", method: "alerts", summary: "Drift and health alerts",
-        scoped: true,
+        scope: .scoped,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.severity { request["severity"] = value }
@@ -160,19 +191,25 @@ let robotCommands: [RobotCommand] = [
             if let value = options.alertLabel { request["alert_label"] = value }
             return request.isEmpty ? nil : request
         }),
-    RobotCommand("robot-drift", method: "drift", summary: "Drift against the saved baseline"),
+    RobotCommand(
+        "robot-drift", method: "drift", summary: "Drift against the saved baseline",
+        scope: .unported),
     RobotCommand("robot-baseline", method: "baseline_info", summary: "The saved baseline"),
 
     // Labels
-    RobotCommand("robot-label-health", method: "label_health", summary: "Per-label health"),
-    RobotCommand("robot-label-flow", method: "label_flow", summary: "Cross-label flow"),
     RobotCommand(
-        "robot-label-attention", method: "label_attention", summary: "Attention ranking"),
+        "robot-label-health", method: "label_health", summary: "Per-label health",
+        scope: .scoped),
+    RobotCommand(
+        "robot-label-flow", method: "label_flow", summary: "Cross-label flow", scope: .scoped),
+    RobotCommand(
+        "robot-label-attention", method: "label_attention", summary: "Attention ranking",
+        scope: .scoped),
 
     // Graph
     RobotCommand(
         "robot-graph", method: "graph_export", summary: "Graph export",
-        scoped: true,
+        scope: .scoped,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.graphFormat { request["format"] = value }
@@ -182,6 +219,7 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-blocker-chain", method: "blocker_chain", summary: "Full blocker chain",
+        scope: .scoped, bvErrorText: true,
         request: { options in ["id": try requireID(options, for: "robot-blocker-chain")] }),
     RobotCommand(
         "robot-unblocks", method: "unblocks", summary: "What closing a bead unblocks",
@@ -190,6 +228,7 @@ let robotCommands: [RobotCommand] = [
     // Search
     RobotCommand(
         "robot-search", method: "search", summary: "Search (text or hybrid)",
+        scope: .scoped,
         request: { options in
             guard let query = options.query, !query.isEmpty else {
                 throw UsageError(message: "--robot-search requires --search")
@@ -204,9 +243,11 @@ let robotCommands: [RobotCommand] = [
     RobotCommand(
         "robot-search-presets", method: "search_presets", summary: "Available weight presets"),
 
-    // History and correlation
+    // History and correlation. bv builds each report from its scoped issues;
+    // vbx's is the whole workspace's, so the scope is refused (vbx-9gl).
     RobotCommand(
         "robot-history", method: "history", summary: "Bead-to-commit correlation",
+        scope: .unported,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.id { request["id"] = value }
@@ -215,12 +256,15 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-causality", method: "causality", summary: "One bead's causal chain",
+        scope: .unported,
         request: { options in ["id": try requireID(options, for: "robot-causality")] }),
     RobotCommand(
         "robot-related", method: "related", summary: "Related work",
+        scope: .unported,
         request: { options in ["id": try requireID(options, for: "robot-related")] }),
     RobotCommand(
         "robot-impact-network", method: "impact_network", summary: "Bead impact network",
+        scope: .unported,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.id { request["id"] = value }
@@ -229,9 +273,11 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-orphans", method: "orphans", summary: "Commits no bead accounts for",
+        scope: .unported,
         request: { options in options.limit.map { ["limit": $0] } }),
     RobotCommand(
         "robot-file-beads", method: "file_beads", summary: "Beads that touched a file",
+        scope: .unported,
         request: { options in
             guard let path = options.file else {
                 throw UsageError(message: "--robot-file-beads requires --file")
@@ -240,9 +286,11 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-file-hotspots", method: "file_hotspots", summary: "Most-touched files",
+        scope: .unported,
         request: { options in options.limit.map { ["limit": $0] } }),
     RobotCommand(
         "robot-file-relations", method: "file_relations", summary: "Co-change partners",
+        scope: .unported,
         request: { options in
             guard let path = options.file else {
                 throw UsageError(message: "--robot-file-relations requires --file")
@@ -254,15 +302,17 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-impact", method: "file_impact", summary: "Risk of changing files",
+        scope: .unported,
         request: { options in
             guard let files = options.files, !files.isEmpty else {
                 throw UsageError(message: "--robot-impact requires --files")
             }
             return ["files": files]
         }),
+    // bv loads and scopes issues first, then reports the feedback file alone.
     RobotCommand(
         "robot-correlation-stats", method: "correlation_feedback",
-        summary: "Correlation feedback accuracy"),
+        summary: "Correlation feedback accuracy", scope: .validated),
 
     // Time travel
     RobotCommand("robot-revisions", method: "revisions", summary: "Bead-changing commits"),
@@ -271,6 +321,7 @@ let robotCommands: [RobotCommand] = [
         request: { options in options.revision.map { ["revision": $0] } }),
     RobotCommand(
         "robot-diff", method: "diff", summary: "Diff against a revision",
+        scope: .unported,
         request: { options in
             guard let revision = options.revision else {
                 throw UsageError(message: "--robot-diff requires --diff-since")
@@ -279,16 +330,19 @@ let robotCommands: [RobotCommand] = [
         }),
 
     // Sprints
-    RobotCommand("robot-sprint-list", method: "sprint_list", summary: "All sprints"),
+    RobotCommand(
+        "robot-sprint-list", method: "sprint_list", summary: "All sprints", scope: .scoped),
     RobotCommand(
         "robot-sprint-show", method: "sprint_show", summary: "One sprint",
+        scope: .scoped,
         request: { options in ["id": options.id ?? "current"] }),
     RobotCommand(
         "robot-burndown", method: "burndown", summary: "Sprint burndown",
+        scope: .scoped,
         request: { options in ["id": options.id ?? "current"] }),
     RobotCommand(
         "robot-capacity", method: "capacity", summary: "Capacity simulation",
-        scoped: true,
+        scope: .scoped,
         request: { options in
             var request: [String: Any] = ["agents": options.agents]
             if let value = options.capacityLabel { request["capacity_label"] = value }
@@ -296,6 +350,7 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-forecast", method: "eta", summary: "ETA for one bead",
+        scope: .unported,
         request: { options in
             [
                 "id": try requireID(options, for: "robot-forecast"),
@@ -606,6 +661,18 @@ func parseArguments() throws -> Options {
     guard ["json", "toon"].contains(options.format) else {
         throw UsageError(message: "invalid --format \(options.format) (expected json or toon)")
     }
+    if let name = options.command,
+        robotCommands.first(where: { $0.flag == name })?.scope == .unported
+    {
+        // bv would answer over the scope; answering over every bead instead
+        // would look like a scoped answer and not be one.
+        for (flag, value) in [("label", options.label), ("recipe", options.recipe)] {
+            if let value, !value.isEmpty {
+                throw UsageError(
+                    message: "--\(flag) does not scope --\(name) in vbx-cli yet (vbx-9gl)")
+            }
+        }
+    }
     if options.notReadyLabels != nil, let command = options.command,
         !notReadyCommands.contains(command)
     {
@@ -643,6 +710,29 @@ func prettyPrinted(_ data: Data) -> String {
     return String(decoding: encoded, as: UTF8.self)
 }
 
+/// The commands a scope rule covers, by name without the `robot-` prefix.
+func scopeNames(_ rule: ScopeRule) -> String {
+    robotCommands.filter { $0.scope == rule }
+        .map { $0.flag.hasPrefix("robot-") ? String($0.flag.dropFirst(6)) : $0.flag }
+        .joined(separator: ", ")
+}
+
+/// Wraps text at word boundaries into lines of at most `width` characters,
+/// each starting with `indent`.
+func wrapped(_ text: String, indent: String, width: Int = 79) -> [String] {
+    var lines: [String] = []
+    var line = indent
+    for word in text.split(separator: " ") {
+        if line.count > indent.count, line.count + 1 + word.count > width {
+            lines.append(line)
+            line = indent
+        }
+        line += (line.count > indent.count ? " " : "") + word
+    }
+    if line.count > indent.count { lines.append(line) }
+    return lines
+}
+
 func usageText() -> String {
     var lines = [
         "vbx-cli — bv's robot protocol, over the vbx engine",
@@ -664,9 +754,18 @@ func usageText() -> String {
         "  --pretty             Indent JSON output",
         "  --list-commands      Print the command list as JSON",
         "",
-        "SCOPE (triage, next, plan, priority, insights, suggest, alerts, graph, capacity):",
+        "SCOPE:",
         "  --label L            The label's subgraph; only its beads are picked",
         "  --recipe NAME|FILE   What a recipe selects — a name, or a .yaml/.yml path",
+    ])
+    // Listed from the table, so the help cannot name a command the table
+    // does not scope.
+    lines.append(contentsOf: wrapped(
+        "Scoped: " + scopeNames(.scoped), indent: "                       "))
+    lines.append(contentsOf: wrapped(
+        "Refused, not yet scoped (vbx-9gl): " + scopeNames(.unported),
+        indent: "                       "))
+    lines.append(contentsOf: [
         "",
         "REPORTS (bv's --export):",
         "  --export FILE        Write a report; a --recipe supplies export defaults",
@@ -847,7 +946,7 @@ func run() async -> Int32 {
     // bv resolves --recipe before it loads issues, so a recipe that does not
     // resolve fails the command whatever it is; here, every command that
     // reads the recipe.
-    if command.scoped || command.flag == "robot-recipe-apply", let recipe = options.recipe,
+    if command.resolvesRecipe || command.flag == "robot-recipe-apply", let recipe = options.recipe,
         !(await recipeResolves(recipe, engine: engine))
     {
         return 1
@@ -879,6 +978,9 @@ func run() async -> Int32 {
 
         emit(options.pretty ? prettyPrinted(data) : String(decoding: data, as: UTF8.self))
         return 0
+    } catch EngineError.callFailed(_, let message) where command.bvErrorText {
+        complain(message)
+        return 1
     } catch {
         complain("Error handling --\(command.flag): \(error.localizedDescription)")
         return 1

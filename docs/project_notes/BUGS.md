@@ -4,6 +4,37 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — `--label` and `--recipe` were silently ignored by most robot commands
+
+**Symptom:** `vbx-cli --robot-label-health --recipe actionable` — and the
+label flow, label attention, blocker chain, search and sprint commands under
+either flag — answered over every bead with no `scope` in the envelope, where
+bv 0.25.2 answers over the selection. Nothing said the flag had been dropped.
+(vbx-shz)
+
+**Cause:** vbx-cli forwarded the scope only to the nine commands it had marked
+`scoped`; bv applies it (`scopeLoadedIssues`) before every post-load handler.
+
+**Fix:** a `ScopeRule` per command, read from `cmd/bv`: `scoped` commands
+route through `Session.view`; `validated` (`--robot-correlation-stats`)
+resolves the recipe as bv does and reads neither flag; `unported` commands —
+the git-history family, diff, drift and forecast (vbx-9gl) — refuse either
+flag with exit 2 rather than answer unscoped; `ignored` is left for the
+commands bv answers before it loads issues and for vbx's own.
+
+Two differences this surfaced, fixed with it: an empty or undated sprint's
+burndown wrote `ideal_line: []` where bv writes `null`, and a blocker chain
+for a bead outside the set printed `null` with exit 0 where bv prints `Issue
+not found: <id>` and exits 1. The chain is also now traced with a bare
+analyzer, as bv's is: the scoped view's readiness scope marked a blocker a
+root under `--label graph` where bv does not.
+
+**Regression test:** `Engine/bridge/engine/post_load_scope_test.go`;
+`TestIdealLineWithoutScopeChangesIsStraight` asserts the null line; and the
+parity runs under `--label`, an unknown label, `--recipe` and both for every
+scoped command, which `test-parity-check.py` requires of each command
+vbx-cli's table marks `scoped`.
+
 ## 2026-10-02 — Editing a `.beads/recipes` recipe in the app changed nothing
 
 **Symptom:** found by reading the code, then reproduced in a test. A recipe

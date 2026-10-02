@@ -212,6 +212,12 @@ DECLARED_DIFFERENCES = {
         ("robot-label-health", ".labels[0].velocity.avg_days_to_close"):
             "bv's fallback read has no closed_at, so it skips the closed bead and averages"
             " an int 0; vbx averages its real close time (ADR-024)",
+        ("robot-label-health", ".data_hash"): _LOSSY_HASH,
+        ("robot-label-health", ".scope_hash"): _LOSSY_SCOPE,
+        ("robot-label-flow", ".data_hash"): _LOSSY_HASH,
+        ("robot-label-flow", ".scope_hash"): _LOSSY_SCOPE,
+        ("robot-label-attention", ".data_hash"): _LOSSY_HASH,
+        ("robot-label-attention", ".scope_hash"): _LOSSY_SCOPE,
         ("robot-triage", ".project_health.velocity.estimated"):
             "bv's fallback read has no closed_at, so it estimates close times from"
             " updated_at; vbx reads closed_at and estimates nothing (ADR-024)",
@@ -285,12 +291,59 @@ TRIAGE_PATHS = {"bv_path": "triage", "bv_lift": ("feedback",)}
 # What a search comparison compares: the ranking and the request it echoes.
 SEARCH_KEYS = ("query", "mode", "limit", "min_score", "results")
 NOT_READY = "needs-design"
+# bv's envelope keys that say what a payload was computed over (vbx-shz). A
+# command whose vbx payload is the analysis result itself, with the envelope
+# at its top level, lifts these from bv's top level into the subtree it
+# compares, so the scope and its hash are checked beside the data.
+ENVELOPE_KEYS = ("data_hash", "scope", "scope_hash", "output_format", "source_path",
+                 "source_kind")
+LABEL_HEALTH_PATHS = {"bv_path": "results", "bv_lift": ENVELOPE_KEYS}
+LABEL_FLOW_PATHS = {"bv_path": "flow", "bv_lift": ENVELOPE_KEYS}
+# bv projects a ranked subset of the attention scores, cut at
+# --attention-limit; vbx returns them all. The count and the envelope are
+# what the two share.
+LABEL_ATTENTION_PATHS = {"keys": ("total_labels", *ENVELOPE_KEYS)}
+# bv nests the chain under `result`; vbx returns it beside the envelope. The
+# target is vbx-6, which two blockers hold, labelled graph and ui.
+BLOCKER_CHAIN = "vbx-6"
+BLOCKER_CHAIN_RUN = {"vbx_args": ["--id", BLOCKER_CHAIN], "bv_args": [BLOCKER_CHAIN],
+                     "bv_path": "result", "bv_lift": ENVELOPE_KEYS}
+# The commands run under each --label and --recipe scope with the same
+# arguments on both sides, and the subtree each compares — the same as its
+# unscoped run, except insights, whose top level bv shapes differently and
+# which compares the metrics themselves (vbx-4cz).
+SCOPED_RUNS = (
+    ("robot-graph", {}),
+    ("robot-triage", TRIAGE_PATHS),
+    ("robot-plan", {"bv_path": "plan"}),
+    ("robot-priority", {"bv_path": "recommendations", "vbx_path": "recommendations"}),
+    ("robot-next", {}),
+    ("robot-suggest", {}),
+    ("robot-insights", {"bv_path": "full_stats", "vbx_path": "full_stats"}),
+    ("robot-alerts", {"bv_path": "alerts", "vbx_path": "alerts"}),
+    ("robot-capacity", {}),
+    ("robot-label-health", LABEL_HEALTH_PATHS),
+    ("robot-label-flow", LABEL_FLOW_PATHS),
+    ("robot-label-attention", LABEL_ATTENTION_PATHS),
+)
+# The recipe scopes, over the `recipes` fixture: a built-in, the project-file
+# recipe, a path, and each beside a label, the last an unknown one.
+RECIPE_SCOPES = (
+    ["--recipe", "actionable"],
+    ["--recipe", "high-impact"],
+    ["--recipe", "ui-open"],
+    ["--recipe", "hub-first.yml"],
+    ["--recipe", "actionable", "--label", "engine"],
+    ["--recipe", "hub-first.yml", "--label", "ui"],
+    ["--recipe", "ui-open", "--label", "no-such-label"],
+)
 
 COMPARISONS = [
-    {"vbx": "robot-label-flow", "bv": "robot-label-flow", "bv_path": "flow"},
-    {"vbx": "robot-label-health", "bv": "robot-label-health", "bv_path": "results"},
-    {"vbx": "robot-label-attention", "bv": "robot-label-attention", "compare": False,
-     "note": "bv projects a ranked subset; vbx returns the full result"},
+    {"vbx": "robot-label-flow", "bv": "robot-label-flow", **LABEL_FLOW_PATHS},
+    {"vbx": "robot-label-health", "bv": "robot-label-health", **LABEL_HEALTH_PATHS},
+    {"vbx": "robot-label-attention", "bv": "robot-label-attention", **LABEL_ATTENTION_PATHS},
+    {"vbx": "robot-blocker-chain", "bv": "robot-blocker-chain", "only": {"demo"},
+     **BLOCKER_CHAIN_RUN},
     {"vbx": "robot-triage", "bv": "robot-triage", **TRIAGE_PATHS},
     {"vbx": "robot-plan", "bv": "robot-plan", "bv_path": "plan"},
     {"vbx": "robot-suggest", "bv": "robot-suggest"},
@@ -338,17 +391,7 @@ COMPARISONS = [
     {"vbx": command, "bv": command, "name": f"{command} --label {label}",
      "vbx_args": ["--label", label], "bv_args": ["--label", label], "only": {"demo"},
      **paths}
-    for command, paths in (
-        ("robot-graph", {}),
-        ("robot-triage", TRIAGE_PATHS),
-        ("robot-plan", {"bv_path": "plan"}),
-        ("robot-priority", {"bv_path": "recommendations", "vbx_path": "recommendations"}),
-        ("robot-next", {}),
-        ("robot-suggest", {}),
-        ("robot-insights", {"bv_path": "full_stats", "vbx_path": "full_stats"}),
-        ("robot-alerts", {"bv_path": "alerts", "vbx_path": "alerts"}),
-        ("robot-capacity", {}),
-    )
+    for command, paths in SCOPED_RUNS
     for label in ("engine", "no-such-label")
 ] + [
     # Recipe-scoped runs (vbx-7d5). bv's --recipe is a global scope like
@@ -359,33 +402,60 @@ COMPARISONS = [
     # as the label runs.
     {"vbx": command, "bv": command, "name": f"{command} {' '.join(args)}",
      "vbx_args": args, "bv_args": args, "only": {"recipes"}, **paths}
-    for command, paths in (
-        ("robot-graph", {}),
-        ("robot-triage", TRIAGE_PATHS),
-        ("robot-plan", {"bv_path": "plan"}),
-        ("robot-priority", {"bv_path": "recommendations", "vbx_path": "recommendations"}),
-        ("robot-next", {}),
-        ("robot-suggest", {}),
-        ("robot-insights", {"bv_path": "full_stats", "vbx_path": "full_stats"}),
-        ("robot-alerts", {"bv_path": "alerts", "vbx_path": "alerts"}),
-        ("robot-capacity", {}),
+    for command, paths in SCOPED_RUNS
+    for args in RECIPE_SCOPES
+] + [
+    # The blocker chain under each scope (vbx-shz): its id is spelled
+    # differently on each side, so it is not one of SCOPED_RUNS. `graph` holds
+    # vbx-6 and one of its blockers; a scope that leaves vbx-6 out — the
+    # unknown label, or a recipe that does not select it — is bv's "Issue not
+    # found", which both must refuse with.
+    {"vbx": "robot-blocker-chain", "bv": "robot-blocker-chain",
+     "name": f"robot-blocker-chain {BLOCKER_CHAIN} {' '.join(args)}",
+     **BLOCKER_CHAIN_RUN,
+     "vbx_args": [*BLOCKER_CHAIN_RUN["vbx_args"], *args],
+     "bv_args": [*BLOCKER_CHAIN_RUN["bv_args"], *args], **how}
+    for args, how in (
+        (["--label", "graph"], {"only": {"demo"}}),
+        (["--label", "no-such-label"], {"only": {"demo"}, "rejects": True}),
+        (["--recipe", "ui-open"], {"only": {"recipes"}}),
+        (["--recipe", "hub-first.yml", "--label", "ui"], {"only": {"recipes"}}),
+        (["--recipe", "hub-first.yml"], {"only": {"recipes"}, "rejects": True}),
+        (["--recipe", "actionable"], {"only": {"recipes"}, "rejects": True}),
+    )
+] + [
+    # The sprint commands under each scope (vbx-shz), over the sprints
+    # fixture: a label, the unknown label, a built-in recipe, and both. The
+    # sprints themselves are the file's whatever the scope; the burndown
+    # counts only the beads inside it, and every envelope hashes the scoped
+    # issues as bv's does.
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join(args)}",
+     "only": {"sprints"}, **run, "vbx_args": [*run.get("vbx_args", []), *args],
+     "bv_args": [*run.get("bv_args", []), *args]}
+    for command, run in (
+        ("robot-sprint-list", {"keys": ("sprints", "sprint_count", *ENVELOPE_KEYS),
+                               "bv_omitzero": SPRINT_OMITZERO}),
+        ("robot-sprint-show", {"vbx_args": ["--id", "spr-sprint-2"], "bv_args": ["spr-sprint-2"],
+                               "keys": ("sprint", *ENVELOPE_KEYS),
+                               "bv_omitzero": SPRINT_OMITZERO}),
+        ("robot-burndown", {"vbx_args": ["--id", "spr-sprint-2"], "bv_args": ["spr-sprint-2"]}),
     )
     for args in (
+        ["--label", "at-risk"],
+        ["--label", "no-such-label"],
         ["--recipe", "actionable"],
-        ["--recipe", "high-impact"],
-        ["--recipe", "ui-open"],
-        ["--recipe", "hub-first.yml"],
-        ["--recipe", "actionable", "--label", "engine"],
-        ["--recipe", "hub-first.yml", "--label", "ui"],
-        ["--recipe", "ui-open", "--label", "no-such-label"],
+        ["--recipe", "actionable", "--label", "burndown"],
     )
 ] + [
     # A recipe that does not resolve fails the command before it runs, as
-    # bv's does: an unknown name, and a path that is not there.
+    # bv's does: an unknown name, and a path that is not there. The same for
+    # --robot-correlation-stats, whose output reads neither flag: bv still
+    # resolves the recipe before loading issues.
     {"vbx": command, "bv": command, "name": f"{command} --recipe {recipe}",
      "vbx_args": ["--recipe", recipe], "bv_args": ["--recipe", recipe],
      "rejects": True, "only": {"recipes"}}
-    for command in ("robot-triage", "robot-plan", "robot-capacity")
+    for command in ("robot-triage", "robot-plan", "robot-capacity", "robot-label-health",
+                    "robot-correlation-stats")
     for recipe in ("no-such-recipe", "missing.yaml")
 ] + [
     # bv's --alert-label is a filter on the alerts, separate from the --label
@@ -450,6 +520,23 @@ COMPARISONS = [
      "bv_args": ["--search", "graph", "--search-min-score", value],
      "rejects": True, "only": {"demo"}}
     for value in ("2", "-1.5", "abc", "NaN", "inf")
+] + [
+    # Search under each scope (vbx-shz): only the scope's beads are eligible
+    # results — an exact id outside it included — while the index is the
+    # whole workspace's. Compared on the ranking and the scope it names.
+    {"vbx": "robot-search", "bv": "robot-search",
+     "name": f"robot-search {query} {limit} {' '.join(rest)}",
+     "vbx_args": ["--search", query, "--limit", limit, *rest],
+     "bv_args": ["--search", query, "--search-limit", limit, *rest],
+     "keys": (*SEARCH_KEYS, "scope", "scope_hash", "data_hash"), "only": {fixture}}
+    for fixture, query, limit, rest in (
+        ("demo", "graph", "5", ["--label", "engine"]),
+        ("demo", "graph", "5", ["--label", "no-such-label"]),
+        ("recipes", "graph", "5", ["--recipe", "actionable"]),
+        ("recipes", "graph", "5", ["--recipe", "hub-first.yml", "--label", "ui"]),
+        ("search", "tax-7", "3", ["--label", "tax"]),
+        ("search", "tax-7", "3", ["--label", "finance"]),
+    )
 ] + [
     # bv's opt-in not-ready label-class keeps a bead out of the claimable top
     # picks of triage and --robot-next, from the flag or, failing that, the

@@ -50,6 +50,10 @@ type searchRequest struct {
 	// text similarity, applied before the lexical boost and hybrid ranking.
 	// An exact-id hit obeys it too. Absent means no threshold.
 	MinScore *float64 `json:"min_score"`
+	// The scope is bv's global --label and --recipe: only the beads it
+	// selects are eligible results, while the index and the hybrid metrics
+	// stay the whole workspace's.
+	scopeRequest
 }
 
 // searchIssues runs one query.
@@ -80,6 +84,10 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
 	issues, _, _ := s.snapshot()
 	if len(issues) == 0 {
 		payload := map[string]any{"query": r.Query, "mode": mode, "results": []any{}}
@@ -116,9 +124,24 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 	// Hybrid re-ranks, so it needs more candidates than it will return —
 	// otherwise re-scoring can only reorder what text similarity already
 	// chose, and a bead the metrics would have promoted is never seen.
+	// Under a scope only its beads are eligible — the label's core, narrowed
+	// to what a recipe selected — and the candidate count is theirs. Nil
+	// means every bead, which is what bv's full eligible set amounts to.
+	var eligible map[string]bool
+	candidates := len(issues)
+	if v.scoped() {
+		eligible = make(map[string]bool, len(v.issues))
+		for _, issue := range v.issues {
+			if v.candidates == nil || v.candidates[issue.ID] {
+				eligible[issue.ID] = true
+			}
+		}
+		candidates = len(eligible)
+	}
+
 	fetch := limit
 	if mode == "hybrid" {
-		fetch = search.HybridCandidateLimit(limit, len(issues), r.Query)
+		fetch = search.HybridCandidateLimit(limit, candidates, r.Query)
 	}
 
 	// bv's search, through bv's options: the short-query lexical boost is
@@ -129,13 +152,16 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 	if search.IsShortQuery(r.Query) {
 		boosts = make(map[string]float64)
 		for id, doc := range docs {
+			if eligible != nil && !eligible[id] {
+				continue
+			}
 			if boost := search.ShortQueryLexicalBoost(r.Query, doc); boost > 0 {
 				boosts[id] = boost
 			}
 		}
 	}
 	results, err := index.SearchTopKWithOptions(vectors[0], fetch, search.VectorSearchOptions{
-		ExactID: r.Query, MinScore: r.MinScore, ScoreBoosts: boosts,
+		Eligible: eligible, ExactID: r.Query, MinScore: r.MinScore, ScoreBoosts: boosts,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("searching: %w", err)
@@ -168,13 +194,15 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 
 	if mode == "text" {
 		payload["results"] = textResults(results, limit, titles)
-		return json.Marshal(payload)
+		return s.withEnvelope(payload, v.dataHash, v.scope)
 	}
 
 	weights, preset, err := resolveWeights(r)
 	if err != nil {
 		return nil, err
 	}
+	// The hybrid metrics are the whole workspace's, as bv's are: a scope
+	// narrows what may be returned, not the graph that ranks it.
 	scored, err := hybridResults(results, issues, weights, exactID, limit, titles)
 	if err != nil {
 		return nil, err
@@ -182,7 +210,7 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 	payload["results"] = scored
 	payload["preset"] = preset
 	payload["weights"] = weights
-	return json.Marshal(payload)
+	return s.withEnvelope(payload, v.dataHash, v.scope)
 }
 
 // vectorIndex loads or builds the workspace's vector index.
