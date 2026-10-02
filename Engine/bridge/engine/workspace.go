@@ -187,7 +187,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = tombstoneIDs
 	s.analyzer, s.stats = analyzer, stats
-	s.complete = len(warnings) == 0
+	s.complete = workspaceClaimSafe(sources)
 	s.loadedAt = timeNow()
 	return nil
 }
@@ -219,7 +219,7 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 		s.mu.Unlock()
 		// And the load's accounting, which a dropped record changes without
 		// changing the bead set — as in the single-repository reload.
-		accountingChanged := s.refreshAccounting(sources, warnings, len(warnings) == 0)
+		accountingChanged := s.refreshAccounting(sources, warnings, workspaceClaimSafe(sources))
 		payload, err := s.info()
 		if err != nil {
 			return nil, err
@@ -237,7 +237,7 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = tombstoneIDs
 	s.analyzer, s.stats = analyzer, stats
-	s.complete = len(warnings) == 0
+	s.complete = workspaceClaimSafe(sources)
 	s.loadedAt = timeNow()
 	s.mu.Unlock()
 

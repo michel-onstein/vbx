@@ -1,0 +1,8 @@
+name: Dropped workspace
+repos:
+  - name: api
+    path: api
+    prefix: "api-"
+  - name: web
+    path: web
+    prefix: "web-"

@@ -280,7 +280,10 @@ five rejected values — and over <code>Fixtures/search</code>, whose text burie
 below a query for its own id, the case bv's exact-ID guarantee exists for.
 <code>Fixtures/dropped</code>, as JSONL and as a <code>beads.db</code>, holds a malformed line and a
 record that fails validation, so every envelope's <code>load_stats</code> is compared
-there — and the clean fixtures prove it absent.</p>
+there — and the clean fixtures prove it absent. <code>Fixtures/dropped-workspace</code>
+puts a malformed line in one member of a two-repository workspace, where
+<code>--robot-next</code> and <code>--robot-triage</code> are compared on bv's claim gate: no claim
+and <code>source_authority_incomplete</code> when any member dropped a record.</p>
 <p>Two known non-comparisons are declared in the harness rather than hidden:
 <code>--robot-insights</code>, because bv inlines <code>analysis.Insights</code>' untagged PascalCase
 fields at the top level, and <code>--robot-label-attention</code>, because bv projects a

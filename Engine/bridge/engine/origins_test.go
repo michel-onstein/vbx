@@ -258,6 +258,93 @@ func TestTriageInTheAppExplainsMissingActions(t *testing.T) {
 	}
 }
 
+// liveTrackerTwoRepo is multiRepoWorkspace with both members bound to a
+// stand-in `br`, so vbx-cli emits claims for either member's beads.
+func liveTrackerTwoRepo(t *testing.T) (root string) {
+	t.Helper()
+	root = multiRepoWorkspace(t)
+	markLiveTracker(t, filepath.Join(root, "api", ".beads"))
+	markLiveTracker(t, filepath.Join(root, "web", ".beads"))
+	standInTrackers(t)
+	return root
+}
+
+// A workspace member that loaded but dropped a malformed line withholds every
+// claim, as bv 0.25.2's source authority does: its ClaimSafe is false when any
+// member has errors, not only when one fails to load. vbx counted only the
+// failures, so --robot-next claimed from a partial graph. vbx-koc.
+func TestAWorkspaceMemberThatDroppedARecordClaimsNothing(t *testing.T) {
+	// The control: the same workspace, clean, does claim.
+	clean := openLive(t, liveTrackerTwoRepo(t), true)
+	if next := call[nextPayload](t, clean, "next", nil); !next.Actionable || next.ClaimCommand == "" {
+		t.Fatalf("the clean workspace claims nothing, so the test proves nothing: %+v", next)
+	}
+
+	root := liveTrackerTwoRepo(t)
+	web := filepath.Join(root, "web", ".beads", "issues.jsonl")
+	file, err := os.OpenFile(web, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("{not json\n"); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	s := openLive(t, root, true)
+
+	next := call[nextPayload](t, s, "next", nil)
+	if next.Actionable || next.ClaimCommand != "" {
+		t.Errorf("a workspace with a dropped record produced a claim: %+v", next)
+	}
+	if len(next.Degraded) != 1 || next.Degraded[0].Code != "source_authority_incomplete" {
+		t.Errorf("degraded is %+v", next.Degraded)
+	}
+
+	triage := call[struct {
+		Recommendations []struct {
+			ID        string             `json:"id"`
+			Claimable bool               `json:"claimable"`
+			Actions   model.IssueActions `json:"actions"`
+		} `json:"recommendations"`
+	}](t, s, "triage", nil)
+	if len(triage.Recommendations) == 0 {
+		t.Fatal("no recommendations")
+	}
+	for _, rec := range triage.Recommendations {
+		if rec.Claimable || rec.Actions.Claim != nil {
+			t.Errorf("%s is claimable from a workspace with a dropped record", rec.ID)
+		}
+	}
+}
+
+// A reload that adds the dropped record to an otherwise unchanged workspace
+// withdraws the claim too: the bead set is the same, so only the accounting
+// path sees it.
+func TestAWorkspaceReloadThatDropsARecordWithdrawsTheClaim(t *testing.T) {
+	root := liveTrackerTwoRepo(t)
+	s := openLive(t, root, true)
+	if next := call[nextPayload](t, s, "next", nil); !next.Actionable {
+		t.Fatalf("the clean workspace claims nothing: %+v", next)
+	}
+
+	web := filepath.Join(root, "web", ".beads", "issues.jsonl")
+	file, err := os.OpenFile(web, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("{not json\n"); err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	if _, err := s.Call("reload", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if next := call[nextPayload](t, s, "next", nil); next.Actionable || next.ClaimCommand != "" {
+		t.Errorf("the reload kept the claim: %+v", next)
+	}
+}
+
 // A load that dropped a record cannot prove what is ready, so nothing from it
 // is claimable — bv's source-authority gate.
 func TestAPartialLoadClaimsNothing(t *testing.T) {

@@ -102,6 +102,7 @@ view snapshots for inspection.
 | `Fixtures/sprints` | 15 beads and 3 sprints: each at-risk signal, a stale `closed_at`, a tombstone; tests and parity only |
 | `Fixtures/search` | 9 beads: six whose text is all "tax 7" bury `tax-7` below a query for its own id, plus `Case-1`/`case-1`. Search tests and parity only — the harness runs nothing else over it |
 | `Fixtures/dropped` | 4 valid beads, a line cut off mid-record and one whose `updated_at` precedes its `created_at`: what bv's `load_stats` counts. Deliberately unwritable by `br`. Tests and parity only, as JSONL and as a `beads.db` |
+| `Fixtures/dropped-workspace` | Two repositories (`api`, `web`) under one `.bv/workspace.yaml`; `web` holds a line cut off mid-record. Parity's workspace claim gate only (vbx-koc). Named explicitly on both sides — bv's discovery prefers this repository's own `.beads` to a `workspace.yaml` in the working directory |
 | `Fixtures/feedback`, `Fixtures/feedback-few` | The same 8 beads with a triage `feedback.json` of 4 verdicts (applied: fb-5 outranks the hub fb-1) and of 2 (reported, not applied); fb-6 carries the not-ready label `needs-design`. Tests and parity only |
 | `Resources` | App icon: generated `vbx-icon.svg` and the committed `vbx.icns` |
 | `Resources/entitlements` | Developer ID entitlements, plus the App Store *template* |

@@ -230,6 +230,34 @@ func TestReloadFollowsADroppedRecordTheHashCannotSee(t *testing.T) {
 	}
 }
 
+// workspaceClaimSafe is bv's newRobotSourceAuthority verdict: any enabled
+// member that failed, dropped a record or read a stale fallback withholds the
+// claim; disabled members count for nothing; and a workspace with no loaded
+// member is unknown, never safe. vbx-koc.
+func TestWorkspaceClaimSafeFollowsBVsSourceAuthority(t *testing.T) {
+	ok := sourceLoad{name: "ok", stats: loader.ParseStats{Valid: 2}}
+	cases := []struct {
+		name    string
+		sources []sourceLoad
+		want    bool
+	}{
+		{"every member clean", []sourceLoad{ok, ok}, true},
+		{"a member dropped a record",
+			[]sourceLoad{ok, {name: "web", stats: loader.ParseStats{Valid: 1, Errors: 1}}}, false},
+		{"a member failed", []sourceLoad{ok, {name: "web", failed: true}}, false},
+		{"a member read a stale fallback", []sourceLoad{ok, {name: "web", stale: true}}, false},
+		{"a disabled member's errors do not count",
+			[]sourceLoad{ok, {name: "off", disabled: true, failed: true, stats: loader.ParseStats{Errors: 3}}}, true},
+		{"nothing loaded", []sourceLoad{{name: "off", disabled: true}}, false},
+		{"no members", nil, false},
+	}
+	for _, c := range cases {
+		if got := workspaceClaimSafe(c.sources); got != c.want {
+			t.Errorf("%s: claim safe = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // A workspace's load_stats sums its members, as bv's workspace authority
 // does, and names no single source.
 func TestWorkspaceLoadStatsSumTheMembers(t *testing.T) {
