@@ -4,6 +4,35 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — A saved baseline recorded the wrong repository's commit, by spawning `git`
+
+**Symptom:** a drift baseline saved by the engine recorded the commit, subject
+and branch of whatever repository the *process* sat in. In the engine's Go
+tests that was vbx's own HEAD rather than the fixture's. An app whose working
+directory is `/` recorded none. Saving one from the app also started three
+`git` processes, which the App Sandbox forbids. (vbx-6s8, found in vbx-9gl.)
+
+**Cause:** `baseline_save` called bv 0.25.2's `baseline.New`, which calls
+`baseline.GetGitInfo(".")`: `git rev-parse HEAD`, `git log -1 --format=%s`
+and `git rev-parse --abbrev-ref HEAD`, in the process's working directory.
+For bv that directory is the project, because bv runs from it; for the
+engine it is not.
+
+**Fix:** `newWorkspaceBaseline` builds the `baseline.Baseline` that
+`baseline.New` builds, field for field, and `workspaceGitInfo` reads the
+three facts from the workspace's object store with go-git — `%s` is ported as
+git's subject, and a detached HEAD reads `HEAD`. Save, Load and Summary stay
+bv's. `vbx-cli --save-baseline` exposes the save, so the parity harness now
+compares it with bv's inside a repository, and has each side's drift check
+read the other's file.
+
+**Regression tests:** `TestBaselineSaveSpawnsNoGit` (a stand-in `git` on PATH
+records any run) and `TestBaselineRecordsTheWorkspaceCommitNotTheProcesses`
+in `baseline_git_test.go` both fail on the old code;
+`TestWorkspaceGitInfoMatchesGit` checks the port against git itself. In the
+app, `AlertsTests` "A saved baseline records the workspace's commit, not the
+process's".
+
 ## 2026-10-02 — A baseline saved during Phase 2 recorded no top metrics
 
 **Symptom:** a drift check against a baseline saved over identical beads

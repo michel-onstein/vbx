@@ -152,7 +152,8 @@ def test_default_run_covers_every_fixture(parity) -> None:
           " both forms and as a workspace member, and the discovery layout are all compared",
           names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
                     "feedback-few", "search", "recipes", "dropped", "dropped (beads.db)",
-                    "dropped (workspace)", "discovery", "history"],
+                    "dropped (workspace)", "discovery", "history",
+                    "history (vbx baseline)"],
           str(names))
     for fixture in parity.FIXTURES:
         if fixture.get("history"):
@@ -236,6 +237,62 @@ def test_history_workspace(parity) -> None:
           drift and all(entry.get("exits") for entry in drift), str(drift))
     check("every drift run asks bv for --check-drift",
           all(entry["bv_args"][:1] == ["--check-drift"] for entry in drift))
+    # vbx-6s8: each side reads the baseline the other saved.
+    savers = {fixture["name"]: bool(fixture.get("vbx_baseline"))
+              for fixture in parity.FIXTURES if fixture.get("history")}
+    check("one history fixture has bv's baseline and one vbx's",
+          savers == {"history": False, "history (vbx baseline)": True}, str(savers))
+    scanned = [entry for entry in drift if entry["name"] != "robot-drift no baseline"]
+    check("every drift run reads both baselines",
+          all(entry["only"] == set(savers) for entry in scanned), str(scanned))
+
+
+def test_baseline_save(parity) -> None:
+    print("\n--save-baseline (vbx-6s8)")
+    entry = parity.BASELINE_SAVE_COMPARISONS[0]
+    check("the save runs inside the history repository, so the commit is compared",
+          entry["only"] == {"history"} and entry["args"][0] == "--save-baseline")
+    check("bv's map-ordered ties are compared in id order",
+          parity.ranked_ties([{"id": "b", "value": 1.0}, {"id": "a", "value": 1.0},
+                              {"id": "c", "value": 2.0}])
+          == [{"id": "c", "value": 2.0}, {"id": "a", "value": 1.0},
+              {"id": "b", "value": 1.0}])
+
+    saved = {"version": 1, "commit_sha": "abc", "branch": "main", "stats": {"node_count": 2}}
+    same = (0, "Baseline saved to <copy>\n", "", saved)
+    check("two identical saves are no difference",
+          parity.baseline_save_differences(same, same) == [])
+    other = (0, "Baseline saved to <copy>\n", "", dict(saved, commit_sha="def"))
+    check("a different commit is a difference",
+          any("commit_sha" in line for line in parity.baseline_save_differences(other, same)))
+    check("a file on one side only is a difference",
+          parity.baseline_save_differences((0, same[1], "", None), same) != [])
+    check("another summary is a difference",
+          parity.baseline_save_differences((0, "Baseline saved to x\n", "", saved), same) != [])
+    check("another exit status is a difference",
+          parity.baseline_save_differences((1, "", "boom", None), same) != [])
+
+    with tempfile.TemporaryDirectory() as scratch:
+        workspace = Path(scratch) / "ws"
+        (workspace / ".bv").mkdir(parents=True)
+        (workspace / ".bv" / "baseline.json").write_text("{}")
+        printer = Path(scratch) / "printer"
+        created = "Baseline created: Mon, 01 Jan 2026 00:00:00 UTC"
+        printer.write_text(
+            "#!/bin/sh\nmkdir -p .bv\necho '{\"created_at\": \"now\", \"version\": 1}'"
+            " > .bv/baseline.json\n"
+            f"echo \"Baseline saved to $PWD/.bv/baseline.json\"\necho '{created}'\n"
+            "printf '\\nTop PageRank:\\n  b: 0.5000\\n  a: 0.5000\\n  c: 0.9000\\n'\n")
+        printer.chmod(0o755)
+        status, out, _, written = parity.run_baseline_save(
+            str(printer), [], workspace, Path(scratch) / "copy")
+    check("the save runs on a copy with no baseline of its own, and drops created_at",
+          status == 0 and written == {"version": 1}, str(written))
+    check("the copy's path and the creation time are normalised",
+          out.startswith("Baseline saved to <copy>/.bv/baseline.json\n"
+                         "Baseline created: <now>\n"), out)
+    check("the summary's leaders are in value then id order",
+          out.endswith("Top PageRank:\n  c: 0.9000\n  a: 0.5000\n  b: 0.5000\n"), out)
 
 
 def test_bv_zero_times_are_dropped_only_when_zero(parity) -> None:
@@ -403,11 +460,13 @@ def cli_load_warning_commands() -> set[str]:
 def test_load_warnings_follow_bv(parity) -> None:
     print("\nThe loader's warnings reach stderr where bv prints them (vbx-1l6)")
     # bv prints them whenever it loads issues outside robot mode. Of the
-    # flags in the command table that is the two feedback verdicts: show and
-    # reset answer before bv loads, and every --robot-* flag is robot mode.
+    # flags in the command table that is the two feedback verdicts and
+    # --save-baseline (vbx-6s8): show and reset answer before bv loads, and
+    # every --robot-* flag is robot mode.
     found = cli_load_warning_commands()
-    check("feedback-accept and feedback-ignore print them, and nothing else in the table",
-          found == {"feedback-accept", "feedback-ignore"}, str(found))
+    check("feedback-accept, feedback-ignore and save-baseline print them, and nothing else"
+          " in the table",
+          found == {"feedback-accept", "feedback-ignore", "save-baseline"}, str(found))
     source = (ROOT / "Sources" / "vbx-cli" / "main.swift").read_text()
     export = source.split("if let path = options.exportPath ?? options.exportMarkdownPath {", 1)[1]
     export = export.split("\n    }\n", 1)[0]
@@ -900,6 +959,7 @@ def main() -> int:
     test_every_difference_is_reported(parity)
     test_default_run_covers_every_fixture(parity)
     test_history_workspace(parity)
+    test_baseline_save(parity)
     test_bv_zero_times_are_dropped_only_when_zero(parity)
     print()
     if FAILURES:

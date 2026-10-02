@@ -56,7 +56,8 @@ its root, for which graph discovery takes from the root, a member and a plain
 folder below it (vbx-1y5). Both are copied out of this repository first, since
 inside it discovery reaches the repository's own `.beads`. Last, `history`, a
 git repository built at run time with deterministic commits and a drift
-baseline bv saves into it, for the diff and drift comparisons (vbx-9gl).
+baseline bv saves into it, for the diff and drift comparisons (vbx-9gl), and
+`history (vbx baseline)`, the same with the baseline vbx-cli saves (vbx-6s8).
 `--workspace` narrows the run to one: a path, or a FIXTURES name.
 
 Each differing command reports its first difference and how many more there
@@ -154,6 +155,10 @@ FIXTURES = [
     # drift baseline bv saves into it (vbx-9gl): the fixture --robot-diff and
     # --robot-drift need, unscoped and under each scope. `only_named`.
     {"name": "history", "history": True, "only_named": True},
+    # The same repository with the baseline saved by vbx-cli instead (vbx-6s8):
+    # bv's --check-drift reading vbx's file, as `history` has vbx reading bv's.
+    {"name": "history (vbx baseline)", "history": True, "only_named": True,
+     "vbx_baseline": True},
 ]
 
 # The recipe files of the `recipes` fixture, by path relative to the
@@ -722,12 +727,13 @@ COMPARISONS = [
     for args in HISTORY_SCOPES
 ] + [
     # bv's --check-drift --robot-drift against the baseline bv saved into the
-    # history fixture: the scope's issues analysed afresh, no envelope, and
-    # the process exiting with the verdict — compared too (`exits`).
+    # history fixture, and the one vbx-cli saved into its twin (vbx-6s8): the
+    # scope's issues analysed afresh, no envelope, and the process exiting
+    # with the verdict — compared too (`exits`).
     {"vbx": "robot-drift", "bv": "robot-drift",
      "name": f"robot-drift {' '.join(args)}".strip(),
      "vbx_args": args, "bv_args": ["--check-drift", *args], "exits": True,
-     "only": {"history"}}
+     "only": {"history", "history (vbx baseline)"}}
     for args in HISTORY_SCOPES
 ] + [
     # With no baseline, bv's error, under a scope or not.
@@ -817,6 +823,18 @@ FEEDBACK_COMPARISONS = [
                {"cwd": "notes", "args": ["--feedback-reset"]},
                {"cwd": "notes", "args": ["--feedback-accept", "api-1"]},
                ["--feedback-show"]]},
+]
+
+
+# bv's --save-baseline (vbx-6s8): each binary saves a baseline into its own
+# copy of the whole history repository — inside it, so the commit, its subject
+# and the branch are recorded and compared — and the printed summary and the
+# file are compared. Only created_at is the wall clock on both sides (bv's
+# baseline.New never reads SOURCE_DATE_EPOCH); it is dropped from the file and
+# its line from the summary.
+BASELINE_SAVE_COMPARISONS = [
+    {"name": "save-baseline", "only": {"history"},
+     "args": ["--save-baseline", "parity baseline"]},
 ]
 
 
@@ -1132,6 +1150,70 @@ def run_feedback_sequence(binary: str, steps: list, workspace: Path, scratch: Pa
                      for path in sorted(scratch.rglob("feedback.json"))}
 
 
+def run_baseline_save(binary: str, args: list[str], workspace: Path,
+                      copy: Path) -> tuple[int, str, str, dict | None]:
+    """Runs a --save-baseline in a fresh copy of the whole workspace, with no
+    baseline of its own. Returns (status, stdout, stderr, the saved file).
+
+    The copy's path is replaced in the output, so the two sides' copies read
+    alike, and so is the creation-time line of bv's summary.
+    """
+    if copy.exists():
+        shutil.rmtree(copy)
+    shutil.copytree(workspace, copy)
+    shutil.rmtree(copy / ".bv", ignore_errors=True)
+    status, out, err = run(binary, args, copy)
+    for root in (str(copy.resolve()), str(copy)):
+        out, err = out.replace(root, "<copy>"), err.replace(root, "<copy>")
+    out = re.sub(r"(?m)^Baseline created: .*$", "Baseline created: <now>", out)
+    # The summary's PageRank leaders, ties in id order — see ranked_ties.
+    head, marker, leaders = out.partition("\nTop PageRank:\n")
+    if marker:
+        rows = [line for line in leaders.splitlines() if line.strip()]
+        rows.sort(key=lambda line: (-float(line.rsplit(":", 1)[1]), line))
+        out = head + marker + "".join(f"{row}\n" for row in rows)
+    path = copy / ".bv" / "baseline.json"
+    saved = None
+    if path.exists():
+        saved = json.loads(path.read_text())
+        saved.pop("created_at", None)
+    return status, out, err, saved
+
+
+def ranked_ties(items: list | None) -> list | None:
+    """A top-metric list with equal values in id order. bv sorts by value
+    alone, leaving ties in Go map order, so its order among them is not a
+    fact either side can be held to; vbx breaks them by id."""
+    if not items:
+        return items
+    return sorted(items, key=lambda item: (-item["value"], item["id"]))
+
+
+def baseline_save_differences(vbx_run, bv_run) -> list[str]:
+    """Every difference between two --save-baseline runs."""
+    (vs, vo, ve, vfile), (bs, bo, be, bfile) = vbx_run, bv_run
+    if vs != bs:
+        return [f"exit {vs} vs {bs}: {ve.strip()!r} vs {be.strip()!r}"]
+    found: list[str] = []
+    if vs != 0:
+        if ve.strip() != be.strip():
+            found.append(f"stderr {ve.strip()!r} vs {be.strip()!r}")
+        return found
+    if vo != bo:
+        found.append(f"stdout {vo!r} vs {bo!r}")
+    if (vfile is None) != (bfile is None):
+        found.append("baseline.json " + ("absent" if vfile is None else "written")
+                     + " on the vbx side, " + ("absent" if bfile is None else "written")
+                     + " on the bv side")
+    elif vfile is not None:
+        for side in (vfile, bfile):
+            for key, items in (side.get("top_metrics") or {}).items():
+                side["top_metrics"][key] = ranked_ties(items)
+        found.extend(f"baseline.json {difference}"
+                     for difference in describe_differences(normalise(vfile), normalise(bfile)))
+    return found
+
+
 def feedback_differences(vbx_run, bv_run, steps: list) -> list[str]:
     """Every difference between two runs of one feedback sequence."""
     (vbx_steps, vbx_files), (bv_steps, bv_files) = vbx_run, bv_run
@@ -1399,12 +1481,14 @@ def history_beads_jsonl(day: int, statuses: dict[str, tuple[str, int]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_history_workspace(destination: Path, bv: str | None) -> Path:
-    """Builds the history repository at `destination`, and saves bv's drift
+def build_history_workspace(destination: Path, saver: str | None) -> Path:
+    """Builds the history repository at `destination`, and saves a drift
     baseline into it from the beads as of HISTORY_BASELINE_DAY.
 
-    The baseline is bv's own `--save-baseline`, run over a copy of those beads
-    outside any repository, so it records no commit. Without a bv there is no
+    The baseline is `saver`'s own `--save-baseline` — bv's for the `history`
+    fixture, vbx-cli's for `history (vbx baseline)`, so each side reads the
+    file the other wrote (vbx-6s8) — run over a copy of those beads outside
+    any repository, so it records no commit. Without a saver there is no
     baseline, and nothing is compared against bv either. Returns the
     workspace directory.
     """
@@ -1440,15 +1524,15 @@ def build_history_workspace(destination: Path, bv: str | None) -> Path:
             "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
             "GIT_COMMITTER_DATE": when})
 
-    if bv and baseline_beads is not None:
+    if saver and baseline_beads is not None:
         saved = destination.parent / f"{destination.name}-baseline"
         if saved.exists():
             shutil.rmtree(saved)
         (saved / ".beads").mkdir(parents=True)
         (saved / ".beads" / "issues.jsonl").write_text(baseline_beads)
-        status, _, err = run(bv, ["--save-baseline", "parity baseline"], saved)
+        status, _, err = run(saver, ["--save-baseline", "parity baseline"], saved)
         if status != 0:
-            raise RuntimeError(f"bv could not save the history baseline: {err.strip()}")
+            raise RuntimeError(f"{saver} could not save the history baseline: {err.strip()}")
         (destination / ".bv").mkdir(exist_ok=True)
         shutil.copy(saved / ".bv" / "baseline.json", destination / ".bv" / "baseline.json")
     return destination
@@ -1780,6 +1864,29 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
         else:
             matched.append(name)
 
+    for entry in BASELINE_SAVE_COMPARISONS:
+        name = entry["name"]
+        if entry["args"][0].removeprefix("--") not in available:
+            missing.append(name)
+            continue
+        if label not in entry["only"]:
+            skipped.append((name, not_named if only_named else
+                            f"compared over {', '.join(sorted(entry['only']))} only"))
+            continue
+        if bv_skip:
+            skipped.append((name, bv_skip))
+            continue
+        with tempfile.TemporaryDirectory(prefix="vbx-parity-baseline-") as scratch:
+            # The same path for both, in turn, so the summary's path agrees.
+            copy = Path(scratch) / "copy"
+            vbx_run = run_baseline_save(vbx, entry["args"], workspace, copy)
+            bv_run = run_baseline_save(bv, entry["args"], workspace, copy)
+        differences = baseline_save_differences(vbx_run, bv_run)
+        if differences:
+            differed.append((name, differences))
+        else:
+            matched.append(name)
+
     for entry in EXPORT_COMPARISONS:
         name = entry["name"]
         flag = entry.get("flag", "--export")
@@ -1914,9 +2021,12 @@ def main() -> int:
         for fixture in fixtures:
             if fixture.get("history"):
                 # Compared against bv only when it is the engine's: an older
-                # bv would write an older baseline.
+                # bv would write an older baseline. vbx-cli saves the other
+                # fixture's, which bv then reads.
+                saver = vbx if fixture.get("vbx_baseline") else bv_path
                 workspace = build_history_workspace(
-                    Path(scratch) / "history", None if bv_skip else bv_path)
+                    Path(scratch) / ("history-vbx" if fixture.get("vbx_baseline") else "history"),
+                    None if bv_skip else saver)
                 d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
                                          fixture["name"], args.verbose,
                                          fixture.get("only_named", False))

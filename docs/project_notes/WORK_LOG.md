@@ -5,6 +5,23 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — A saved baseline records the workspace's commit, without running git (vbx-6s8)
+
+`baseline_save` used bv's `baseline.New`, which runs `git` three times in the
+process's working directory. The app may not spawn processes, and the
+directory is not the workspace, so the baseline recorded the wrong commit or
+none. The engine now builds bv's `baseline.Baseline` itself
+(`newWorkspaceBaseline`) and reads the commit, subject and branch from the
+workspace's object store with go-git (`workspaceGitInfo`). The save response
+now carries `commit_message` too, which the app's `BaselineInfo` already
+decoded. `vbx-cli --save-baseline DESC` exposes the save with bv's prose. It
+refuses `--label` and `--recipe`, which bv's honours. The parity harness gains
+`history (vbx baseline)`, where bv's drift check reads a baseline vbx saved,
+and a `save-baseline` comparison inside the history repository, covering the
+summary and the whole file. The run went from 0 to 0 differing commands, with 7
+more matched: 6 drift runs and the save. Tests: `baseline_git_test.go`,
+`AlertsTests`, `test-parity-check.py`.
+
 ## 2026-10-02 — Diff, drift and forecast answer over --label and --recipe, in bv's shapes (vbx-9gl)
 
 `vbx-cli --robot-diff`, `--robot-drift` and `--robot-forecast` used to refuse

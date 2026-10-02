@@ -118,7 +118,11 @@ envelope, and the verdict as the exit code; the forecast estimates the scope's
 candidates, filtered by `--forecast-label` and `--forecast-sprint`. The harness
 builds a `history` workspace for the first two — a git repository with
 deterministic commits, and a baseline bv saves into it — and compares all three
-unscoped and under a label, an unknown label, recipes, and both.
+unscoped and under a label, an unknown label, recipes, and both. A second copy,
+`history (vbx baseline)`, carries a baseline `vbx-cli --save-baseline` saved,
+so bv's drift check reads vbx's file as vbx's reads bv's; and `--save-baseline`
+itself is compared inside the repository — the summary and the whole file, the
+commit, subject and branch included (vbx-6s8).
 
 bv scopes nine more post-load commands that vbx does not yet: the history
 correlation family (history, related, impact-network, causality, orphans,
@@ -319,7 +323,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-burndown`, `--robot-sprint-list`, `--robot-sprint-show` | ✓ | Sprint dashboard | 6 |
 | `--robot-label-health`, `--robot-label-flow`, `--robot-label-attention` (+ label and recipe scope) | ✓ | Label dashboard, Flow matrix, Attention | 6 |
 | `--robot-alerts` (+ severity, alert-type, alert-label, label scope) | ✓ | Alerts panel | 6 |
-| `--robot-drift`, `--check-drift` (+ label and recipe scope; bv's exit code), baseline save/show | ✓ | Alerts + baseline menu | 6 |
+| `--robot-drift`, `--check-drift` (+ label and recipe scope; bv's exit code), baseline save/show | ✓ (`vbx-cli --save-baseline DESC` in bv's file format and prose, the commit read from the workspace's object store rather than a `git` process — vbx-6s8. **Not built:** `--label` / `--recipe` on the save, refused) | Alerts + baseline menu | 6 |
 | `--robot-diff`, `--diff-since` (+ label and recipe scope), `--as-of` | ✓ | Time-travel mode | 7 |
 | `--robot-graph` (+ format, root, depth) | ✓ | Graph export menu | 6 |
 | `--robot-recipes` | ✓ | Recipe sidebar | 6 |

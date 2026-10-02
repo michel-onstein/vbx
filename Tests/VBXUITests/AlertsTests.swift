@@ -144,6 +144,25 @@ struct AlertsTests {
         await store.close()
     }
 
+    @Test("A saved baseline records the workspace's commit, not the process's")
+    func baselineCommitIsTheWorkspaces() async throws {
+        // The copy sits in a temporary directory, in no repository, so it has
+        // no commit to record. The test process runs inside this package's
+        // own repository: before vbx-6s8 the engine ran `git` in the process's
+        // working directory, and the baseline recorded vbx's HEAD instead.
+        let (store, directory) = try await Fixture.writableStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        await store.saveBaseline(description: "outside any repository")
+
+        #expect(store.baseline.exists)
+        #expect(store.baseline.commitSHA.isEmpty, "recorded \(store.baseline.commitSHA)")
+        #expect(store.baseline.branch.isEmpty)
+        #expect(store.baseline.commitMessage.isEmpty)
+
+        await store.close()
+    }
+
     @Test("The alerts panel renders")
     func rendersPanel() async throws {
         let store = await Fixture.loadedStore()
