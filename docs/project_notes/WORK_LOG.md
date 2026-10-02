@@ -5,6 +5,21 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Every report the engine fails to build shows as unavailable, never empty (vbx-twy)
+
+vbx-lh0 fixed the Orphans tab; the same `(try? …) ?? .empty` swallowed a
+failure for 21 other reports the app displays. All of them now go through
+`ProjectStore.fetch`, which records the failure under an `EngineReport` in
+`unavailable`; panes show "<Report> unavailable" with the reason and Try
+Again, panels and sidebar sections a compact form, counts a dash. Covered:
+hotspots, correlation feedback, label health, flow and attention,
+repositories, triage and its feedback, alerts, baseline, search presets,
+hybrid search, sprints, capacity, recipes, revisions, causal chain, file
+lookup, diff, unblocks, Cloudflare instructions. `orphansError` is gone.
+Tests inject a failure per report and snapshot each drawn one against its
+empty state. Parity: 0 differing commands before and after (the CLI is
+untouched). Details in BUGS.md.
+
 ## 2026-10-02 — Orphans work on every history, and a failure shows as one (vbx-lh0)
 
 `vbx-cli --robot-orphans` failed on this repository, and the app's Orphans tab

@@ -12,7 +12,11 @@ struct SprintView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                if store.burndown.isLoaded {
+                if let reason = store.unavailableReason(.sprints) {
+                    // Not "No sprints defined": whether any are is what the
+                    // failed read would have said.
+                    UnavailableReportLabel(report: .sprints, reason: reason)
+                } else if store.burndown.isLoaded {
                     riskBanner
                     atRiskSection
                     burndownChart
@@ -218,6 +222,16 @@ struct SprintView: View {
                 .onChange(of: store.capacityAgents) { Task { await store.loadCapacity() } }
             }
 
+            if let reason = store.unavailableReason(.capacity) {
+                UnavailableReportLabel(report: .capacity, reason: reason)
+            } else {
+                capacityFigures
+            }
+        }
+    }
+
+    private var capacityFigures: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 18) {
                 stat(days(store.capacity.estimatedDays), "with \(store.capacity.agents)")
                 stat(days(store.capacity.totalDays), "with 1")

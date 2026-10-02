@@ -16,7 +16,10 @@ struct AlertsView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if store.alerts.alerts.isEmpty {
+            if let reason = store.unavailableReason(.alerts) {
+                // Never "No alerts": nothing was checked.
+                UnavailableReportView(report: .alerts, reason: reason)
+            } else if store.alerts.alerts.isEmpty {
                 EmptyStateView(
                     symbol: "checkmark.shield",
                     title: "No alerts",
@@ -36,9 +39,11 @@ struct AlertsView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Alerts").font(.headline)
                 Spacer()
-                severityCount(.critical, store.alerts.summary.critical)
-                severityCount(.warning, store.alerts.summary.warning)
-                severityCount(.info, store.alerts.summary.info)
+                if store.unavailableReason(.alerts) == nil {
+                    severityCount(.critical, store.alerts.summary.critical)
+                    severityCount(.warning, store.alerts.summary.warning)
+                    severityCount(.info, store.alerts.summary.info)
+                }
             }
 
             baselineRow
@@ -49,7 +54,10 @@ struct AlertsView: View {
 
     private var baselineRow: some View {
         HStack(spacing: 8) {
-            if store.baseline.exists {
+            if let reason = store.unavailableReason(.baseline) {
+                // Not "No baseline": whether one is saved is unknown.
+                UnavailableReportLabel(report: .baseline, reason: reason)
+            } else if store.baseline.exists {
                 Image(systemName: "flag.checkered").foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(

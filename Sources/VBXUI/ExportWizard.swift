@@ -257,6 +257,12 @@ public struct ExportWizard: View {
 
     private var cloudflareForm: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let reason = store.unavailableReason(.cloudflareInstructions) {
+                UnavailableReportLabel(report: .cloudflareInstructions, reason: reason) {
+                    cloudflare = await store.cloudflareInstructions(
+                        project: store.siteBundle.suggestedProject)
+                }
+            }
             // Said plainly rather than half-implemented: wrangler's upload
             // protocol cannot be driven from a sandboxed app.
             Label(cloudflare.reason, systemImage: "terminal")

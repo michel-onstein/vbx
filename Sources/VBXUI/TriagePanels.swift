@@ -13,7 +13,9 @@ struct RecommendationsPanel: View {
             subtitle: "Composite impact: PageRank, betweenness, blockers, staleness, priority"
         ) {
             let recommendations = store.triage.recommendations
-            if recommendations.isEmpty {
+            if let reason = store.unavailableReason(.triage) {
+                UnavailableReportLabel(report: .triage, reason: reason)
+            } else if recommendations.isEmpty {
                 unavailable
             } else {
                 VStack(spacing: 8) {
@@ -172,6 +174,9 @@ struct TriageFeedbackLine: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            if let reason = store.unavailableReason(.triageFeedback) {
+                UnavailableReportLabel(report: .triageFeedback, reason: reason)
+            }
             if let feedback = store.triageFeedbackState {
                 HStack(spacing: 6) {
                     Image(systemName: feedback.applied ? "slider.horizontal.3" : "hourglass")
@@ -229,7 +234,9 @@ struct QuickWinsPanel: View {
     var body: some View {
         Panel(title: "Quick wins", subtitle: "Small effort, large unblocking effect") {
             let wins = store.triage.quickWins
-            if wins.isEmpty {
+            if let reason = store.unavailableReason(.triage) {
+                UnavailableReportLabel(report: .triage, reason: reason)
+            } else if wins.isEmpty {
                 Text("No quick wins identified.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
@@ -267,7 +274,9 @@ struct BlockersPanel: View {
     var body: some View {
         Panel(title: "Blockers to clear", subtitle: "Ranked by downstream work released") {
             let blockers = store.triage.blockersToClear
-            if blockers.isEmpty {
+            if let reason = store.unavailableReason(.triage) {
+                UnavailableReportLabel(report: .triage, reason: reason)
+            } else if blockers.isEmpty {
                 Text("Nothing is blocking downstream work.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {

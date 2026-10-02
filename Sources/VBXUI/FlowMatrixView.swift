@@ -19,6 +19,11 @@ struct FlowMatrixView: View {
     private var flow: LabelFlow { store.labelFlow }
 
     var body: some View {
+        matrixOrEmpty.reportAvailability(.labelFlow)
+    }
+
+    @ViewBuilder
+    private var matrixOrEmpty: some View {
         if flow.labels.isEmpty {
             EmptyStateView(
                 symbol: "square.grid.3x3",

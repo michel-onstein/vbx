@@ -4,6 +4,53 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — Every report the app reads from the engine showed a failure as an empty report
+
+**Symptom:** after vbx-lh0 fixed the Orphans tab, History's Hotspots tab and
+its "reviewed" count still read `(try? …) ?? .empty`, so a failed engine call
+showed as no hotspots and no reviews. A sweep of the app found the same
+pattern on every report it displays: label health ("No labels — No bead in
+this workspace carries a label"), label flow, attention, repositories (the
+section vanished), triage ("Nothing is actionable right now"), triage
+feedback, alerts ("No alerts — Nothing looks wrong"), the baseline ("No
+baseline"), search presets, hybrid search (the list silently fell back to the
+fuzzy ranking), sprints ("No sprints defined"), capacity (zeros), recipes, the
+revisions menu, a bead's causal chain, the file lookup, a commit's diff (the
+click did nothing), the Cloudflare instructions, and a bead's unblocks — where
+`?? []` was cached, so the inspector said "Unblocks 0" for the rest of the
+session. Each is a claim about the workspace nothing had checked. (vbx-twy,
+found in vbx-lh0.)
+
+**Cause:** one idiom, `(try? await engine.x()) ?? .empty`, copied to every
+call site that had a sensible empty value — which made the failure and the
+empty answer indistinguishable to everything downstream.
+
+**Fix:** one mechanism instead of a per-panel copy of vbx-lh0's
+`orphansError`, which it replaces. `EngineReport` names each displayed
+report; `ProjectStore.fetch(_:_:)` is the only way the store reads one, and
+publishes a failure under its report in `unavailable` (cleared by the next
+success, and on opening another workspace). The views ask
+`unavailableReason(_:)`: a pane is replaced by `UnavailableReportView` (via
+`.reportAvailability(_:)`), a panel, bar, section or menu shows
+`UnavailableReportLabel`, and a count reads "—" through `display(_:from:)`.
+Each offers Try Again through `retry(_:)`. A failed triage now clears the
+previous ranking rather than keeping it; a failed unblocks read is not cached.
+The unused `relatedWork(for:)` and `fileRelations(for:)` were removed rather
+than converted. The revisions menu outside a git repository is a normal empty
+state, not a failure: the engine throws for it, so `loadRevisions` does not ask.
+
+**Regression tests:** `UnavailableReportTests`. `An engine failure is
+published as unavailable, and a retry clears it` runs for every
+`EngineReport`, injecting the failure through `injectedFailures` and driving
+the load the app uses, so a call site that bypasses `fetch` fails it. `A
+failed report draws unavailable, not empty` renders each drawn report twice
+through `NSHostingView` — failed, then with the failure swallowed as before —
+and compares the scoped region pixel for pixel (`RenderResult.difference`),
+because "No labels" and "Label health unavailable" have equal ink coverage.
+`A healthy workspace has no unavailable report` and `A workspace outside git
+has no unavailable report` keep the normal empty states from reading as
+failures.
+
 ## 2026-10-02 — `--robot-orphans` failed on this repository, and the app's Orphans tab showed the failure as an empty list
 
 **Symptom:** `vbx-cli --robot-orphans` at this repository's root failed with
@@ -43,8 +90,9 @@ and quoted paths, a merge with its own edits, a clean merge and an octopus.
 empty and vendor-only commits. `TestThisRepositoryMatchesBV` does the same
 over this repository's whole history and fails on any command line outside
 `supportedShapes`. In the app, `A history holding an empty commit has an
-orphan report` and `A failed orphan report is unavailable, never empty`
-(`HistoryViewTests`) cover the store and the view. Parity's `history`
+orphan report` (`HistoryViewTests`) covers the store; the view's test was
+folded into `UnavailableReportTests` by vbx-twy, which replaced
+`orphansError` with the shared `unavailable` record. Parity's `history`
 fixture gains a vendor-only commit, which its orphan runs now reach.
 
 ## 2026-10-02 — Triage's staleness ignored a commit naming the bead, where bv 0.25.2 counts it

@@ -11,7 +11,13 @@ struct SidebarReposSection: View {
     @EnvironmentObject var store: ProjectStore
 
     var body: some View {
-        if store.repos.isWorkspace {
+        if let reason = store.unavailableReason(.repos) {
+            // Shown even though the workspace may hold one repository: which
+            // it is, is exactly what the failed report would have said.
+            Section("Repositories") {
+                UnavailableReportLabel(report: .repos, reason: reason)
+            }
+        } else if store.repos.isWorkspace {
             Section("Repositories") {
                 if !store.repoFilter.isEmpty {
                     Button {

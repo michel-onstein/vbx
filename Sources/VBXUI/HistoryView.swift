@@ -15,7 +15,7 @@ struct HistoryView: View {
     /// The diff on screen — non-nil is what presents it. A companion flag
     /// would present the sheet from a body that had not yet seen the patch,
     /// which opens an empty window. See ``SidebarRecipesSection/editing``.
-    @State private var patch: CommitPatch?
+    @State private var patch: PatchSheetItem?
     @State private var causality: CausalityResult?
     @State private var filePath: String = ""
     @State private var fileBeads: FileBeadLookup?
@@ -88,7 +88,13 @@ struct HistoryView: View {
             case .orphans: orphansTab
             }
         }
-        .sheet(item: $patch) { patchSheet($0) }
+        .sheet(item: $patch) { item in
+            PatchSheet(item: item, done: { patch = nil }) {
+                if case .unavailable(let sha, let path, _) = item {
+                    await showPatch(sha: sha, path: path)
+                }
+            }
+        }
     }
 
     private var header: some View {
@@ -107,8 +113,11 @@ struct HistoryView: View {
                 stat("authors", "\(store.history.stats.uniqueAuthors)")
                 // An unavailable count is a dash, not a zero: zero orphans is
                 // a claim about the history the failed report never made.
-                stat("orphans", store.orphansError == nil ? "\(store.orphans.stats.orphanCount)" : "—")
-                if store.feedback.stats.totalFeedback > 0 {
+                stat("orphans", store.display("\(store.orphans.stats.orphanCount)", from: .orphans))
+                if store.unavailableReason(.correlationFeedback) != nil {
+                    // Not "nobody reviewed anything": the count is unknown.
+                    stat("reviewed", EngineReportText.absent)
+                } else if store.feedback.stats.totalFeedback > 0 {
                     stat(
                         "reviewed",
                         "\(store.feedback.stats.totalFeedback)")
@@ -285,6 +294,9 @@ struct HistoryView: View {
         }
         .task(id: store.focusedID) {
             guard let id = store.focusedID else { return }
+            // Forget the previous bead's chain first, or it shows against
+            // this one until the engine replies.
+            causality = nil
             causality = await store.causality(for: id)
         }
     }
@@ -293,6 +305,12 @@ struct HistoryView: View {
     private var causalityPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
+                if causality == nil, let reason = store.unavailableReason(.causality) {
+                    UnavailableReportLabel(report: .causality, reason: reason) {
+                        guard let id = store.focusedID else { return }
+                        causality = await store.causality(for: id)
+                    }
+                }
                 if let insights = causality?.insights {
                     Text(insights.summary).font(.callout)
                     HStack(spacing: 14) {
@@ -358,7 +376,13 @@ struct HistoryView: View {
             .padding(.horizontal, 12)
             .padding(.top, 10)
 
-            if let lookup = fileBeads {
+            if fileBeads == nil, let reason = store.unavailableReason(.fileLookup) {
+                UnavailableReportLabel(report: .fileLookup, reason: reason) {
+                    fileBeads = await store.beads(touching: filePath)
+                }
+                .padding(12)
+                Spacer()
+            } else if let lookup = fileBeads {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("\(lookup.totalBeads) beads touched \(lookup.filePath)")
@@ -416,6 +440,10 @@ struct HistoryView: View {
     // MARK: - Hotspots
 
     private var hotspotsTab: some View {
+        hotspotsList.reportAvailability(.hotspots)
+    }
+
+    private var hotspotsList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 Text(
@@ -451,19 +479,8 @@ struct HistoryView: View {
 
     // MARK: - Orphans
 
-    @ViewBuilder
     private var orphansTab: some View {
-        if let error = store.orphansError {
-            EmptyStateView(
-                symbol: "exclamationmark.triangle",
-                title: "Orphans unavailable",
-                message: error,
-                actionTitle: "Try Again",
-                action: { Task { await store.loadHistory(refresh: true) } }
-            )
-        } else {
-            orphansList
-        }
+        orphansList.reportAvailability(.orphans)
     }
 
     private var orphansList: some View {
@@ -529,37 +546,88 @@ struct HistoryView: View {
     // MARK: - Patch sheet
 
     private func showPatch(sha: String, path: String? = nil) async {
-        patch = await store.patch(sha: sha, path: path)
+        if let loaded = await store.patch(sha: sha, path: path) {
+            patch = .loaded(loaded)
+        } else {
+            patch = .unavailable(
+                sha: sha, path: path, reason: store.unavailableReason(.patch) ?? "")
+        }
     }
+}
 
-    private func patchSheet(_ patch: CommitPatch) -> some View {
+/// What the diff sheet shows: a commit's patch, or why the engine produced
+/// none. A failed diff used to present nothing at all — the click simply did
+/// not answer — which is the same silence as an empty report (vbx-twy).
+enum PatchSheetItem: Identifiable {
+    case loaded(CommitPatch)
+    case unavailable(sha: String, path: String?, reason: String)
+
+    var id: String {
+        switch self {
+        case .loaded(let patch): "loaded \(patch.sha) \(patch.path)"
+        case .unavailable(let sha, let path, _): "unavailable \(sha) \(path ?? "")"
+        }
+    }
+}
+
+/// The diff sheet.
+struct PatchSheet: View {
+    let item: PatchSheetItem
+    let done: () -> Void
+    /// Asks for the same diff again, from the unavailable state.
+    let retry: () async -> Void
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(patch.sha.prefix(7)).font(.headline.monospaced())
-                if !patch.path.isEmpty {
-                    Text(patch.path).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(sha.prefix(7)).font(.headline.monospaced())
+                if !path.isEmpty {
+                    Text(path).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Done") { self.patch = nil }
+                Button("Done", action: done)
                     .keyboardShortcut(.defaultAction)
             }
             .padding(12)
             Divider()
 
-            ScrollView([.horizontal, .vertical]) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(patch.lines) { line in
-                        Text(line.text.isEmpty ? " " : line.text)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(colour(for: line.kind))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(background(for: line.kind))
-                    }
-                }
-                .padding(8)
+            switch item {
+            case .loaded(let patch):
+                lines(patch)
+            case .unavailable(_, _, let reason):
+                UnavailableReportView(report: .patch, reason: reason, retry: retry)
             }
         }
         .frame(width: 760, height: 560)
+    }
+
+    private var sha: String {
+        switch item {
+        case .loaded(let patch): patch.sha
+        case .unavailable(let sha, _, _): sha
+        }
+    }
+
+    private var path: String {
+        switch item {
+        case .loaded(let patch): patch.path
+        case .unavailable(_, let path, _): path ?? ""
+        }
+    }
+
+    private func lines(_ patch: CommitPatch) -> some View {
+        ScrollView([.horizontal, .vertical]) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(patch.lines) { line in
+                    Text(line.text.isEmpty ? " " : line.text)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(colour(for: line.kind))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(background(for: line.kind))
+                }
+            }
+            .padding(8)
+        }
     }
 
     private func colour(for kind: PatchLine.Kind) -> Color {
