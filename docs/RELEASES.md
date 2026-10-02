@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.14.2 — 2026-10-02
+
+### Fixes
+
+- Correct the br quirks recorded in CLAUDE.md: a worktree write lands in the main checkout ([#109](https://github.com/michel-onstein/vbx/pull/109))
+
 ## 0.14.1 — 2026-10-02
 
 ### Fixes
