@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.20.0 — 2026-10-02
+
+### Features
+
+- vbx-cli --recipe scopes robot commands by name or path, and editing a .beads/recipes recipe saves to its own file ([#117](https://github.com/michel-onstein/vbx/pull/117))
+
 ## 0.19.0 — 2026-10-02
 
 ### Features
