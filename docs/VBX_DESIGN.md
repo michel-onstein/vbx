@@ -591,7 +591,10 @@ a member with no history as `unknown_ids` rather than leaving them to read as ad
 
 - `com.apple.security.files.user-selected.read-only` — the user grants a workspace folder.
 - **Security-scoped bookmarks** persisted per document, so reopening a workspace does not
-  re-prompt.
+  re-prompt. *Planned, not built.* The app keeps a path and never starts security-scoped
+  access, and the read-only grant means workspace writes (bead edits, correlation verdicts,
+  triage feedback) fail in the App Store build. See
+  [ADR-025](project_notes/DECISIONS.md).
 - Git history requires reading `.git`, which is inside the granted folder, so no extra
   entitlement is needed — *provided* correlation reads the object database directly rather
   than spawning `git`. `bv` currently shells out (`pkg/correlation/gitcmd.go`).

@@ -5,6 +5,23 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Accept / Not now on triage recommendations (vbx-442)
+
+Each recommendation in the triage panel has Accept / Not now (thumbs up and
+down). Clicking one records a verdict through the engine's
+`triage_feedback_record`, which writes `.beads/feedback.json` with bv's own
+functions and the engine's score. Under the recommendations, a line shows the
+verdict count and whether the weights apply yet. bv needs 3 verdicts, and that
+number comes from its `feedback` block, or from `triage_feedback` while triage
+omits the block. Reset sits on the same line and asks for confirmation. After
+a write the store reloads, and the unchanged engine copy makes that reload
+re-rank. `bv --feedback-show` 0.25.2 reads a verdict recorded this way. The
+open question about sandbox access is settled in ADR-025: no security-scoped
+access exists to activate, the Developer ID build needs none, and in the
+read-only App Store build a denied write shows as an error. New tests:
+`TriageFeedbackTests` (accept, ignore, reset, denied write) and
+`TriageFeedbackPanelTests` (controls, the count line, a thumb that fills).
+
 ## 2026-10-01 — `beads-check.py --fix` fixes the worktree it runs in (vbx-p00)
 
 `--fix` pins every `br` call with `--db` to the database beside the export it

@@ -20,6 +20,7 @@ struct RecommendationsPanel: View {
                     ForEach(recommendations.prefix(5)) { rec in
                         RecommendationRow(recommendation: rec)
                     }
+                    TriageFeedbackLine()
                 }
             }
         }
@@ -92,6 +93,7 @@ struct RecommendationRow: View {
                         .buttonStyle(.link).font(.caption2)
                 }
                 Spacer()
+                TriageVerdictButtons(id: recommendation.id)
             }
 
             if showReasons {
@@ -108,6 +110,115 @@ struct RecommendationRow: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+/// Accept / Not now on one recommendation: bv's `--feedback-accept` and
+/// `--feedback-ignore`, recorded by the engine with the engine's score.
+///
+/// The symbol fills for the verdict this window gave, so a click visibly
+/// landed; the count it moved is the engine's, on ``TriageFeedbackLine``.
+struct TriageVerdictButtons: View {
+    @EnvironmentObject var store: ProjectStore
+    let id: String
+
+    var body: some View {
+        let given = store.triageVerdicts[id]
+        HStack(spacing: 6) {
+            button(.accept, given: given)
+            button(.ignore, given: given)
+        }
+    }
+
+    private func button(_ verdict: TriageVerdict, given: TriageVerdict?) -> some View {
+        let chosen = given == verdict
+        return Button {
+            Task { await store.recordTriageFeedback(verdict, for: id) }
+        } label: {
+            Image(systemName: Self.symbol(verdict, chosen: chosen))
+                .font(.caption)
+                .foregroundStyle(chosen ? Color.accentColor : .secondary)
+        }
+        .buttonStyle(.plain)
+        .help(Self.help(verdict))
+        .accessibilityLabel(Self.title(verdict))
+    }
+
+    static func title(_ verdict: TriageVerdict) -> String {
+        switch verdict {
+        case .accept: "Accept"
+        case .ignore: "Not now"
+        }
+    }
+
+    static func symbol(_ verdict: TriageVerdict, chosen: Bool) -> String {
+        let base = verdict == .accept ? "hand.thumbsup" : "hand.thumbsdown"
+        return chosen ? base + ".fill" : base
+    }
+
+    static func help(_ verdict: TriageVerdict) -> String {
+        switch verdict {
+        case .accept: "Accept: a good pick. Records triage feedback that tunes the ranking."
+        case .ignore: "Not now: a poor pick. Records triage feedback that tunes the ranking."
+        }
+    }
+}
+
+/// How much triage feedback is on file and whether it shapes the ranking yet,
+/// with a way to start over.
+struct TriageFeedbackLine: View {
+    @EnvironmentObject var store: ProjectStore
+    @State private var confirmingReset = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let feedback = store.triageFeedbackState {
+                HStack(spacing: 6) {
+                    Image(systemName: feedback.applied ? "slider.horizontal.3" : "hourglass")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text(Self.summary(feedback))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                    if feedback.totalEvents > 0 {
+                        Button("Reset…") { confirmingReset = true }
+                            .buttonStyle(.link).font(.caption2)
+                            .help("Forget every verdict and rank with the default weights")
+                    }
+                }
+            }
+            if let error = store.triageFeedbackError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption2).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .confirmationDialog(
+            "Reset triage feedback?", isPresented: $confirmingReset
+        ) {
+            Button("Reset Feedback", role: .destructive) {
+                Task { await store.resetTriageFeedback() }
+            }
+        } message: {
+            Text(
+                "Every accept and not-now verdict is removed from .beads/feedback.json, "
+                    + "and recommendations go back to the default weights.")
+        }
+    }
+
+    /// The line's text. Every number in it is the engine's — the count, and
+    /// how many verdicts the weights wait for.
+    static func summary(_ feedback: TriageFeedback) -> String {
+        let count = feedback.totalEvents
+        if count == 0 {
+            return "No feedback yet · weights adapt after \(feedback.minSamples) verdicts"
+        }
+        let verdicts = count == 1 ? "1 verdict" : "\(count) verdicts"
+        let split = "\(feedback.acceptedCount) accepted, \(feedback.ignoredCount) not now"
+        return feedback.applied
+            ? "Feedback: \(verdicts) (\(split)) · applied to the ranking"
+            : "Feedback: \(verdicts) (\(split)) · not applied yet "
+                + "(\(feedback.minSamples) needed)"
     }
 }
 

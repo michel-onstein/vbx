@@ -111,9 +111,12 @@ public struct Triage: Codable, Sendable, Hashable {
     public var recommendations: [Recommendation]
     public var quickWins: [QuickWin]
     public var blockersToClear: [BlockerItem]
+    /// The triage feedback this ranking was scored with — bv's `feedback`
+    /// block. Absent, as bv omits it, until a verdict has been recorded.
+    public var feedback: TriageFeedback?
 
     private enum CodingKeys: String, CodingKey {
-        case recommendations
+        case recommendations, feedback
         case quickWins = "quick_wins"
         case blockersToClear = "blockers_to_clear"
     }
@@ -123,20 +126,95 @@ public struct Triage: Codable, Sendable, Hashable {
         recommendations = try c.decodeIfPresent([Recommendation].self, forKey: .recommendations) ?? []
         quickWins = try c.decodeIfPresent([QuickWin].self, forKey: .quickWins) ?? []
         blockersToClear = try c.decodeIfPresent([BlockerItem].self, forKey: .blockersToClear) ?? []
+        feedback = try c.decodeIfPresent(TriageFeedback.self, forKey: .feedback)
     }
 
     public init(
         recommendations: [Recommendation] = [], quickWins: [QuickWin] = [],
-        blockersToClear: [BlockerItem] = []
+        blockersToClear: [BlockerItem] = [], feedback: TriageFeedback? = nil
     ) {
         self.recommendations = recommendations
         self.quickWins = quickWins
         self.blockersToClear = blockersToClear
+        self.feedback = feedback
     }
 
     public static let empty = Triage()
 
     public var isEmpty: Bool {
         recommendations.isEmpty && quickWins.isEmpty && blockersToClear.isEmpty
+    }
+}
+
+/// bv's triage feedback summary: how many accept / ignore verdicts are on
+/// file, and whether the weights they adjust are applied yet.
+///
+/// Every field is the engine's. `applied` in particular is not derived here
+/// from `totalEvents >= minSamples`: the rule is bv's, and so is the number.
+public struct TriageFeedback: Codable, Sendable, Hashable {
+    public var enabled: Bool
+    /// Whether the adjusted weights scored this ranking.
+    public var applied: Bool
+    /// Verdicts needed before the weights apply — bv's MinFeedbackSamples.
+    public var minSamples: Int
+    public var totalEvents: Int
+    public var acceptedCount: Int
+    public var ignoredCount: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled, applied
+        case minSamples = "min_samples"
+        case totalEvents = "total_events"
+        case acceptedCount = "accepted_count"
+        case ignoredCount = "ignored_count"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        applied = try c.decodeIfPresent(Bool.self, forKey: .applied) ?? false
+        minSamples = try c.decodeIfPresent(Int.self, forKey: .minSamples) ?? 0
+        totalEvents = try c.decodeIfPresent(Int.self, forKey: .totalEvents) ?? 0
+        acceptedCount = try c.decodeIfPresent(Int.self, forKey: .acceptedCount) ?? 0
+        ignoredCount = try c.decodeIfPresent(Int.self, forKey: .ignoredCount) ?? 0
+    }
+
+    public init(
+        enabled: Bool = false, applied: Bool = false, minSamples: Int = 0,
+        totalEvents: Int = 0, acceptedCount: Int = 0, ignoredCount: Int = 0
+    ) {
+        self.enabled = enabled
+        self.applied = applied
+        self.minSamples = minSamples
+        self.totalEvents = totalEvents
+        self.acceptedCount = acceptedCount
+        self.ignoredCount = ignoredCount
+    }
+}
+
+/// A verdict on one triage recommendation.
+public enum TriageVerdict: String, Codable, Sendable, Hashable {
+    /// A good pick: bv's `--feedback-accept`.
+    case accept
+    /// Not now: bv's `--feedback-ignore`.
+    case ignore
+}
+
+/// What the engine's feedback methods return: the state after the operation,
+/// and bv's own message for the same flag.
+public struct TriageFeedbackResult: Codable, Sendable, Hashable {
+    public var feedback: TriageFeedback
+    public var message: String
+    /// The feedback.json read and, for a write, written.
+    public var path: String
+
+    private enum CodingKeys: String, CodingKey { case feedback, message, path }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        feedback =
+            try c.decodeIfPresent(TriageFeedback.self, forKey: .feedback) ?? TriageFeedback()
+        message = try c.decodeIfPresent(String.self, forKey: .message) ?? ""
+        path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
     }
 }

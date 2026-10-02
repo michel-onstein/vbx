@@ -1325,3 +1325,66 @@ fails; a declaration that stops firing fails the run; and each is printed as
   (`due_date` vs `due_at`) — the declarations then stop firing and the run
   fails, which is the prompt — or when bv exports its source selection, so vbx
   could adopt it without copying `cmd/bv` or `internal/`.
+
+---
+
+## ADR-025 — The app records triage feedback in-process, under whatever access the build has
+
+**Date:** 2026-10-01 · **Status:** Accepted, implemented
+
+**Context.** vbx-442 puts Accept / Not now on each triage recommendation, and
+Reset beside the feedback count. Bead edits leave the app through `br`, a
+separate process; this write does not. The engine's `triage_feedback_record`
+and `triage_feedback_reset` (vbx-rt3) write `.beads/feedback.json` from inside
+the app, through bv's own `FeedbackData`. The bead asked whether the
+workspace's security-scoped access is active when that happens.
+
+What the code holds today:
+
+- **No security-scoped access is ever started.** Nothing calls
+  `startAccessingSecurityScopedResource` and no bookmark is created. The Open
+  panel hands over a URL, the store keeps its `path` string, and the recents
+  list and window restoration reopen by path. VBX_DESIGN §8.3's "bookmarks
+  persisted per document" is the plan, not the build.
+- **The Developer ID build** (`--dmg`, the shipping channel, ADR-010/012) is
+  not sandboxed, so the write needs no grant, and neither do the engine's other
+  in-process workspace writes: correlation verdicts, the drift baseline,
+  recipes.
+- **The App Store build** declares `files.user-selected.read-only`. In a
+  session, a folder picked in the Open panel stays readable, but the
+  entitlement makes it read-only. So *every* workspace write fails there, and
+  that includes `br`'s and the engine's other in-process writes.
+
+**Decision.** Record through the engine, in-process, exactly as correlation
+verdicts already are. Do not wrap the call in
+`startAccessingSecurityScopedResource`: on a URL rebuilt from a path string it
+returns false and grants nothing, so it would only look like a guard. Where the
+process may not write, the engine's error (`Error saving feedback: …`) goes to
+`ProjectStore.triageFeedbackError`, the panel shows it, and nothing else
+changes. No verdict is marked and the count does not move. A test makes
+`.beads` read-only and asserts exactly that.
+
+After a successful write the store reloads at once. The engine leaves its own
+copy of the feedback alone, so that reload sees the file changed and re-ranks
+(the path an outside `bv --feedback-accept` takes through the watch). The
+watch's own reload that follows finds nothing changed.
+
+**Alternatives.**
+
+- *Go through `bv` or `vbx-cli` as a subprocess, like `br`.* Rejected. The
+  sandbox forbids spawning either (ADR-006, ADR-020), the App Store build ships
+  no `vbx-cli` (ADR-010), and it would be a second process doing what the
+  linked engine already does with the same functions.
+- *Write to the app's container in the App Store build.* Rejected. bv and
+  `vbx-cli` read `.beads/feedback.json` in the workspace, and verdicts nobody
+  else can see would score a ranking that only this app shows.
+- *Widen the App Store entitlement to read-write and implement bookmarks
+  here.* Out of scope: it changes what App Review is asked to approve, and it
+  applies to every workspace write, not to this one. Filed as its own bead.
+
+**Consequences.** In the Developer ID build feedback works with no grant. In
+the App Store build it fails visibly, alongside the other workspace writes,
+until the read-write question is settled. **Revisit** when the App Store build
+gains read-write access with security-scoped bookmarks. The write then has to
+happen while that access is started, and the denied-write test is where the
+switch shows up.
