@@ -1574,9 +1574,10 @@ to match exactly once. `gitcmd.go` is not copied. `vbx_gitcmd.go` supplies a
 `Start`, `Wait`, `Process.Kill`), and it answers the command line in-process
 through `objgit`. `objgit` is a package that understands exactly the git
 invocations the correlator makes (`log` with the walk, batch, `--raw
---follow` and causal shapes, `show -s`, `rev-parse`, `cat-file --batch` and
-`-s`). It prints the bytes git prints, and refuses anything else with an
-error rather than approximating it. The substitutions are the env shim (bv's
+--follow` and causal shapes, `show -s`, the co-commit fallback's `show
+--name-status` and `show --numstat` under an empty format, `rev-parse`,
+`cat-file --batch` and `-s`). It prints the bytes git prints, and refuses
+anything else with an error rather than approximating it. The substitutions are the env shim (bv's
 `internal/env` is not importable; the shim keeps every disk cache off), the
 two places the package names `*exec.Cmd` as a type, and one that always
 takes bv's snapshot extraction. bv proves that extraction byte-identical to
@@ -1626,8 +1627,15 @@ and feedback applies at once.
   ADR-024's source keys.
 - **Upgrading bv** means bumping `go.mod`, running the script, and running the
   tests. A new git invocation is refused by `objgit` and fails the
-  differential tests. An exec added outside `gitCommand` fails
-  `TestNoSourceStartsAProcess`.
+  differential tests — **if a test history reaches it**. A command line on a
+  fallback path runs only on histories that take the fallback. The orphan
+  detector's per-commit `show --name-status`, for an orphan the walk lists no
+  files for, reached none of them, so it shipped refused and
+  `--robot-orphans` failed on this repository (vbx-lh0, 2026-10-02).
+  `TestThisRepositoryMatchesBV` now runs the correlator over this
+  repository's whole history with every call checked against git, and fails
+  on any command line outside `objgit`'s supported set. An exec added
+  outside `gitCommand` fails `TestNoSourceStartsAProcess`.
 - **What differs from git, by construction.** `objgit` reads the repository's
   own configuration (`core.quotePath`, `diff.renames`) and no global or
   system file. It does not read `.gitattributes` (binary or diff drivers).

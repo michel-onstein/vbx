@@ -269,7 +269,13 @@ them.
   `objgit` in-process, which answers each command line from the object store
   with the bytes git prints and **refuses** any it does not know — so a bv
   upgrade that adds a git call fails the differential tests instead of
-  approximating. Never make `objgit` guess at an invocation. Port git's
+  approximating, **but only a call some test history reaches**. A fallback
+  path runs only on the histories that take it: the orphan detector's
+  per-commit `show --name-status` reached no fixture and shipped refused
+  (vbx-lh0). `TestThisRepositoryMatchesBV` walks this repository's whole
+  history and fails on any command line outside `supportedShapes`; a new
+  fallback needs a fixture that takes it. Never make `objgit` guess at an
+  invocation. Port git's
   behaviour, and prove it against real git in a test. See ADR-027.
 - **bv's custom id patterns are a package global, and the engine holds a
   lock whenever it sets them.** `correlation.SetCustomIDPatterns` is how
