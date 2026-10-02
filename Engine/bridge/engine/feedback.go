@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/loader"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
 
@@ -80,10 +81,20 @@ func readFeedback(dir string) (*analysis.FeedbackData, string) {
 	return fb, fingerprint
 }
 
+// sessionFeedbackDir is the directory this session reads feedback from:
+// feedbackDir for the source, or — for a FeedbackCommand session — the beads
+// directory bv resolved, whatever was loaded.
+func (s *Session) sessionFeedbackDir(source, kind string) string {
+	if s.config.FeedbackCommand {
+		return s.feedbackCommandDir
+	}
+	return feedbackDir(source, kind)
+}
+
 // refreshFeedback re-reads the feedback for source and reports whether it
 // differs from what the session held.
 func (s *Session) refreshFeedback(source, kind string) bool {
-	fb, fingerprint := readFeedback(feedbackDir(source, kind))
+	fb, fingerprint := readFeedback(s.sessionFeedbackDir(source, kind))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	changed := fingerprint != s.feedbackFingerprint
@@ -188,14 +199,18 @@ type triageFeedbackResult struct {
 }
 
 // loadSessionFeedback is bv's LoadFeedback over the directory this session
-// reads feedback from (feedbackDir): the defaults when there is no file, and
-// an error — not the defaults, as the read path uses — when the file cannot
-// be parsed, so a write never silently replaces a file it could not read.
+// reads feedback from (sessionFeedbackDir): the defaults when there is no
+// file, and an error — not the defaults, as the read path uses — when the
+// file cannot be parsed, so a write never silently replaces a file it could
+// not read.
 func (s *Session) loadSessionFeedback() (*analysis.FeedbackData, string, error) {
+	if s.feedbackCommandDirErr != nil {
+		return nil, "", fmt.Errorf("Error getting beads directory: %w", s.feedbackCommandDirErr)
+	}
 	s.mu.RLock()
 	source, kind := s.source, s.kind
 	s.mu.RUnlock()
-	dir := feedbackDir(source, kind)
+	dir := s.sessionFeedbackDir(source, kind)
 	if dir == "" {
 		return nil, "", fmt.Errorf("session has no source")
 	}
@@ -280,6 +295,15 @@ func (s *Session) triageFeedbackRecord(req []byte) ([]byte, error) {
 		return nil, fmt.Errorf("invalid action: %s (must be 'accept' or 'ignore')", r.Action)
 	}
 
+	// bv reads the feedback file before it loads issues, so a file it cannot
+	// parse is the error even for a bead that does not exist; then a load
+	// that failed; then the bead.
+	if _, _, err := s.loadSessionFeedback(); err != nil {
+		return nil, err
+	}
+	if s.feedbackLoadErr != nil {
+		return nil, fmt.Errorf("Error loading issues: %w", s.feedbackLoadErr)
+	}
 	issues, an, stats := s.snapshot()
 	if an == nil || stats == nil {
 		return nil, fmt.Errorf("session has no analyzer")
@@ -325,4 +349,79 @@ func (s *Session) triageFeedbackRecord(req []byte) ([]byte, error) {
 		"Recorded %s feedback for %s (score: %.3f)\n%s", r.Action, r.ID, score, fb.Summary()))
 	result.IssueID, result.Action, result.Score = r.ID, r.Action, &score
 	return json.Marshal(result)
+}
+
+// ---- bv's feedback commands, before discovery (vbx-v1t) --------------------
+//
+// bv 0.25.2 answers its four feedback flags early in cmd/bv/main.go, before
+// it discovers a `.bv/workspace.yaml` and before it reads --workspace at all.
+// So where no `.beads` is reachable — a workspace root, or a folder below one
+// — bv does not answer over the workspace, as every robot command there does:
+//
+//   - feedback.json is the one in loader.GetBeadsDir(cwd), a directory that
+//     does not exist there. Show reports the defaults, and reset fails to
+//     write into it;
+//   - a verdict looks the bead up in datasource.LoadIssues(""), the working
+//     directory as one repository, which fails with "Error loading issues:
+//     failed to read beads directory: …".
+//
+// A FeedbackCommand session is that: Path as one repository, never a
+// workspace, and the beads directory bv would resolve for it.
+
+// openForFeedback prepares a FeedbackCommand session. It never fails: bv's
+// show and reset need only the directory, so a load that fails is kept for a
+// verdict to report, and a directory that cannot be resolved is reported by
+// whichever command runs.
+func (s *Session) openForFeedback() {
+	s.feedbackCommandDir, s.feedbackCommandDirErr = bvFeedbackBeadsDir(s.config.Path)
+	if s.feedbackCommandDirErr != nil {
+		return
+	}
+	stderr, err := s.loadSingle()
+	if err != nil {
+		s.feedbackLoadErr = bvLoadIssuesError(s.feedbackCommandDir, err)
+		s.mu.Lock()
+		s.loadStderr = stderr
+		s.mu.Unlock()
+	}
+}
+
+// bvFeedbackBeadsDir is the directory bv reads and writes feedback.json in:
+// loader.GetBeadsDir over the working directory — BEADS_DB or BEADS_DIR when
+// set, else `.beads` there, else at the root of the checkout it sits in —
+// returned even when it does not exist. vbx-cli's --path stands in for the
+// working directory; a `.beads` directory or a data file named directly,
+// which bv cannot be given, is its own directory.
+func bvFeedbackBeadsDir(path string) (string, error) {
+	if path == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current working directory: %w", err)
+		}
+		path = wd
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+		return filepath.Dir(abs), nil
+	}
+	if filepath.Base(abs) == ".beads" {
+		return abs, nil
+	}
+	return loader.GetBeadsDir(abs)
+}
+
+// bvLoadIssuesError is the error bv's datasource.LoadIssues reports for a
+// load vbx could not make. When every candidate source fails, bv falls back
+// to its legacy JSONL loader, which fails first on finding the file —
+// "failed to read beads directory: open …: no such file or directory" for a
+// directory that is not there. When the file is found the failure is in the
+// data, and vbx's own error says which.
+func bvLoadIssuesError(beadsDir string, err error) error {
+	if _, findErr := loader.FindJSONLPath(beadsDir); findErr != nil {
+		return findErr
+	}
+	return err
 }

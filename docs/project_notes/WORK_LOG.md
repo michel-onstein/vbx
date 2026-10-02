@@ -5,6 +5,23 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — The feedback flags answer before workspace discovery, as bv's do (vbx-v1t)
+
+bv 0.25.2 answers `--feedback-accept`, `--feedback-ignore`, `--feedback-show`
+and `--feedback-reset` before it discovers a `.bv/workspace.yaml` or reads
+`--workspace`. They work over the working directory's own `.beads`. `vbx-cli`
+answered them over the discovered workspace. The four now open the engine
+with `OpenConfig.FeedbackCommand`, which loads the path as one repository and
+resolves `feedback.json` as bv does. A failed load fails only a verdict, in
+bv's words. A verdict also reads the feedback file before it looks up the
+bead, as bv does. ADR-026 records the rule and flags it as a likely bv bug,
+followed here for parity. Parity gains two feedback sequences that run on a
+copy of the whole workspace, `dropped (workspace)` and `discovery`, and they
+compare every `feedback.json` left in it. The run went from 0 to 0 differing
+commands, and both new sequences match. Filed vbx-15s: from a folder below a
+workspace root, triage's `feedback` block differs the same way. Tests:
+`feedback_command_test.go`, `EngineTests.swift`, `test-parity-check.py`.
+
 ## 2026-10-02 — Triage, plan, alerts and metrics carry the robot envelope (vbx-6su)
 
 bv 0.25.2 wraps `--robot-triage`, `--robot-plan`, `--robot-alerts` and

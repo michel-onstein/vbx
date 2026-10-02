@@ -700,6 +700,29 @@ FEEDBACK_COMPARISONS = [
     # warnings first on stderr, then bv's two lines on stdout (vbx-1l6).
     {"name": "feedback-accept over dropped records", "only": {"dropped", "dropped (beads.db)"},
      "steps": [["--feedback-ignore", "drop-1"], ["--feedback-show"]]},
+    # Where no .beads is reachable and every robot command answers over the
+    # workspace found above (ADR-026), bv answers the feedback flags before
+    # discovery and before --workspace (vbx-v1t): over the folder's own
+    # .beads, which is not there. Show reports the defaults, reset cannot
+    # write, and a verdict — even on a member's bead — fails to load, with no
+    # discovery notice and no member warnings. Each runs on a copy of the
+    # whole workspace, so a feedback.json either side leaves anywhere in it
+    # is compared.
+    {"name": "feedback in a discovered workspace", "only": {"dropped (workspace)"},
+     "whole_workspace": True,
+     "steps": [["--feedback-show"], ["--feedback-reset"],
+               ["--feedback-accept", "no-such-bead"], ["--feedback-accept", "api-1"],
+               ["--feedback-ignore", "web-1", "--workspace", ".bv/workspace.yaml"]]},
+    # Below a root holding a .beads of its own: a verdict recorded at the root
+    # is the root's, and from a folder below it bv neither shows it nor adds
+    # to it — the folder's own .beads is the one it reads.
+    {"name": "feedback below a workspace root", "only": {"discovery"},
+     "whole_workspace": True,
+     "steps": [["--feedback-accept", "vbx-2"],
+               {"cwd": "notes", "args": ["--feedback-show"]},
+               {"cwd": "notes", "args": ["--feedback-reset"]},
+               {"cwd": "notes", "args": ["--feedback-accept", "api-1"]},
+               ["--feedback-show"]]},
 ]
 
 
@@ -969,33 +992,59 @@ def read_feedback_file(beads: Path):
         return f"<unparseable: {error}>"
 
 
-def run_feedback_sequence(binary: str, steps: list[list[str]], workspace: Path,
-                          scratch: Path) -> tuple[list[tuple[int, str, str, bool]], object]:
-    """Runs `steps` on a fresh copy of the workspace's .beads.
+def feedback_step(step) -> tuple[str | None, list[str]]:
+    """A feedback step's (cwd, arguments): a plain list runs from the copy's
+    root, and {"cwd": …, "args": […]} from a folder inside it."""
+    if isinstance(step, dict):
+        return step.get("cwd"), step["args"]
+    return None, step
+
+
+def feedback_step_text(step) -> str:
+    """A step as a difference names it."""
+    cwd, args = feedback_step(step)
+    return (f"(in {cwd}) " if cwd else "") + " ".join(args)
+
+
+def run_feedback_sequence(binary: str, steps: list, workspace: Path, scratch: Path,
+                          whole: bool = False) -> tuple[list[tuple[int, str, str, bool]], dict]:
+    """Runs `steps` on a fresh copy of the workspace's .beads — or, when
+    `whole`, of the whole workspace, so discovery finds what it would.
 
     Returns each step's (status, stdout, stderr, volatile) — volatile when the
-    step is a show whose updated_at is the wall clock — and the feedback.json
-    left behind.
+    step is a show whose updated_at is the wall clock — and every feedback.json
+    left anywhere in the copy, parsed, by its path inside it: a file written
+    to the wrong directory is a difference too.
     """
     if scratch.exists():
         shutil.rmtree(scratch)
-    shutil.copytree(workspace / ".beads", scratch / ".beads")
-    wrote = not (scratch / ".beads" / "feedback.json").exists()
+    if whole:
+        shutil.copytree(workspace, scratch)
+    else:
+        shutil.copytree(workspace / ".beads", scratch / ".beads")
+    wrote = not any(scratch.rglob("feedback.json"))
     results = []
     for step in steps:
-        status, out, err = run(binary, step, scratch)
-        results.append((status, out, err, step[0] == "--feedback-show" and wrote))
-        if step[0] != "--feedback-show":
+        cwd, args = feedback_step(step)
+        status, out, err = run(binary, args, scratch / cwd if cwd else scratch)
+        # Each side runs in a copy of its own, and an error names the path it
+        # failed on — so the copy is named alike on both.
+        for root in (str(scratch.resolve()), str(scratch)):
+            out, err = out.replace(root, "<copy>"), err.replace(root, "<copy>")
+        results.append((status, out, err, args[0] == "--feedback-show" and wrote))
+        if args[0] != "--feedback-show":
             wrote = True
-    return results, read_feedback_file(scratch / ".beads")
+    return results, {str(path.relative_to(scratch)): read_feedback_file(path.parent)
+                     for path in sorted(scratch.rglob("feedback.json"))}
 
 
-def feedback_differences(vbx_run, bv_run, steps: list[list[str]]) -> list[str]:
+def feedback_differences(vbx_run, bv_run, steps: list) -> list[str]:
     """Every difference between two runs of one feedback sequence."""
-    (vbx_steps, vbx_file), (bv_steps, bv_file) = vbx_run, bv_run
+    (vbx_steps, vbx_files), (bv_steps, bv_files) = vbx_run, bv_run
     found: list[str] = []
     for step, (vs, vo, ve, volatile), (bs, bo, be, _) in zip(steps, vbx_steps, bv_steps):
-        where = " ".join(step)
+        where = feedback_step_text(step)
+        step = feedback_step(step)[1]
         if vs != bs:
             found.append(f"{where}: exit {vs} vs {bs}")
             continue
@@ -1018,14 +1067,17 @@ def feedback_differences(vbx_run, bv_run, steps: list[list[str]]) -> list[str]:
                          for difference in describe_differences(left, right))
         elif vo != bo:
             found.append(f"{where}: stdout {vo!r} vs {bo!r}")
-    if (vbx_file is None) != (bv_file is None):
-        found.append("feedback.json: " + ("absent" if vbx_file is None else "written")
-                     + " on the vbx side, " + ("absent" if bv_file is None else "written")
-                     + " on the bv side")
-    elif vbx_file is not None:
-        found.extend(
-            f"feedback.json{difference}" for difference in describe_differences(
-                strip_keys(vbx_file, FEEDBACK_TIME_KEYS), strip_keys(bv_file, FEEDBACK_TIME_KEYS)))
+    for path in sorted(set(vbx_files) | set(bv_files)):
+        vbx_file, bv_file = vbx_files.get(path), bv_files.get(path)
+        if (vbx_file is None) != (bv_file is None):
+            found.append(f"{path}: " + ("absent" if vbx_file is None else "written")
+                         + " on the vbx side, " + ("absent" if bv_file is None else "written")
+                         + " on the bv side")
+        elif vbx_file is not None:
+            found.extend(
+                f"{path}{difference}" for difference in describe_differences(
+                    strip_keys(vbx_file, FEEDBACK_TIME_KEYS),
+                    strip_keys(bv_file, FEEDBACK_TIME_KEYS)))
     return found
 
 
@@ -1466,7 +1518,7 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
 
     for entry in FEEDBACK_COMPARISONS:
         name = entry["name"]
-        flags = {step[0].removeprefix("--") for step in entry["steps"]}
+        flags = {feedback_step(step)[1][0].removeprefix("--") for step in entry["steps"]}
         if not flags <= available:
             missing.append(name)
             continue
@@ -1480,8 +1532,11 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
             skipped.append((name, bv_skip))
             continue
         with tempfile.TemporaryDirectory(prefix="vbx-parity-feedback-") as scratch:
-            vbx_run = run_feedback_sequence(vbx, entry["steps"], workspace, Path(scratch) / "vbx")
-            bv_run = run_feedback_sequence(bv, entry["steps"], workspace, Path(scratch) / "bv")
+            whole = entry.get("whole_workspace", False)
+            vbx_run = run_feedback_sequence(
+                vbx, entry["steps"], workspace, Path(scratch) / "vbx", whole)
+            bv_run = run_feedback_sequence(
+                bv, entry["steps"], workspace, Path(scratch) / "bv", whole)
         differences = feedback_differences(vbx_run, bv_run, entry["steps"])
         if differences:
             differed.append((name, differences))

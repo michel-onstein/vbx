@@ -73,11 +73,16 @@ struct RobotCommand {
     /// keeps stderr clean in robot mode. So are feedback-show and
     /// feedback-reset, which bv answers without loading.
     var printsLoadWarnings = false
+    /// True when bv answers the flag before it discovers a workspace or reads
+    /// `--workspace`: the four feedback commands. They read the folder as one
+    /// repository and its own `.beads/feedback.json`, even where every other
+    /// command answers over the workspace above it (vbx-v1t).
+    var answersBeforeDiscovery = false
 
     init(
         _ flag: String, method: String, summary: String, waitsForPhase2: Bool = false,
         scope: ScopeRule = .ignored, printsMessage: Bool = false, bvErrorText: Bool = false,
-        printsLoadWarnings: Bool = false,
+        printsLoadWarnings: Bool = false, answersBeforeDiscovery: Bool = false,
         request: @escaping (Options) throws -> [String: Any]? = { _ in nil }
     ) {
         self.flag = flag
@@ -89,6 +94,7 @@ struct RobotCommand {
         self.printsMessage = printsMessage
         self.bvErrorText = bvErrorText
         self.printsLoadWarnings = printsLoadWarnings
+        self.answersBeforeDiscovery = answersBeforeDiscovery
     }
 
     /// True when a `--recipe` must resolve before the command runs: bv
@@ -382,23 +388,26 @@ let robotCommands: [RobotCommand] = [
 
     // Triage feedback: .beads/feedback.json, which triage, next and priority
     // apply once it holds three verdicts. The accept and ignore flags take the
-    // bead id as their value, as bv's do. These write inside the workspace.
+    // bead id as their value, as bv's do. These write inside the folder's own
+    // .beads: bv answers them before workspace discovery and --workspace.
     RobotCommand(
         "feedback-accept", method: "triage_feedback_record",
         summary: "Record that a recommendation was taken", printsMessage: true,
-        printsLoadWarnings: true,
+        printsLoadWarnings: true, answersBeforeDiscovery: true,
         request: { options in ["id": options.id ?? "", "action": "accept"] }),
     RobotCommand(
         "feedback-ignore", method: "triage_feedback_record",
         summary: "Record that a recommendation was passed over", printsMessage: true,
-        printsLoadWarnings: true,
+        printsLoadWarnings: true, answersBeforeDiscovery: true,
         request: { options in ["id": options.id ?? "", "action": "ignore"] }),
     RobotCommand(
         "feedback-reset", method: "triage_feedback_reset",
-        summary: "Clear every verdict and weight adjustment", printsMessage: true),
+        summary: "Clear every verdict and weight adjustment", printsMessage: true,
+        answersBeforeDiscovery: true),
     RobotCommand(
         "feedback-show", method: "triage_feedback",
-        summary: "The verdicts and adjusted weights", printsMessage: true),
+        summary: "The verdicts and adjusted weights", printsMessage: true,
+        answersBeforeDiscovery: true),
 ]
 
 // MARK: - Report export
@@ -1009,7 +1018,8 @@ func run() async -> Int32 {
         // supports — which is what puts claim commands in triage and
         // --robot-next (ADR-020). The app leaves this off.
         info = try await engine.open(
-            path: options.path, liveTrackerActions: true, workspace: options.workspace)
+            path: options.path, liveTrackerActions: true, workspace: options.workspace,
+            feedbackCommand: command.answersBeforeDiscovery)
     } catch {
         complain("Error: \(error.localizedDescription)")
         return 1

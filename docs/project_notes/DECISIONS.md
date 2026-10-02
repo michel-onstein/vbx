@@ -1490,3 +1490,20 @@ with no bead data. The Open panel refuses it and `vbx-cli` reports "no bead
 data found", so open the configuration instead. Neither bv nor the engine
 creates that directory when it records feedback, because `FeedbackData.Save`
 writes into an existing one.
+
+**The feedback flags are answered before discovery (vbx-v1t, 2026-10-02).**
+bv 0.25.2 handles `--feedback-accept`, `--feedback-ignore`, `--feedback-show`
+and `--feedback-reset` before it discovers a configuration and before it reads
+`--workspace`. It reads `feedback.json` in `loader.GetBeadsDir(cwd)` and looks
+a verdict's bead up in `datasource.LoadIssues("")`, the working directory as
+one repository. Where no `.beads` is reachable, show reports the defaults,
+reset cannot write, and a verdict fails with `Error loading issues: failed to
+read beads directory: …`, even on a member's bead that `--robot-triage` from
+the same directory recommends. `vbx-cli` matches it: those four flags open the
+engine with `OpenConfig.FeedbackCommand`, which skips discovery, ignores
+`Workspace`, and resolves the feedback directory as bv does. A load that fails
+does not fail that open, because show and reset never load. This is arguably a
+bv bug: the feedback handler predates workspace discovery and was never moved
+after it. vbx follows bv here, as the parity rule requires, and does not fix
+it. Triage's `feedback` block from a folder below a workspace root differs
+the same way and is tracked separately (vbx-15s).

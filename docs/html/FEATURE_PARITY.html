@@ -415,7 +415,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td>Loader warnings on stderr outside robot mode (<code>Warning: skipping …</code>, a discovered workspace's notice, <code>N repos failed to load</code>)</td>
-<td><code>vbx-cli --export</code>, <code>--export-md</code>, <code>--feedback-accept</code> and <code>--feedback-ignore</code> print them before their own output, as bv does; robot commands, <code>--feedback-show</code>, <code>--feedback-reset</code> and <code>BV_ROBOT=1</code> stay quiet. The engine's <code>info.load_stderr</code> holds the lines. Compared against bv over <code>Fixtures/dropped</code> as JSONL, <code>beads.db</code> and workspace (vbx-1l6)</td>
+<td><code>vbx-cli --export</code>, <code>--export-md</code>, <code>--feedback-accept</code> and <code>--feedback-ignore</code> print them before their own output, as bv does, though a verdict never prints the discovery notice because bv answers it before discovery (vbx-v1t); robot commands, <code>--feedback-show</code>, <code>--feedback-reset</code> and <code>BV_ROBOT=1</code> stay quiet. The engine's <code>info.load_stderr</code> holds the lines. Compared against bv over <code>Fixtures/dropped</code> as JSONL, <code>beads.db</code> and workspace (vbx-1l6)</td>
 <td>Engine + Native</td>
 <td>—</td>
 </tr>
@@ -1298,7 +1298,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--feedback-accept ID</code>, <code>--feedback-ignore ID</code>, <code>--feedback-reset</code>, <code>--feedback-show</code> (not robot commands: bv prints prose and writes <code>.beads/feedback.json</code>)</td>
-<td>✓ (vbx-rt3; two at once is a usage error where bv picks one)</td>
+<td>✓ (vbx-rt3; two at once is a usage error where bv picks one; answered before workspace discovery and <code>--workspace</code>, over the folder's own <code>.beads</code>, as bv does — vbx-v1t, ADR-026)</td>
 <td>Triage panel: Accept / Not now per recommendation, feedback count line, Reset (vbx-442)</td>
 <td>6</td>
 </tr>

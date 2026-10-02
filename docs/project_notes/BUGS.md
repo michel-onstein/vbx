@@ -4,6 +4,40 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — `vbx-cli`'s feedback flags answered over a discovered workspace
+
+**Symptom:** at a workspace root with no `.beads`, or in a folder below one,
+bv 0.25.2's `--feedback-accept no-such-bead` fails with `Error loading issues:
+failed to read beads directory: open <cwd>/.beads: no such file or directory`
+(exit 1). `vbx-cli` printed the discovery notice and the members' warnings,
+then `Issue not found: no-such-bead`. On a member's bead such as `api-1` it
+recorded the verdict where bv refuses it. Below a root that has a `.beads` of
+its own, it wrote to the root's `feedback.json`, and `--feedback-show` and
+`--feedback-reset` read and cleared that file instead of the folder's.
+(vbx-v1t)
+
+**Cause:** bv answers its four feedback flags in `cmd/bv/main.go` (~2441)
+before workspace auto-discovery (~2619) and before it reads `--workspace`.
+They use `loader.GetBeadsDir("")` and `datasource.LoadIssues("")`, the
+working directory as one repository. `vbx-cli` opened the engine the way
+every robot command does, with discovery, and the engine's `feedbackDir`
+for a workspace is the root's `.beads`.
+
+**Fix:** `OpenConfig.FeedbackCommand`, set by `vbx-cli` for the four flags
+(`answersBeforeDiscovery` in its command table). It skips discovery, ignores
+`Workspace`, loads the path as one repository, and resolves the feedback
+directory with `GetBeadsDir`. A failed load is kept rather than failing the
+open, and a verdict reports it in bv's text. A verdict now also reads
+`feedback.json` before it looks up the bead, as bv does, so an unparseable
+file is the error even for an unknown id.
+
+**Regression test:** `feedback_command_test.go`, `feedbackCommandSkipsDiscovery`
+in `EngineTests.swift`, and `test_feedback_before_discovery` in
+`test-parity-check.py`. Parity: `feedback in a discovered workspace` over
+`dropped (workspace)` and `feedback below a workspace root` over `discovery`.
+Both run on a copy of the whole workspace and compare every `feedback.json`
+left in it.
+
 ## 2026-10-02 — `vbx-cli` printed none of the loader's warnings where bv prints them
 
 **Symptom:** over a workspace whose load dropped records, bv 0.25.2 prints

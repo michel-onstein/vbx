@@ -111,9 +111,15 @@ public actor BeadsEngine {
     /// discovery from `path` — `bv --workspace`, which only `vbx-cli` passes.
     /// Without it, `path` is discovered by bv's precedence: a reachable
     /// `.beads` wins over a workspace configuration above it. See ADR-026.
+    ///
+    /// `feedbackCommand` opens `path` the way bv answers its feedback flags:
+    /// before any workspace discovery, with `workspace` ignored, and with
+    /// `feedback.json` in the beads directory bv resolves for `path`. A load
+    /// that fails does not fail the open — bv's show and reset never load —
+    /// but fails a recorded verdict, with bv's text. Only `vbx-cli` passes it.
     public func open(
         path: String, skipPhase2: Bool = false, liveTrackerActions: Bool = false,
-        exportHooks: Bool = false, workspace: String? = nil
+        exportHooks: Bool = false, workspace: String? = nil, feedbackCommand: Bool = false
     ) throws -> WorkspaceInfo {
         close()
 
@@ -124,6 +130,7 @@ public actor BeadsEngine {
                 "export_hooks": exportHooks,
             ] as [String: Any]
         if let workspace { config["workspace"] = workspace }
+        if feedbackCommand { config["feedback_command"] = true }
         let configData = try JSONSerialization.data(withJSONObject: config)
         let configString = String(decoding: configData, as: UTF8.self)
 

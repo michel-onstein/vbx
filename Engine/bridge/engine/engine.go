@@ -49,6 +49,14 @@ type OpenConfig struct {
 	// discovery — bv's --workspace, which vbx-cli's sets. Path is then not
 	// read. Empty means discover from Path, by bv's precedence (ADR-026).
 	Workspace string `json:"workspace,omitempty"`
+	// FeedbackCommand opens the session the way bv answers --feedback-accept,
+	// --feedback-ignore, --feedback-show and --feedback-reset: before it
+	// discovers a workspace or reads --workspace. Workspace is ignored, Path
+	// is read as a single repository, and feedback.json is the one in the
+	// beads directory bv resolves for Path. A load that fails does not fail
+	// the open, because bv's show and reset never load; it fails a verdict
+	// instead, with bv's text (vbx-v1t). See openForFeedback.
+	FeedbackCommand bool `json:"feedback_command,omitempty"`
 }
 
 // Session holds one loaded workspace and its analysis state.
@@ -95,6 +103,13 @@ type Session struct {
 	// feedbackWriteMu serialises the load-modify-save of a feedback write,
 	// so two verdicts recorded at once cannot each overwrite the other.
 	feedbackWriteMu sync.Mutex
+	// feedbackCommandDir, feedbackCommandDirErr and feedbackLoadErr are set
+	// only for a FeedbackCommand session: the beads directory bv resolved
+	// (or why it could not), and why the issues it scores a verdict against
+	// did not load. See openForFeedback.
+	feedbackCommandDir    string
+	feedbackCommandDirErr error
+	feedbackLoadErr       error
 
 	loadedAt time.Time
 
@@ -127,6 +142,10 @@ type Session struct {
 // flag, matching bv's two-phase contract.
 func Open(cfg OpenConfig) (*Session, error) {
 	s := &Session{config: cfg}
+	if cfg.FeedbackCommand {
+		s.openForFeedback()
+		return s, nil
+	}
 	if err := s.load(); err != nil {
 		return nil, err
 	}
@@ -237,15 +256,22 @@ func (s *Session) load() error {
 	if configPath := workspaceConfigFor(s.config); configPath != "" {
 		return s.loadWorkspaceSession(configPath)
 	}
+	_, err := s.loadSingle()
+	return err
+}
 
+// loadSingle loads Path as one repository, with no workspace discovery. On
+// failure it returns what bv would have printed while trying, so a caller
+// that reports the failure itself can print that first.
+func (s *Session) loadSingle() ([]string, error) {
 	src, kind, warnings, stderr, err := resolveSource(s.config.Path)
 	if err != nil {
-		return err
+		return stderr, err
 	}
 
 	records, read, complete, err := s.readSource(src, kind, &warnings, &stderr)
 	if err != nil {
-		return fmt.Errorf("loading %s: %w", src, err)
+		return stderr, fmt.Errorf("loading %s: %w", src, err)
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, nil)
@@ -262,7 +288,7 @@ func (s *Session) load() error {
 	s.analyzer, s.stats = an, stats
 	s.complete = complete
 	s.loadedAt = time.Now()
-	return nil
+	return nil, nil
 }
 
 // readSource parses one resolved source and binds every bead to its origin.
@@ -405,6 +431,15 @@ func (s *Session) Close() {
 
 // Call dispatches one method by name. req may be nil or empty.
 func (s *Session) Call(method string, req []byte) ([]byte, error) {
+	if s.config.FeedbackCommand {
+		// Opened for bv's feedback commands, which may have loaded nothing:
+		// anything else would answer over an empty or absent graph.
+		switch method {
+		case "info", "triage_feedback", "triage_feedback_record", "triage_feedback_reset":
+		default:
+			return nil, fmt.Errorf("method %q is not available to a session opened for feedback", method)
+		}
+	}
 	switch method {
 	case "info":
 		return s.info()
