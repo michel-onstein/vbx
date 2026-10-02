@@ -1273,9 +1273,11 @@ identical to <code>bv</code>:</p>
   <strong>Keychain</strong> rather than environment variables.</li>
 <li><strong>SVG/PNG graph snapshots</strong> — additionally available as drag-out from the graph canvas and
   as an <code>NSSharingService</code> provider.</li>
-<li><strong>Hooks</strong> — user shell commands around export phases. In the sandboxed app these run via a
-  user-approved <code>NSUserUnixTask</code> path or are disabled with an explanation pointing at
-  <code>vbx-cli</code>; the CLI keeps full hook behaviour.</li>
+<li><strong>Hooks</strong> — user shell commands around export phases (<code>.bv/hooks.yaml</code>). <code>vbx-cli</code>
+  runs them exactly as bv does, through bv's own <code>pkg/hooks</code>, with <code>--no-hooks</code> to skip
+  them; the engine runs them only for a session opened with <code>export_hooks</code>, which the app
+  never sets, so File → Export Report runs none. A user-approved <code>NSUserUnixTask</code> path for
+  the app remains a possibility, not a plan.</li>
 </ul>
 <hr />
 <h2 id="15-performance-budget"><a class="toclink" href="#15-performance-budget">15. Performance Budget</a></h2>

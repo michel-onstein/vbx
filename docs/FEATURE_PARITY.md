@@ -31,10 +31,10 @@ state. Built: the six new alert types with `suggested_action` and `labels`
 and in the app (vbx-upz), `.beads/recipes/*.yaml` recipe files — edited and
 deleted in their own file (vbx-7d5) — the multi-repository loader, triage
 feedback, `--export` reports in four formats (vbx-im9), `--search-min-score`
-with bv's guaranteed exact-ID hit (vbx-52c), and `--recipe` as a robot scope,
-by name or path (vbx-7d5). Not yet built, each with a child bead of epic
-vbx-htg: the app's search threshold control (vbx-c1j), export hooks around
-`vbx-cli --export` (vbx-uos), `load_stats` in the robot envelope (vbx-dv5),
+with bv's guaranteed exact-ID hit (vbx-52c), `--recipe` as a robot scope,
+by name or path (vbx-7d5), and `.bv/hooks.yaml` export hooks with `--no-hooks`
+in `vbx-cli` (vbx-uos). Not yet built, each with a child bead of epic
+vbx-htg: the app's search threshold control (vbx-c1j), `load_stats` in the robot envelope (vbx-dv5),
 and bv's `.beads`-first workspace discovery with `--workspace` (vbx-1y5). A row naming a bead is not built until
 that bead closes.
 
@@ -328,7 +328,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | WASM hybrid search scorer for the static bundle | Built and embedded as `bv` does | Engine | 7 |
 | Graph snapshots (SVG/PNG) | Export + drag-out from the canvas + Share sheet | Engine + Native | 3 |
 | Shell script emission | Export submenu; copy to clipboard | Engine + Native | 7 |
-| Hooks around export phases | **Not built** — `vbx-cli --export` runs no hooks and has no `--no-hooks` (vbx-uos); the sandboxed app cannot run them | Engine + Native | 7 |
+| Hooks around export phases (`.bv/hooks.yaml`, `--no-hooks`) | ✓ `vbx-cli --export` / `--export-md` run bv's own `pkg/hooks` around the write — pre-export before it (a failure aborts, exit 1), post-export after it (`on_error: fail` exits 1 after the summary), bv's `BV_*` environment with credential-bearing variables scrubbed — and `--no-hooks` skips them. Output, exit status, file and each hook's effects match bv in `parity-check.py` (vbx-uos). **Security:** a hook is a command the repository configures, run through `sh -c` with your user's rights — exactly as bv runs it, so exporting in an untrusted checkout runs its commands; pass `--no-hooks` there. The app runs none (§9) | Engine + Native | — |
 | `AGENTS.md` / `CLAUDE.md` blurb management | Menu item "Add bv blurb to AGENTS.md" | Engine + Native | 7 |
 | Self-update engine | Sparkle 2 with a signed appcast | Native | 7 |
 
@@ -365,6 +365,6 @@ decision, not an omission.
 | Terminal single-key shortcuts are opt-out, not the only binding | macOS users expect menu-driven `⌘` shortcuts; both are provided ([design doc §10.3](VBX_DESIGN.md#103-keyboard-model)) |
 | Correlation reads the git object store directly in the sandboxed app | The App Sandbox cannot spawn `git`; the CLI keeps the subprocess path |
 | Optional Core ML embedder for semantic search | Better on-device quality, but off by default because it changes ranking relative to the CLI |
-| Shell hooks restricted under the sandbox | Sandbox policy; `vbx-cli` retains full behaviour |
+| The app runs no export hooks | A hook is a repository-configured subprocess the App Sandbox forbids; the engine runs them only for a session opened with `export_hooks`, which only `vbx-cli` sets (vbx-uos). `vbx-cli` retains full behaviour |
 | ASCII sparklines and heatmaps become real charts | The whole point of a native UI |
 | No `source_authority` / `authority_hash` in the robot envelope | vbx resolves one source and ranks none, so a ported report would assert checks it never ran (ADR-023); vbx also keeps its own read of a `beads.db` (ADR-024) |

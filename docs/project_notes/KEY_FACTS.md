@@ -120,6 +120,14 @@ view snapshots for inspection.
   `docs/images/vbx-icon.png` for the README, so the two cannot drift — a test
   asserts they are pixel-identical. `scripts/make-icon.py <dir> --variants`
   re-renders the palettes that were considered. See ADR-008.
+- **`vbx-cli --export` runs the repository's `.bv/hooks.yaml`**, as
+  `bv --export` does: each hook is `sh -c <command>` with your user's rights,
+  read from the *working directory* (bv's choice, not `--path`). So exporting
+  in a checkout you do not trust runs its commands — pass `--no-hooks` there.
+  bv's executor strips credential-looking variables (`*TOKEN*`, `*SECRET*`,
+  `SSH_AUTH_SOCK`, …) from a hook's environment unless the hook's own `env:`
+  re-grants them. Only a session opened with `export_hooks` runs a hook, and
+  the app never opens one: the sandbox forbids the subprocess (vbx-uos).
 - **This repo's own `.beads` store is empty** (0 issues). Point vbx at
   `Fixtures/demo` for anything with a real dependency graph.
 - **bv's `--feedback-*` flags are not pinned by `SOURCE_DATE_EPOCH`.** The

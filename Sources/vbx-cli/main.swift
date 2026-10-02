@@ -446,9 +446,13 @@ func runExport(_ options: Options, path: String, engine: BeadsEngine) async -> I
     struct Reply: Decodable {
         let issueCount: Int
         let labelMatches: Int?
+        let hookOutput: String?
+        let hookFailed: Bool?
         private enum CodingKeys: String, CodingKey {
             case issueCount = "issue_count"
             case labelMatches = "label_matches"
+            case hookOutput = "hook_output"
+            case hookFailed = "hook_failed"
         }
     }
     do {
@@ -461,6 +465,15 @@ func runExport(_ options: Options, path: String, engine: BeadsEngine) async -> I
             complain("Warning: No issues found with label \"\(label)\"")
         }
         emit("Exporting \(reply.issueCount) issues to \(path)...")
+        // bv's hook lines, the summary and any failure, already formatted by
+        // bv's own code in the engine. All of it is stdout, as in bv, and a
+        // failed hook is bv's exit 1 with no "Done!".
+        // Through print, as emit is: a direct write would bypass print's
+        // buffer and land before the "Exporting" line on a pipe.
+        if let output = reply.hookOutput, !output.isEmpty {
+            print(output, terminator: "")
+        }
+        if reply.hookFailed == true { return 1 }
         emit("Done!")
         return 0
     } catch EngineError.callFailed(_, let message) {
@@ -511,6 +524,9 @@ struct Options {
     var exportFormat: String?
     var exportIncludeGraph: Bool?
     var exportTemplate: String?
+    /// bv's --no-hooks: skip `.bv/hooks.yaml` around an export. Accepted, and
+    /// meaningless, without one, as in bv.
+    var noHooks = false
     /// Every flag given, by name, so a modifier can be checked against the
     /// command it needs whether or not it carried a value.
     var given: Set<String> = []
@@ -577,6 +593,7 @@ func parseArguments() throws -> Options {
             } else {
                 options.exportIncludeGraph = true
             }
+        case "--no-hooks": options.noHooks = true
         case "--path": options.path = try next(arg)
         case "--format", "-f": options.format = try next(arg).lowercased()
         case "--json": options.format = "json"
@@ -776,6 +793,9 @@ func usageText() -> String {
         "  --export-template FILE",
         "                       A Go text/template for the Markdown report;",
         "                       --export-template= disables a recipe's",
+        "  --no-hooks           Skip .bv/hooks.yaml; by default its pre- and",
+        "                       post-export commands run around the write, as",
+        "                       bv runs them (they are the repository's commands)",
         "",
         "SEARCH (--robot-search):",
         "  --search QUERY       The query; a bead id returns that bead first",
@@ -900,7 +920,10 @@ func run() async -> Int32 {
         do {
             // Live tracker actions, as for the robot commands: a report's
             // per-bead claim commands come from the same binding (ADR-020).
-            _ = try await engine.open(path: options.path, liveTrackerActions: true)
+            // Export hooks are repository-configured commands, run as bv runs
+            // them; the CLI is never sandboxed, and the app never asks.
+            _ = try await engine.open(
+                path: options.path, liveTrackerActions: true, exportHooks: !options.noHooks)
         } catch {
             complain("Error: \(error.localizedDescription)")
             return 1

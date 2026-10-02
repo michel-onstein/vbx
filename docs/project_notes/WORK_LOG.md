@@ -5,6 +5,26 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — `vbx-cli --export` runs bv's export hooks, with `--no-hooks` (vbx-uos)
+
+bv 0.25.2 runs `.bv/hooks.yaml` around `--export` / `--export-md`; vbx-cli
+now does too, through bv's exported `pkg/hooks` — its loader, executor
+(environment, credential scrubbing, timeouts, `on_error`) and summary — so
+nothing about a hook is reimplemented. `export_report` runs them around the
+write only for a session opened with the new `export_hooks` option
+(`OpenConfig.ExportHooks`, `BeadsEngine.open(exportHooks:)`), which vbx-cli
+sets unless `--no-hooks` is given and the app never sets: a hook is a
+repository-configured subprocess the App Sandbox forbids, the ADR-020 pattern.
+The payload carries bv's stdout text (`hook_output`) and its exit 1
+(`hook_failed`) for the CLI to print. Parity: 12 new comparisons in
+`parity-check.py` — five hook configs (both phases passing, a pre-export
+failure, an `on_error: fail` post-export failure, a timeout with a tolerated
+pre-export failure, unparseable YAML) with and without `--no-hooks`, plus JSON
+and `--export-md` runs — each in a temporary copy of the demo, comparing
+exit, stdout (run times normalised), stderr, the report and each hook's
+marker file; 319 → 331 matches, 0 differences. Tests: `report_hooks_test.go`,
+`exportHooksCrossTheBridge`, `test_export_hooks`.
+
 ## 2026-10-02 — `--label` and `--recipe` scope every robot command bv scopes (vbx-shz)
 
 bv 0.25.2 applies its scope before every post-load handler, and vbx-cli now

@@ -856,9 +856,11 @@ identical to `bv`:
   **Keychain** rather than environment variables.
 - **SVG/PNG graph snapshots** — additionally available as drag-out from the graph canvas and
   as an `NSSharingService` provider.
-- **Hooks** — user shell commands around export phases. In the sandboxed app these run via a
-  user-approved `NSUserUnixTask` path or are disabled with an explanation pointing at
-  `vbx-cli`; the CLI keeps full hook behaviour.
+- **Hooks** — user shell commands around export phases (`.bv/hooks.yaml`). `vbx-cli`
+  runs them exactly as bv does, through bv's own `pkg/hooks`, with `--no-hooks` to skip
+  them; the engine runs them only for a session opened with `export_hooks`, which the app
+  never sets, so File → Export Report runs none. A user-approved `NSUserUnixTask` path for
+  the app remains a possibility, not a plan.
 
 ---
 

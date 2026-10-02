@@ -1073,6 +1073,10 @@ gates, in bv's order, with the claim command taken from the bead's actions.
   bv's claim, byte for byte.
 - `parity-check.py` compares `--robot-next` again, less the provenance envelope
   keys vbx-v57 owns (since settled by ADR-023).
+- Export hooks (`.bv/hooks.yaml`) follow the same pattern with their own open
+  option, `export_hooks`: `export_report` runs bv's `pkg/hooks` around the
+  write only when the caller says it may spawn, which vbx-cli does unless
+  `--no-hooks` is given and the app never does (vbx-uos).
 
 ---
 

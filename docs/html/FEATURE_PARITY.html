@@ -257,10 +257,10 @@ state. Built: the six new alert types with <code>suggested_action</code> and <co
 and in the app (vbx-upz), <code>.beads/recipes/*.yaml</code> recipe files — edited and
 deleted in their own file (vbx-7d5) — the multi-repository loader, triage
 feedback, <code>--export</code> reports in four formats (vbx-im9), <code>--search-min-score</code>
-with bv's guaranteed exact-ID hit (vbx-52c), and <code>--recipe</code> as a robot scope,
-by name or path (vbx-7d5). Not yet built, each with a child bead of epic
-vbx-htg: the app's search threshold control (vbx-c1j), export hooks around
-<code>vbx-cli --export</code> (vbx-uos), <code>load_stats</code> in the robot envelope (vbx-dv5),
+with bv's guaranteed exact-ID hit (vbx-52c), <code>--recipe</code> as a robot scope,
+by name or path (vbx-7d5), and <code>.bv/hooks.yaml</code> export hooks with <code>--no-hooks</code>
+in <code>vbx-cli</code> (vbx-uos). Not yet built, each with a child bead of epic
+vbx-htg: the app's search threshold control (vbx-c1j), <code>load_stats</code> in the robot envelope (vbx-dv5),
 and bv's <code>.beads</code>-first workspace discovery with <code>--workspace</code> (vbx-1y5). A row naming a bead is not built until
 that bead closes.</p>
 <p><strong>Verified rather than asserted.</strong> <code>scripts/parity-check.py</code> runs <code>vbx-cli</code> and
@@ -1391,10 +1391,10 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>7</td>
 </tr>
 <tr>
-<td>Hooks around export phases</td>
-<td><strong>Not built</strong> — <code>vbx-cli --export</code> runs no hooks and has no <code>--no-hooks</code> (vbx-uos); the sandboxed app cannot run them</td>
+<td>Hooks around export phases (<code>.bv/hooks.yaml</code>, <code>--no-hooks</code>)</td>
+<td>✓ <code>vbx-cli --export</code> / <code>--export-md</code> run bv's own <code>pkg/hooks</code> around the write — pre-export before it (a failure aborts, exit 1), post-export after it (<code>on_error: fail</code> exits 1 after the summary), bv's <code>BV_*</code> environment with credential-bearing variables scrubbed — and <code>--no-hooks</code> skips them. Output, exit status, file and each hook's effects match bv in <code>parity-check.py</code> (vbx-uos). <strong>Security:</strong> a hook is a command the repository configures, run through <code>sh -c</code> with your user's rights — exactly as bv runs it, so exporting in an untrusted checkout runs its commands; pass <code>--no-hooks</code> there. The app runs none (§9)</td>
 <td>Engine + Native</td>
-<td>7</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>AGENTS.md</code> / <code>CLAUDE.md</code> blurb management</td>
@@ -1516,8 +1516,8 @@ decision, not an omission.</p>
 <td>Better on-device quality, but off by default because it changes ranking relative to the CLI</td>
 </tr>
 <tr>
-<td>Shell hooks restricted under the sandbox</td>
-<td>Sandbox policy; <code>vbx-cli</code> retains full behaviour</td>
+<td>The app runs no export hooks</td>
+<td>A hook is a repository-configured subprocess the App Sandbox forbids; the engine runs them only for a session opened with <code>export_hooks</code>, which only <code>vbx-cli</code> sets (vbx-uos). <code>vbx-cli</code> retains full behaviour</td>
 </tr>
 <tr>
 <td>ASCII sparklines and heatmaps become real charts</td>

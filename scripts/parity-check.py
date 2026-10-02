@@ -718,6 +718,98 @@ def export_differences(vbx_run, bv_run) -> list[str]:
     return found
 
 
+# Export hooks: bv 0.25's .bv/hooks.yaml, run around --export (vbx-uos). Each
+# HOOK_CONFIGS entry is a hooks.yaml, written into a copy of the demo's .beads
+# in a temporary directory — both binaries' working directory, since bv reads
+# the file from there — and every one is exported with and without
+# --no-hooks. The hooks are harmless: each writes a marker beside the report,
+# recording what it saw (whether the report existed yet, the BV_* context, a
+# hook env entry expanded from it, and whether an ambient credential leaked
+# or was re-granted). Compared on exit status, stdout, stderr, the report and
+# every marker. The one volatile part, each successful hook's run time in the
+# summary, is normalised by HOOK_DURATION on both sides.
+HOOK_ENV = {"PARITY_SECRET_TOKEN": "hunter2"}
+# Go's Duration.String: "0s", "12ms", "1.002s", "1m0.5s", "1h2m3s".
+HOOK_DURATION = re.compile(r"\((?:[0-9.]+(?:ns|µs|ms|h|m|s))+\)")
+_HOOK_WITNESS = (
+    "'if [ -e \"$BV_EXPORT_PATH\" ]; then echo present; else echo absent; fi"
+    " > \"$BV_EXPORT_PATH.{phase}\"; printf \"%s|%s|%s|%s|%s|%s\\n\" \"$BV_EXPORT_PATH\""
+    " \"$BV_EXPORT_FORMAT\" \"$BV_ISSUE_COUNT\" \"$BV_TIMESTAMP\" \"$GREETING\""
+    " \"$PARITY_SECRET_TOKEN|$REGRANTED\" >> \"$BV_EXPORT_PATH.{phase}\"; echo quiet'"
+)
+_HOOK_ENV_BLOCK = ("      env:\n        GREETING: \"hello ${BV_ISSUE_COUNT}\"\n"
+                   "        REGRANTED: \"${PARITY_SECRET_TOKEN}\"\n")
+HOOK_CONFIGS = {
+    # Both phases succeed; the pre hook sees no report, the post hook sees it.
+    "pass": ("hooks:\n  pre-export:\n    - name: before\n      command: "
+             + _HOOK_WITNESS.format(phase="pre") + "\n" + _HOOK_ENV_BLOCK
+             + "  post-export:\n    - command: " + _HOOK_WITNESS.format(phase="post") + "\n"
+             + _HOOK_ENV_BLOCK),
+    # A pre-export failure (on_error defaults to fail) stops the write.
+    "pre-fail": ("hooks:\n  pre-export:\n    - name: gate\n"
+                 "      command: 'echo nope >&2; exit 3'\n"
+                 "  post-export:\n    - command: " + _HOOK_WITNESS.format(phase="post") + "\n"),
+    # Post-export failures: one tolerated (the default), one on_error: fail.
+    "post-fail": ("hooks:\n  post-export:\n    - name: tolerated\n"
+                  "      command: 'echo soft >&2; exit 1'\n"
+                  "    - name: strict\n      command: 'echo hard >&2; exit 2'\n"
+                  "      on_error: fail\n"),
+    # A timeout, an invalid on_error (warned about only internally) and a
+    # pre-export hook told to continue past its own failure.
+    "lenient": ("hooks:\n  pre-export:\n    - name: shrug\n      command: 'exit 4'\n"
+                "      on_error: continue\n"
+                "  post-export:\n    - name: slow\n      command: 'exec sleep 2'\n"
+                "      timeout: 200ms\n      on_error: sometimes\n"),
+    # A file that does not parse is bv's warning, and the export goes on.
+    "unreadable": "hooks: [not, a, map\n",
+}
+HOOK_COMPARISONS = [
+    {"name": f"export hooks:{config} {' '.join(args)}".strip(), "config": config,
+     "args": args, "only": {"demo"}}
+    for config in HOOK_CONFIGS
+    for args in ([], ["--no-hooks"])
+] + [
+    {"name": f"{flag.removeprefix('--')} hooks:pass {' '.join(args)}".strip(), "config": "pass",
+     "flag": flag, "args": args, "only": {"demo"}}
+    for flag, args in (("--export", ["--export-format", "json"]), ("--export-md", []))
+]
+
+
+def build_hook_workspace(source: Path, destination: Path, config: str) -> Path:
+    """Copies `source`'s .beads to `destination` beside a .bv/hooks.yaml."""
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(source / ".beads", destination / ".beads")
+    (destination / ".bv").mkdir()
+    (destination / ".bv" / "hooks.yaml").write_text(HOOK_CONFIGS[config])
+    return destination
+
+
+def run_hooked_export(binary: str, flag: str, args: list[str], workspace: Path,
+                      out_dir: Path) -> tuple[tuple[int, str, str, bytes | None], dict[str, str]]:
+    """Runs one export over a hooked workspace; returns run_export's tuple, the
+    summary's run times normalised, and every marker the hooks left."""
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir()
+    out = out_dir / "report"
+    status, stdout, stderr = run(binary, [flag, str(out), *args], workspace, HOOK_ENV)
+    report = out.read_bytes() if out.exists() else None
+    markers = {path.name: path.read_text() for path in sorted(out_dir.iterdir()) if path != out}
+    return (status, HOOK_DURATION.sub("(<duration>)", stdout), stderr, report), markers
+
+
+def hook_differences(vbx_run, bv_run) -> list[str]:
+    """Every difference between two hooked exports, markers included."""
+    (vbx_export, vbx_markers), (bv_export, bv_markers) = vbx_run, bv_run
+    found = export_differences(vbx_export, bv_export)
+    for name in sorted(set(vbx_markers) | set(bv_markers)):
+        left, right = vbx_markers.get(name), bv_markers.get(name)
+        if left != right:
+            found.append(f"marker {name}: {left!r} vs {right!r}")
+    return found
+
+
 def select_keys(payload, keys):
     """Keeps `keys` of a dict payload; a key neither side has stays absent."""
     if not keys or not isinstance(payload, dict):
@@ -1274,6 +1366,32 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
             vbx_run = run_export(vbx, flag, entry["args"], places, workspace)
             bv_run = run_export(bv, flag, entry["args"], places, workspace)
         differences = export_differences(vbx_run, bv_run)
+        if differences:
+            differed.append((name, differences))
+        else:
+            matched.append(name)
+
+    for entry in HOOK_COMPARISONS:
+        name = entry["name"]
+        flag = entry.get("flag", "--export")
+        if flag.removeprefix("--") not in available:
+            missing.append(name)
+            continue
+        if only_named and label not in entry["only"]:
+            skipped.append((name, not_named))
+            continue
+        if label not in entry["only"]:
+            skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
+            continue
+        if bv_skip:
+            skipped.append((name, bv_skip))
+            continue
+        with tempfile.TemporaryDirectory(prefix="vbx-parity-hooks-") as scratch:
+            hooked = build_hook_workspace(workspace, Path(scratch) / "workspace", entry["config"])
+            out_dir = Path(scratch) / "out"
+            vbx_run = run_hooked_export(vbx, flag, entry["args"], hooked, out_dir)
+            bv_run = run_hooked_export(bv, flag, entry["args"], hooked, out_dir)
+        differences = hook_differences(vbx_run, bv_run)
         if differences:
             differed.append((name, differences))
         else:
