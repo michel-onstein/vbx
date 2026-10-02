@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.28.2 — 2026-10-02
+
+### Fixes
+
+- Every report the engine fails to build shows as unavailable, never as an empty one ([#132](https://github.com/michel-onstein/vbx/pull/132))
+
 ## 0.28.1 — 2026-10-02
 
 ### Fixes
