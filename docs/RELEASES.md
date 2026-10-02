@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.16.0 — 2026-10-02
+
+### Features
+
+- Export reports as Markdown, JSON, CSV or Mermaid, from vbx-cli --export and File → Export Report ([#113](https://github.com/michel-onstein/vbx/pull/113))
+
 ## 0.15.1 — 2026-10-02
 
 ### Fixes
