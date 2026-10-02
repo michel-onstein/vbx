@@ -75,7 +75,7 @@ func asyncPathMatchesCache() async {
 
     let cached = store.knownUnblocks("vbx-3")
     let fetched = await store.unblocks("vbx-3")
-    #expect(Set(fetched) == Set(cached ?? []), "cache and engine disagree")
+    #expect(Set(fetched ?? []) == Set(cached ?? []), "cache and engine disagree")
 
     // A bead outside the plan and triage falls through to the engine, and the
     // result is remembered so the view stops flashing on reselection.

@@ -27,7 +27,11 @@ struct SearchScopeBar: View {
                 .fixedSize()
                 .help(store.searchMode.explanation)
 
-                if store.searchMode == .hybrid {
+                if store.searchMode == .hybrid,
+                    let reason = store.unavailableReason(.searchPresets)
+                {
+                    unavailable(.searchPresets, reason)
+                } else if store.searchMode == .hybrid {
                     Picker("Preset", selection: $store.searchPreset) {
                         ForEach(store.searchPresets.presets) { preset in
                             Text(preset.displayName).tag(preset.name)
@@ -69,7 +73,11 @@ struct SearchScopeBar: View {
 
                 Spacer()
 
-                if store.isUsingEngineSearch {
+                if store.searchMode == .hybrid, let reason = store.unavailableReason(.search) {
+                    // The list falls back to the fuzzy ranking, which is
+                    // still a ranking — so say this is not the one chosen.
+                    unavailable(.search, reason)
+                } else if store.isUsingEngineSearch {
                     Text(
                         "\(store.searchResults.results.count) of "
                             + "\(store.searchResults.totalBeads) · \(store.searchResults.provider)"
@@ -89,6 +97,20 @@ struct SearchScopeBar: View {
             .onChange(of: store.searchMode) { Task { await store.runEngineSearch() } }
             .onChange(of: store.searchPreset) { Task { await store.runEngineSearch() } }
         }
+    }
+
+    /// One line, because the bar is one line high: the title, the reason as
+    /// its tooltip, and the retry.
+    private func unavailable(_ report: EngineReport, _ reason: String) -> some View {
+        HStack(spacing: 6) {
+            Label(EngineReportText.title(report), systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            Button("Try Again") { Task { await store.retry(report) } }
+                .buttonStyle(.link)
+                .font(.caption)
+        }
+        .help(EngineReportText.unavailable(report, reason))
     }
 }
 

@@ -241,6 +241,85 @@ public final class ProjectStore: ObservableObject {
     /// than as a load error: the workspace itself is fine.
     @Published public private(set) var reportError: String?
 
+    // MARK: Unavailable reports
+
+    /// Why each report the engine could not build is missing, keyed by report.
+    ///
+    /// **An unavailable report is shown as unavailable, never as an empty
+    /// one.** The report's own property holds its empty value meanwhile, so
+    /// nothing has to unwrap it, but a view showing it asks
+    /// ``unavailableReason(_:)`` first. See ``EngineReport``.
+    @Published public internal(set) var unavailable: [EngineReport: String] = [:]
+
+    /// Why `report` is unavailable, or nil when its last read succeeded.
+    public func unavailableReason(_ report: EngineReport) -> String? {
+        unavailable[report]
+    }
+
+    /// Failures to answer in place of the engine, by report: the seam a test
+    /// injects an engine failure through. Consulted by ``fetch(_:_:)``, so a
+    /// test proves the call site goes through it rather than past it.
+    var injectedFailures: [EngineReport: any Error] = [:]
+
+    /// Swallows an injected failure the way every call site did before
+    /// vbx-twy — an empty report and nothing on record — so a snapshot can
+    /// draw the panel as it looked then, beside the panel as it looks now.
+    /// A view's `.task` re-reads during a render, which is why the old look
+    /// cannot be had by clearing the reason alone.
+    var swallowsInjectedFailures = false
+
+    /// The one way the store reads a report it displays.
+    ///
+    /// Publishes the outcome under `report` — the failure on a throw, nothing
+    /// on success — and returns the value, or nil when there is none. A caller
+    /// falls back to the report's empty value, which is safe only because the
+    /// failure is now on record for the view to show instead of it.
+    func fetch<Value>(
+        _ report: EngineReport, _ call: () async throws -> Value
+    ) async -> Value? {
+        do {
+            if let failure = injectedFailures[report] {
+                if swallowsInjectedFailures { return nil }
+                throw failure
+            }
+            let value = try await call()
+            unavailable[report] = nil
+            return value
+        } catch {
+            unavailable[report] = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Reads `report` again, through whichever load produces it — the Try
+    /// Again of its unavailable state.
+    public func retry(_ report: EngineReport) async {
+        switch report {
+        case .orphans, .hotspots, .correlationFeedback:
+            await loadHistory(refresh: true)
+        case .labelHealth, .labelFlow, .labelAttention, .repos, .triage, .triageFeedback:
+            await reload(force: true)
+        case .alerts, .baseline:
+            await refreshAlerts()
+        case .searchPresets:
+            await loadSearchPresets()
+        case .search:
+            await runEngineSearch()
+        case .sprints:
+            await loadSprints()
+        case .capacity:
+            await loadCapacity()
+        case .recipes:
+            await loadRecipes()
+        case .revisions:
+            await loadRevisions()
+        case .causality, .fileLookup, .patch, .unblocks, .cloudflareInstructions:
+            // Read for one bead, path or commit, so the view that asked
+            // repeats its own question.
+            break
+        }
+    }
+
     // MARK: Correlation
     //
     // History is loaded on demand rather than with the workspace: walking the
@@ -248,12 +327,6 @@ public final class ProjectStore: ObservableObject {
     // sessions never open the History view at all.
     @Published public private(set) var history: HistoryReport = .empty
     @Published public private(set) var orphans: OrphanReport = .empty
-    /// Why the orphan report could not be built, while the rest of the
-    /// history could. **An unavailable report is shown as unavailable, never
-    /// as an empty one**: an empty list says "every commit belongs to a bead",
-    /// which is a claim, and the Orphans tab once made it on every repository
-    /// whose detector failed (vbx-lh0).
-    @Published public private(set) var orphansError: String?
     @Published public private(set) var hotspots: FileHotspots = .empty
     @Published public private(set) var feedback: CorrelationFeedbackReport = .empty
     @Published public private(set) var historyLoaded = false
@@ -725,6 +798,9 @@ public final class ProjectStore: ObservableObject {
                 // no repository at all, where no walk runs to overwrite it, it
                 // would simply stay.
                 resetHistory()
+                // Every failure on record was a failure to read the
+                // workspace being left.
+                unavailable = [:]
                 // Verdicts name beads of the workspace being left.
                 triageVerdicts = [:]
                 triageFeedbackError = nil
@@ -1024,11 +1100,12 @@ public final class ProjectStore: ObservableObject {
         plan = try await engine.executionPlan()
         edges = try await engine.graphEdges()
         // Label analytics are advisory, so a failure here must not block the
-        // load — a workspace with no labels at all is perfectly valid.
-        labelAnalysis = (try? await engine.labelHealth()) ?? .empty
-        labelFlow = (try? await engine.labelFlow()) ?? .empty
-        labelAttention = (try? await engine.labelAttention()) ?? .empty
-        repos = (try? await engine.repos()) ?? .empty
+        // load — but it is published, not swallowed: a failed report shown as
+        // "No labels" is a claim about the workspace nobody made.
+        labelAnalysis = await fetch(.labelHealth) { try await engine.labelHealth() } ?? .empty
+        labelFlow = await fetch(.labelFlow) { try await engine.labelFlow() } ?? .empty
+        labelAttention = await fetch(.labelAttention) { try await engine.labelAttention() } ?? .empty
+        repos = await fetch(.repos) { try await engine.repos() } ?? .empty
         // Spotlight is refreshed on every load so a deleted bead stops being
         // findable; the indexer replaces rather than merges for that reason.
         await updateSpotlightIndex()
@@ -1036,7 +1113,7 @@ public final class ProjectStore: ObservableObject {
         // thing a user wants to see without asking.
         await refreshAlerts()
         // Triage depends on Phase-2 scores; it is refreshed again once they land.
-        await publishTriage((try? await engine.triage()) ?? .empty)
+        await publishTriage(await fetch(.triage) { try await engine.triage() })
         rebuildUnblocksCache()
         // Drop ids the reload removed, and fall back to the first row when
         // that empties the selection — an empty inspector after a reload reads
@@ -1073,7 +1150,7 @@ public final class ProjectStore: ObservableObject {
             // Recommendations are scored from PageRank and betweenness, so
             // they are only meaningful once Phase 2 has landed.
             if triageNeedsRefresh {
-                await publishTriage((try? await engine.triage()) ?? triage)
+                await publishTriage(await fetch(.triage) { try await engine.triage() })
                 triageNeedsRefresh = false
             }
         } catch {
@@ -1090,7 +1167,7 @@ public final class ProjectStore: ObservableObject {
 
     public func loadSearchPresets() async {
         guard isLoaded, searchPresets.presets.isEmpty else { return }
-        searchPresets = (try? await engine.searchPresets()) ?? .empty
+        searchPresets = await fetch(.searchPresets) { try await engine.searchPresets() } ?? .empty
     }
 
     /// Runs the engine-backed search for the current query text.
@@ -1108,11 +1185,16 @@ public final class ProjectStore: ObservableObject {
 
         searchInFlight = true
         defer { searchInFlight = false }
+        // A failure leaves the list on the fuzzy ranking, which is still a
+        // ranking — so the scope bar says hybrid is unavailable, or the list
+        // would quietly be ordered by something other than what was chosen.
         searchResults =
-            (try? await engine.search(
-                text, mode: searchMode, limit: 50,
-                preset: searchWeights == nil ? searchPreset : nil,
-                weights: searchWeights)) ?? .empty
+            await fetch(.search) {
+                try await engine.search(
+                    text, mode: searchMode, limit: 50,
+                    preset: searchWeights == nil ? searchPreset : nil,
+                    weights: searchWeights)
+            } ?? .empty
     }
 
     /// True when the list should show engine-ranked results.
@@ -1130,9 +1212,11 @@ public final class ProjectStore: ObservableObject {
         guard isLoaded else { return }
         sprintError = nil
 
-        sprints = (try? await engine.sprints()) ?? .empty
+        sprints = await fetch(.sprints) { try await engine.sprints() } ?? .empty
         // No sprint file at all is a normal state for a workspace, not an
         // error, so it is reported by the empty list rather than a message.
+        // The engine answers it with an empty list; a throw is a failure, and
+        // is on record as one.
         guard !sprints.sprints.isEmpty else {
             burndown = .empty
             await loadCapacity()
@@ -1153,14 +1237,14 @@ public final class ProjectStore: ObservableObject {
     /// Re-runs the capacity simulation at the current agent count.
     public func loadCapacity() async {
         guard isLoaded else { return }
-        capacity = (try? await engine.capacity(agents: capacityAgents)) ?? .empty
+        capacity = await fetch(.capacity) { try await engine.capacity(agents: capacityAgents) } ?? .empty
     }
 
     // MARK: - Recipes
 
     public func loadRecipes() async {
         guard isLoaded else { return }
-        recipes = (try? await engine.recipes()) ?? .empty
+        recipes = await fetch(.recipes) { try await engine.recipes() } ?? .empty
     }
 
     /// Applies a recipe: filter, sort and view, together.
@@ -1549,12 +1633,24 @@ public final class ProjectStore: ObservableObject {
     /// none, the engine's `triage_feedback` answers instead, so the panel can
     /// still say how many verdicts the weights wait for — a number that is
     /// bv's, not one written down here.
-    private func publishTriage(_ fresh: Triage) async {
-        triage = fresh
-        if let block = fresh.feedback {
+    ///
+    /// A failed triage (nil) clears the last one rather than keeping it: after
+    /// Phase 2 lands, the old ranking was scored without the metrics it now
+    /// needs, so it is as wrong as an empty one — and the panels say the
+    /// ranking is unavailable instead of "Nothing is actionable right now".
+    private func publishTriage(_ fresh: Triage?) async {
+        triage = fresh ?? .empty
+        if let block = fresh?.feedback {
             triageFeedbackState = block
+            unavailable[.triageFeedback] = nil
+        } else if fresh == nil {
+            // No triage, so no feedback block to describe it either; the
+            // triage's own failure is the one on record.
+            triageFeedbackState = nil
+            unavailable[.triageFeedback] = nil
         } else {
-            triageFeedbackState = (try? await engine.triageFeedback())?.feedback
+            triageFeedbackState =
+                await fetch(.triageFeedback) { try await engine.triageFeedback() }?.feedback
         }
     }
 
@@ -1607,11 +1703,13 @@ public final class ProjectStore: ObservableObject {
         let previous = Set(alerts.alerts.filter { $0.severity == .critical }.map(\.id))
 
         alerts =
-            (try? await engine.alerts(
-                severity: alertSeverityFilter,
-                type: alertTypeFilter,
-                alertLabel: alertLabelFilter)) ?? .empty
-        baseline = (try? await engine.baselineInfo()) ?? .empty
+            await fetch(.alerts) {
+                try await engine.alerts(
+                    severity: alertSeverityFilter,
+                    type: alertTypeFilter,
+                    alertLabel: alertLabelFilter)
+            } ?? .empty
+        baseline = await fetch(.baseline) { try await engine.baselineInfo() } ?? .empty
 
         // Only alerts that were not there a moment ago are announced. Without
         // this every reload would re-notify about the same standing problem,
@@ -1643,7 +1741,15 @@ public final class ProjectStore: ObservableObject {
     /// Loads the revisions the scrubber can jump to.
     public func loadRevisions() async {
         guard isLoaded, revisions.revisions.isEmpty else { return }
-        revisions = (try? await engine.revisions()) ?? .empty
+        // No repository is a normal state with no revisions in it, not a
+        // failed read: the engine throws for it, and showing that as
+        // "Revisions unavailable" would report a fault that is not there.
+        guard hasGitRepository else {
+            revisions = .empty
+            unavailable[.revisions] = nil
+            return
+        }
+        revisions = await fetch(.revisions) { try await engine.revisions() } ?? .empty
     }
 
     /// Compares the current bead set against `revision`.
@@ -1721,11 +1827,19 @@ public final class ProjectStore: ObservableObject {
     private func resetHistory() {
         history = .empty
         orphans = .empty
-        orphansError = nil
         hotspots = .empty
         feedback = .empty
+        forgetHistoryFailures()
         historyLoaded = false
         historyError = nil
+    }
+
+    /// Drops the failures of the reports read alongside the walk: they
+    /// describe a history that is no longer the one on offer.
+    private func forgetHistoryFailures() {
+        for report in EngineReport.allCases where report.isHistory {
+            unavailable[report] = nil
+        }
     }
 
     /// Starts the correlation walk in the background, for the workspace that
@@ -1781,9 +1895,15 @@ public final class ProjectStore: ObservableObject {
             history = report
             // These read the same cached report, so they are cheap once the
             // walk is done.
-            publishOrphans(await orphanResult())
-            hotspots = (try? await engine.fileHotspots()) ?? .empty
-            feedback = (try? await engine.correlationFeedback()) ?? .empty
+            //
+            // A failure clears the report rather than keeping the last one:
+            // after a refresh the old list describes a history that has moved
+            // on, so it is as wrong as an empty one.
+            orphans = await fetch(.orphans) { try await engine.orphanCommits() } ?? .empty
+            hotspots = await fetch(.hotspots) { try await engine.fileHotspots() } ?? .empty
+            feedback =
+                await fetch(.correlationFeedback) { try await engine.correlationFeedback() }
+                ?? .empty
             guard generation == historyGeneration else { return }
             historyLoaded = true
         } catch {
@@ -1794,33 +1914,11 @@ public final class ProjectStore: ObservableObject {
             historyLoaded = false
             history = .empty
             orphans = .empty
-            orphansError = nil
             hotspots = .empty
-        }
-    }
-
-    /// The orphan report, or why the engine could not build it.
-    private func orphanResult() async -> Result<OrphanReport, any Error> {
-        do {
-            return .success(try await engine.orphanCommits())
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    /// Publishes an orphan report, or its failure in place of it.
-    ///
-    /// A failure clears the report rather than keeping the last one: after a
-    /// verdict or a refresh the old list describes a history that has moved
-    /// on, so it is as wrong as an empty one.
-    func publishOrphans(_ result: Result<OrphanReport, any Error>) {
-        switch result {
-        case .success(let report):
-            orphans = report
-            orphansError = nil
-        case .failure(let error):
-            orphans = .empty
-            orphansError = error.localizedDescription
+            feedback = .empty
+            // The whole history is unavailable, and `historyError` says so
+            // once; a failure per report under it would say it six times.
+            forgetHistoryFailures()
         }
     }
 
@@ -1830,24 +1928,23 @@ public final class ProjectStore: ObservableObject {
     }
 
     /// One bead's causal chain, fetched on demand.
+    ///
+    /// Nil when the engine could not build it, with the reason under
+    /// ``EngineReport/causality``.
     public func causality(for id: Issue.ID) async -> CausalityResult? {
-        try? await engine.causality(id)
+        await fetch(.causality) { try await engine.causality(id) }
     }
 
-    public func relatedWork(for id: Issue.ID) async -> RelatedWork? {
-        try? await engine.relatedWork(id)
-    }
-
+    /// Which beads touched `path`; nil when the engine could not say, with
+    /// the reason under ``EngineReport/fileLookup``.
     public func beads(touching path: String) async -> FileBeadLookup? {
-        try? await engine.beads(touching: path)
+        await fetch(.fileLookup) { try await engine.beads(touching: path) }
     }
 
-    public func fileRelations(for path: String) async -> CoChangeResult? {
-        try? await engine.fileRelations(path)
-    }
-
+    /// One commit's diff; nil when the engine could not produce it, with the
+    /// reason under ``EngineReport/patch``.
     public func patch(sha: String, path: String? = nil) async -> CommitPatch? {
-        try? await engine.commitPatch(sha: sha, path: path)
+        await fetch(.patch) { try await engine.commitPatch(sha: sha, path: path) }
     }
 
     /// Records a verdict on one commit-to-bead link and republishes the report.
@@ -1865,8 +1962,10 @@ public final class ProjectStore: ObservableObject {
                 try await engine.rejectCorrelation(sha: sha, beadID: beadID, reason: reason)
             }
             history = try await engine.history()
-            publishOrphans(await orphanResult())
-            feedback = (try? await engine.correlationFeedback()) ?? feedback
+            orphans = await fetch(.orphans) { try await engine.orphanCommits() } ?? .empty
+            feedback =
+                await fetch(.correlationFeedback) { try await engine.correlationFeedback() }
+                ?? .empty
         } catch {
             historyError = error.localizedDescription
         }
@@ -2020,8 +2119,10 @@ public final class ProjectStore: ObservableObject {
     /// What to run for a Cloudflare deployment, which needs `wrangler`.
     public func cloudflareInstructions(project: String) async -> DeployInstructions {
         guard siteBundle.isBuilt else { return .empty }
-        return (try? await engine.cloudflareInstructions(
-            bundlePath: siteBundle.outputDir, project: project)) ?? .empty
+        return await fetch(.cloudflareInstructions) {
+            try await engine.cloudflareInstructions(
+                bundlePath: siteBundle.outputDir, project: project)
+        } ?? .empty
     }
 
     /// Clears the wizard's state so a second run starts fresh.
@@ -2038,9 +2139,15 @@ public final class ProjectStore: ObservableObject {
     ///
     /// Answers from the cache when the plan or triage already reported it,
     /// falling back to the engine for beads neither covers.
-    public func unblocks(_ id: String) async -> [String] {
+    ///
+    /// Nil when the engine could not say, and nothing is cached: an empty
+    /// list is "closing this unblocks nothing", which the failed call never
+    /// established, and caching it would show that zero for the session.
+    public func unblocks(_ id: String) async -> [String]? {
         if let cached = unblocksCache[id] { return cached }
-        let fetched = (try? await engine.unblocks(id)) ?? []
+        guard let fetched = await fetch(.unblocks, { try await engine.unblocks(id) }) else {
+            return nil
+        }
         unblocksCache[id] = fetched
         return fetched
     }

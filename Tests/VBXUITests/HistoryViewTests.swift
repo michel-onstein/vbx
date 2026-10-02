@@ -147,48 +147,8 @@ struct HistoryViewTests {
         await store.loadHistory()
 
         #expect(store.historyError == nil, "\(store.historyError ?? "")")
-        #expect(store.orphansError == nil, "\(store.orphansError ?? "")")
+        #expect(store.unavailableReason(.orphans) == nil, "\(store.unavailable)")
         #expect(store.orphans.stats.totalCommits == 4)
-        await store.close()
-    }
-
-    @Test("A failed orphan report is unavailable, never empty")
-    func orphanFailureIsShown() async throws {
-        let (store, directory) = try await Fixture.historyStore()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        await store.loadHistory()
-        #expect(store.orphansError == nil, "\(store.orphansError ?? "")")
-
-        let empty = try Snapshot.render(
-            HistoryView(tab: .orphans).environmentObject(store),
-            name: "history-orphans-empty",
-            size: CGSize(width: 900, height: 600)
-        )
-
-        store.publishOrphans(.failure(EngineError.callFailed(
-            method: "orphans", message: "detecting orphans: unsupported git invocation")))
-        #expect(store.orphansError == "Engine call orphans failed: "
-            + "detecting orphans: unsupported git invocation")
-        #expect(store.orphans.candidates.isEmpty)
-        // History itself is still loaded: only the one report is unavailable.
-        #expect(store.historyLoaded)
-
-        let failed = try Snapshot.render(
-            HistoryView(tab: .orphans).environmentObject(store),
-            name: "history-orphans-unavailable",
-            size: CGSize(width: 900, height: 600)
-        )
-        // The tab below the header: an empty report is one caption line, the
-        // unavailable state a symbol, a title, the message and a button. The
-        // two drew the same before vbx-lh0.
-        let body = CGRect(x: 0, y: 140, width: 900, height: 460)
-        #expect(
-            failed.inkCoverage(in: body) > 3 * empty.inkCoverage(in: body),
-            "unavailable \(failed.inkCoverage(in: body)), empty \(empty.inkCoverage(in: body))")
-
-        // A later success clears the failure.
-        store.publishOrphans(.success(.empty))
-        #expect(store.orphansError == nil)
         await store.close()
     }
 

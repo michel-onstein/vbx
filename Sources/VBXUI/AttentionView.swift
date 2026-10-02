@@ -14,6 +14,11 @@ struct AttentionView: View {
     private var attention: LabelAttention { store.labelAttention }
 
     var body: some View {
+        rankingOrEmpty.reportAvailability(.labelAttention)
+    }
+
+    @ViewBuilder
+    private var rankingOrEmpty: some View {
         if attention.labels.isEmpty {
             EmptyStateView(
                 symbol: "exclamationmark.bubble",

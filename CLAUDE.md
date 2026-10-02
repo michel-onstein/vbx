@@ -40,6 +40,16 @@ them.
   omitted rather than zero-filled, and the UI shows the metric's status. Note
   `phase2Ready` and `hasPhase2Values` are different: everything-skipped is
   "ready" with nothing in it.
+- **A report the engine failed to build is unavailable, never empty.** Never
+  read a displayed report with `(try? …) ?? .empty`: every panel once did, and
+  drew "No alerts", "No labels" or a zero for a call that failed. Read it
+  through `ProjectStore.fetch(.report) { … }`, which records the failure in
+  `unavailable`; the view checks `unavailableReason(_:)` and draws
+  `UnavailableReportView` / `UnavailableReportLabel`, or a dash for a count.
+  A new report is a new `EngineReport` case — `UnavailableReportTests` runs
+  every case, so one that bypasses `fetch` fails it. A normal empty state the
+  engine *throws* for (revisions outside git) is guarded before the call, not
+  swallowed. See BUGS.md, 2026-10-02 (vbx-twy).
 - **Decoding never drops a record.** Status, type and dependency-type enums are
   open. A dropped issue silently changes every downstream metric. **Analysis is
   a different set:** like bv 0.25, the engine analyses every record *except

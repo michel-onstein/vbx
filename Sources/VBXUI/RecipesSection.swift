@@ -35,6 +35,9 @@ struct SidebarRecipesSection: View {
                 .buttonStyle(.plain)
             }
 
+            if let reason = store.unavailableReason(.recipes) {
+                UnavailableReportLabel(report: .recipes, reason: reason)
+            }
             ForEach(store.recipes.recipes) { entry in
                 row(entry)
             }

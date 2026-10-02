@@ -243,6 +243,48 @@ struct RenderResult {
         return nil
     }
 
+    /// The fraction of pixels within `region` (points from the top-left) that
+    /// differ from the same pixel of `other`, a render of the same size.
+    ///
+    /// Ink coverage cannot tell two different drawings of equal density apart:
+    /// "No labels" and "Label health unavailable" are each a symbol, a title
+    /// and a line of text in the middle of the pane, and their coverage agreed
+    /// to four decimal places. This compares what is drawn, not how much.
+    func difference(from other: RenderResult, in region: CGRect) -> Double {
+        guard width == other.width, height == other.height,
+            let data = image.dataProvider?.data, let ptr = CFDataGetBytePtr(data),
+            let otherData = other.image.dataProvider?.data,
+            let otherPtr = CFDataGetBytePtr(otherData)
+        else { return 1 }
+        let bytesPerPixel = image.bitsPerPixel / 8
+        let bytesPerRow = image.bytesPerRow
+        let otherBytesPerPixel = other.image.bitsPerPixel / 8
+        let otherBytesPerRow = other.image.bytesPerRow
+        guard bytesPerPixel >= 3, otherBytesPerPixel >= 3 else { return 1 }
+
+        let scale = CGFloat(width) / CGFloat(pointWidth)
+        let minX = max(0, Int(region.minX * scale))
+        let minY = max(0, Int(region.minY * scale))
+        let maxX = min(width, Int(region.maxX * scale))
+        let maxY = min(height, Int(region.maxY * scale))
+        guard minX < maxX, minY < maxY else { return 0 }
+
+        var differing = 0
+        for y in minY..<maxY {
+            for x in minX..<maxX {
+                let a = y * bytesPerRow + x * bytesPerPixel
+                let b = y * otherBytesPerRow + x * otherBytesPerPixel
+                let delta =
+                    abs(Int(ptr[a]) - Int(otherPtr[b])) + abs(Int(ptr[a + 1]) - Int(otherPtr[b + 1]))
+                    + abs(Int(ptr[a + 2]) - Int(otherPtr[b + 2]))
+                // The same tolerance as ``firstInkFraction(in:)``: antialiasing
+                // is not a difference in what was drawn.
+                if delta > 24 { differing += 1 }
+            }
+        }
+        return Double(differing) / Double((maxX - minX) * (maxY - minY))
+    }
+
     /// The mean colour, for comparing two renders of the same thing.
     ///
     /// Ink coverage cannot see a background tint — a plain row and a tinted row

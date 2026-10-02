@@ -43,6 +43,7 @@ struct LabelsView: View {
                 )
             }
         }
+        .reportAvailability(.labelHealth)
     }
 }
 

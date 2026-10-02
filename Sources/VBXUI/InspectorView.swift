@@ -6,7 +6,10 @@ import SwiftUI
 /// dependencies both ways, and comments.
 struct InspectorView: View {
     @EnvironmentObject var store: ProjectStore
-    @State private var unblocks: [String] = []
+    /// What closing the bead releases, as the engine answered for it. Nil
+    /// until it answers, and when it could not — never an empty list, which
+    /// would read as "unblocks nothing".
+    @State private var unblocks: [String]?
 
     var body: some View {
         Group {
@@ -33,7 +36,12 @@ struct InspectorView: View {
                     }
                     .padding(14)
                 }
-                .task(id: issue.id) { unblocks = await store.unblocks(issue.id) }
+                .task(id: issue.id) {
+                    // Forget the previous bead's answer first, or it shows
+                    // against this one until the engine replies.
+                    unblocks = nil
+                    unblocks = await store.unblocks(issue.id)
+                }
                 // Bead links carry a vbx:// URL. Handling them here keeps the
                 // click inside the app: without this the system would try to
                 // launch a second vbx for the scheme.
@@ -123,10 +131,13 @@ struct InspectorView: View {
                 }
                 GridRow {
                     Text("Unblocks").foregroundStyle(.secondary)
-                    if let known = store.knownUnblocks(issue.id) ?? (unblocks.isEmpty ? nil : unblocks) {
+                    if let known = store.knownUnblocks(issue.id) ?? unblocks {
                         Text("\(known.count)").monospacedDigit()
                     } else {
-                        Text("—").foregroundStyle(.tertiary)
+                        Text(EngineReportText.absent).foregroundStyle(.tertiary)
+                            .help(store.unavailableReason(.unblocks).map {
+                                EngineReportText.unavailable(.unblocks, $0)
+                            } ?? "")
                     }
                 }
                 metricRow(
@@ -141,7 +152,7 @@ struct InspectorView: View {
             }
             .font(.callout)
 
-            let resolved = store.knownUnblocks(issue.id) ?? unblocks
+            let resolved = store.knownUnblocks(issue.id) ?? unblocks ?? []
             if !resolved.isEmpty {
                 Text("Closing this unblocks: \(resolved.joined(separator: ", "))")
                     .font(.caption)

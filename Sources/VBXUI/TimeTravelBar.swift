@@ -33,7 +33,12 @@ struct RevisionScrubber: View {
                 }
             }
 
-            if store.revisions.revisions.isEmpty {
+            if let reason = store.unavailableReason(.revisions) {
+                // A menu draws text and buttons only, so the compact label is
+                // spelled out: the title with its reason, and the retry.
+                Text(EngineReportText.unavailable(.revisions, reason))
+                Button("Try Again") { Task { await store.retry(.revisions) } }
+            } else if store.revisions.revisions.isEmpty {
                 Text("No bead-changing commits found").foregroundStyle(.secondary)
             }
         } label: {
