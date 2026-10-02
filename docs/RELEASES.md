@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.15.0 — 2026-10-02
+
+### Features
+
+- Triage panel: accept or set aside a recommendation, and see when feedback reshapes the ranking ([#111](https://github.com/michel-onstein/vbx/pull/111))
+
 ## 0.14.3 — 2026-10-02
 
 ### Fixes
