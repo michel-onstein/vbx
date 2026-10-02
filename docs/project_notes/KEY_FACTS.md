@@ -31,6 +31,7 @@ end over bv's own Go analysis engine.
 | Go | 1.26.6 and 1.27.1 (`darwin/arm64`) — 1.27 needs `-ldflags=-macos=`, which `build-engine.sh` passes only to a linker that offers it |
 | Minimum macOS | 14.0 |
 | Upstream `bv` | `github.com/Dicklesworthstone/beads_viewer v0.25.2` — its `go 1.26.0` directive is why the engine needs Go 1.26+ |
+| `bv` binary for parity | Must report the same version (`bv --version` → `bv v0.25.2`); `parity-check.py` fails on a mismatch unless `--allow-bv-mismatch`. Homebrew's lags (0.20.0 on 2026-10-01): `brew upgrade bv`, or the release binary for the go.mod tag first on PATH / `--bv <path>` |
 
 Biome is referenced by the global conventions but is **not configured in this
 repo** — there is no `package.json`, and Biome does not format Markdown. Go is
