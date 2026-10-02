@@ -57,11 +57,12 @@ func findWorkspaceConfig(path string) string {
 // loader is vbx's port of bv's, because bv's spawns trackers — see
 // workspace_loader.go.
 func loadWorkspace(configPath string, reader workspaceReader) (
-	issues []model.Issue, loads []repoLoad, warnings []string, tombstoneIDs []string, err error,
+	issues []model.Issue, loads []repoLoad, warnings []string, tombstoneIDs []string,
+	watchDirs []string, err error,
 ) {
 	issues, results, err := loadAllFromConfig(configPath, reader)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
 	}
 
 	loads = make([]repoLoad, 0, len(results))
@@ -86,13 +87,77 @@ func loadWorkspace(configPath string, reader workspaceReader) (
 	}
 
 	sort.SliceStable(loads, func(i, j int) bool { return loads[i].Name < loads[j].Name })
-	return issues, loads, warnings, tombstoneIDs, nil
+	return issues, loads, warnings, tombstoneIDs, workspaceWatchDirs(configPath, results), nil
+}
+
+// workspaceWatchDirs lists every directory whose contents feed a workspace
+// session, for the app's file watch (vbx-zot).
+//
+// The session's source is `.bv/workspace.yaml`, and a watch on that file's
+// directory alone sees a membership change but never a bead: every member's
+// data lives in its own repository. So the list is `.bv` itself, the root
+// `.beads` that feedback is read from, and each enabled member's beads
+// directory — both the one the data was actually read from and the configured
+// one, which differ when a redirect is followed.
+//
+// Only directories that exist are listed: a watch on a missing path never
+// fires. A member with no beads directory at all is watched at its repository
+// root instead, so creating one is noticed. The order is stable and duplicates
+// are dropped, so a caller can compare two lists to decide whether a watch
+// needs re-establishing.
+func workspaceWatchDirs(configPath string, results []workspace.LoadResult) []string {
+	root := filepath.Dir(filepath.Dir(configPath))
+	seen := map[string]bool{}
+	dirs := []string{}
+	add := func(dir string) bool {
+		if dir == "" {
+			return false
+		}
+		dir = filepath.Clean(dir)
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			return false
+		}
+		if !seen[dir] {
+			seen[dir] = true
+			dirs = append(dirs, dir)
+		}
+		return true
+	}
+
+	add(filepath.Dir(configPath))
+	add(feedbackDir(configPath, "workspace"))
+	for _, result := range results {
+		if result.Disabled {
+			continue
+		}
+		repoPath := result.RepoPath
+		if !filepath.IsAbs(repoPath) {
+			repoPath = filepath.Join(root, repoPath)
+		}
+		watched := false
+		if source := result.SourcePath; source != "" {
+			if info, err := os.Stat(source); err == nil && !info.IsDir() {
+				source = filepath.Dir(source)
+			}
+			watched = add(source)
+		}
+		// The configured directory, when the data came from elsewhere: the
+		// redirect that points away from it lives here.
+		if add(filepath.Join(repoPath, ".beads")) {
+			watched = true
+		}
+		if !watched {
+			add(repoPath)
+		}
+	}
+	return dirs
 }
 
 // loadWorkspaceSession loads every repository the configuration names and
 // analyses them as one graph.
 func (s *Session) loadWorkspaceSession(configPath string) error {
-	records, loads, warnings, tombstoneIDs, err := loadWorkspace(configPath, s.workspaceReader())
+	records, loads, warnings, tombstoneIDs, watchDirs, err := loadWorkspace(configPath, s.workspaceReader())
 	if err != nil {
 		return err
 	}
@@ -106,7 +171,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 	// The configuration file stands in for the source: it is what was read,
 	// and it is what the watcher should follow.
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings
-	s.workspacePath, s.repoLoads = configPath, loads
+	s.workspacePath, s.repoLoads, s.watchDirs = configPath, loads, watchDirs
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = tombstoneIDs
 	s.analyzer, s.stats = analyzer, stats
@@ -118,7 +183,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 // reloadWorkspace re-aggregates every repository, gated on the content hash
 // exactly as the single-repository path is.
 func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
-	records, loads, warnings, tombstoneIDs, err := loadWorkspace(configPath, s.workspaceReader())
+	records, loads, warnings, tombstoneIDs, watchDirs, err := loadWorkspace(configPath, s.workspaceReader())
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +199,12 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 	// As in the single-repository reload: feedback is outside the hash.
 	feedbackChanged := s.refreshFeedback(configPath, "workspace")
 	if newHash == oldHash && oldHash != "" {
+		// Membership can change without the bead set changing — a member with
+		// no beads yet — and the watch must follow it either way, so the
+		// directories are kept current even when nothing is re-analysed.
+		s.mu.Lock()
+		s.repoLoads, s.watchDirs = loads, watchDirs
+		s.mu.Unlock()
 		payload, err := s.info()
 		if err != nil {
 			return nil, err
@@ -146,7 +217,7 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings
-	s.workspacePath, s.repoLoads = configPath, loads
+	s.workspacePath, s.repoLoads, s.watchDirs = configPath, loads, watchDirs
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = tombstoneIDs
 	s.analyzer, s.stats = analyzer, stats

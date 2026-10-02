@@ -566,6 +566,17 @@ back to 2 s polling, mirroring `BV_FORCE_POLLING`.
 Reload is **hash-gated**: the engine recomputes the data hash and returns "unchanged"
 without re-analysing, so an incidental touch does not cost a re-render.
 
+**What is watched comes from the engine**, as the `watch_paths` of every `info` and
+`reload` payload, so the app never re-derives discovery. For one repository that is the
+source's directory, which also holds `feedback.json`. For a multi-repository workspace
+the source is `.bv/workspace.yaml`, so the list is `.bv/` itself, the root `.beads` that
+feedback is read from, and every enabled member's beads directory — only those that
+exist, with a member that has none watched at its repository root. One FSEvents stream
+covers the lot, through one debouncer. The app compares the list on every reload,
+before the hash gate, and re-establishes the stream when it changes, so a member added
+to `workspace.yaml` is watched from then on even if it brought no beads. The `.git`
+watch for uncommitted marks stays on the repository the workspace root is in.
+
 ### 8.3 Sandboxing
 
 `vbx` ships **sandboxed** with:

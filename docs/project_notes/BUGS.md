@@ -4,6 +4,34 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — A multi-repository workspace never reloaded on a member's edit
+
+**Symptom:** with a `.bv/workspace.yaml` workspace open, a bead written to any
+member repository — or a verdict recorded in the root `.beads/feedback.json`,
+read since vbx-5ba — never reached the app. The store stayed loaded and
+reported that it was watching. Found by reading code under vbx-5ba, then
+reproduced by `WorkspaceWatchTests` against the old engine: the watch list was
+`.bv/` alone. (vbx-zot)
+
+**Cause:** `ProjectStore.startWatching` watched the directory of
+`info.source`, and for a workspace session the source is
+`.bv/workspace.yaml`. Every member's data lives in its own repository, outside
+that directory.
+
+**Fix:** the engine reports `watch_paths` in `info` and `reload` — `.bv/`, the
+root `.beads`, and each enabled member's beads directory (configured and
+resolved, existing ones only) — and `FileWatchService.start(directories:)`
+watches them in one stream through one debouncer. `reload` compares the list
+before the hash gate and re-establishes the watch when membership changes; the
+engine refreshes the list even on an unchanged hash, since a member with no
+beads leaves the hash alone. The vbx-d9p rule — watch what is open now — is
+unchanged.
+
+**Regression test:** `WorkspaceWatchTests.swift` (a member's edit arrives; the
+root `feedback.json` reloads; a member added to `workspace.yaml` is watched and
+heard) and `workspace_watch_test.go` (the list covers every member, skips
+missing directories, and follows membership on an unchanged reload).
+
 ## 2026-10-01 — The parity harness's own tests failed after capacity landed
 
 **Symptom:** `python3 scripts/test-parity-check.py`, in the verify block,
