@@ -210,14 +210,19 @@ them.
   — the recents list, the current directory, a restored window's path — is
   skipped when it does not probe openable, so a launch with nothing to open
   lands in the neutral empty state. Only an explicit choice reports a failure.
-- **`br update --description-file` is a silent no-op.** It prints the issue as
-  JSON and exits 0, and the description is unchanged — measured on `vbx-g3q`,
-  where the file on disk held the new text and the record kept the old. Only
-  `-d/--description` actually writes. That matters because the reason to reach
-  for the file form is a long markdown body, which is exactly the case where
-  losing the write is least likely to be noticed. Pass the text as an argv
-  element instead — from a script, not through the shell, so quoting cannot
-  mangle it. (`br create --description-file` *does* work; it is only `update`.)
+- **A `br` write run from a worktree lands in the main checkout, and looks like
+  a silent no-op.** `br` resolves its workspace through git's common dir, so
+  from `.claude/worktrees/<topic>` it writes the *primary* checkout's
+  `beads.db` and `.beads/issues.jsonl`: it prints the updated issue and exits
+  0, your worktree's export is unchanged, and the shared tree is left holding an
+  uncommitted edit. This was once recorded here as "`br update
+  --description-file` is a silent no-op" (`vbx-g3q`); it is not — the flag
+  writes on br 0.6.0 and 0.7.4 alike, and `-d` from a worktree misses in exactly
+  the same way. **Pin every `br` call to the worktree** with
+  `--db "$PWD/.beads/beads.db"` or `BEADS_DB`, and run `br where` if in doubt.
+  Separately, `br update` **refuses** — exit 4, a `VALIDATION_FAILED` envelope
+  on stdout — a description under half the old length unless `--force` is
+  given, so a shrink is loud rather than lost. See BUGS.md, 2026-10-01.
 - **A single-bead `br update` is guarded by `Issue.updatedAtStamp`, never by
   `updatedAt`.** `br update --if-unchanged` (0.7.0+) compares to the
   microsecond; a `Date` keeps milliseconds, so a stamp rebuilt from one is a
@@ -232,9 +237,12 @@ them.
   named a path that no longer existed. Nothing reads the field today
   (`RepoInfo.owns(_:)` matches by id prefix), so the cost is latent: `br`'s help
   calls `source_repo_path` the canonical location "for cross-machine sync
-  awareness". There is nothing to configure — `br create` has no
-  `--source-repo` flag and `.beads/config.yaml` holds only `issue_prefix` — so
-  **after `br create`, run `python3 scripts/beads-check.py --fix`**. The check
+  awareness". It cannot be set at creation — `br create` has no
+  `--source-repo` flag and `.beads/config.yaml` holds only `issue_prefix` — but
+  `br update` has `--source-repo` and `--source-repo-path`, which is what the
+  fix uses. So **after `br create`, run `python3 scripts/beads-check.py
+  --fix`** — from a worktree with `BEADS_DB="$PWD/.beads/beads.db"` set, or its
+  `br update` lands in the main checkout like any other unpinned write. The check
   is in the verify block, which is what makes forgetting a build failure instead
   of silent drift. The real fix is upstream in `beads_rust`. See ADR-018.
 - **Never call bv's `workspace.LoadAllFromConfig` or `AggregateLoader`.** In

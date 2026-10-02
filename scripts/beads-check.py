@@ -19,11 +19,18 @@ awareness", and half of ours named a path that does not exist on this machine.
 
 **This check is what stops it recurring.** There is no configuration for it:
 `br create` has no `--source-repo` flag and `.beads/config.yaml` holds only
-`issue_prefix`, so the value cannot be set correctly at creation time. The real
-fix is upstream in `beads_rust`. Until then a failing check in the verify block
-turns "remember to run `br update` after `br create`" — a rule of exactly the
-kind that produced this mess — into something the build says out loud, with
-`--fix` as the one-line answer.
+`issue_prefix`, so the value cannot be set correctly at creation time. Only
+`br update` takes `--source-repo` and `--source-repo-path` (br 0.6.0 and 0.7.4
+alike), which is what `--fix` calls. The real fix is upstream in `beads_rust`.
+Until then a failing check in the verify block turns "remember to run
+`br update` after `br create`" — a rule of exactly the kind that produced this
+mess — into something the build says out loud, with `--fix` as the one-line
+answer.
+
+From a worktree, run `--fix` with `BEADS_DB` pointing at the worktree's
+`.beads/beads.db`: an unpinned `br update` resolves to the main checkout's
+workspace and rewrites *its* export, leaving the one this script reads as it
+was.
 
 The canonical name and path come from git rather than from a constant: the
 common git directory is shared by every worktree and its parent is the primary

@@ -5,6 +5,19 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — The br quirks in CLAUDE.md match what br does (vbx-cd7)
+
+The "`br update --description-file` is a silent no-op" rule is replaced by its
+real cause: an unpinned `br` write from a worktree lands in the main checkout,
+so the worktree's export looks unchanged. Reproduced on br 0.6.0 and 0.7.4 in
+temporary repositories. The `source_repo` entry and the `beads-check.py`
+docstring now say `br update` has `--source-repo`/`--source-repo-path` (only
+`br create` lacks them) and that `--fix` needs `BEADS_DB` from a worktree.
+`test-packaging.py` gains a test that measures all of it against the `br` on the
+PATH. The global "Beads — repo notes" entries checked against 0.7.4 — a
+worktree resolves to the main checkout's database; `br sync --flush-only`
+printing "Nothing to export" — still hold and were left alone.
+
 ## 2026-10-01 — Uncommitted marks follow each member of a workspace (vbx-d1c)
 
 In a multi-repository workspace, `snapshot_at` for `HEAD` now reads each
