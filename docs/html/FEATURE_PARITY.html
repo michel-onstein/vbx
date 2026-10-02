@@ -227,7 +227,7 @@ pre.mermaid svg { max-width: 100%; height: auto; }
 </tr>
 <tr>
 <td><strong>Date</strong></td>
-<td>2026-08-20</td>
+<td>2026-08-20; bv 0.21–0.25 capabilities mapped 2026-10-01 (vbx-htg)</td>
 </tr>
 <tr>
 <td><strong>Build state</strong></td>
@@ -250,6 +250,18 @@ History view, time travel with diff badges, recipes, alerts and drift with
 baselines, the sprint dashboard, multi-repository workspaces, App Intents, the
 <code>vbx://</code> URL scheme, Spotlight indexing, the tutorial, and <code>vbx-cli</code> speaking
 the robot protocol with TOON output.</p>
+<p><strong>Except the bv 0.21–0.25 additions.</strong> The engine runs on bv v0.25.2, and the
+capabilities bv gained between 0.21 and 0.25 are mapped below with their real
+state. Built: the six new alert types with <code>suggested_action</code> (engine and
+<code>vbx-cli</code>), <code>defer_until</code> in readiness, <code>.beads/recipes/*.yaml</code> recipe files,
+the multi-repository loader, and triage feedback. Not yet built, each with a
+child bead of epic vbx-htg: <code>--export</code> reports in four formats (vbx-im9),
+<code>--search-min-score</code> and bv's exact-ID guarantee (vbx-52c), <code>defer_until</code> in
+the app (vbx-upz), <code>load_stats</code> in the robot envelope (vbx-dv5), suggested
+actions in the Alerts panel (vbx-fc7), <code>--recipe</code> as a robot scope and recipe
+file paths (vbx-7d5), and bv's <code>.beads</code>-first workspace discovery with
+<code>--workspace</code> (vbx-1y5). A row naming a bead is not built until that bead
+closes.</p>
 <p><strong>Verified rather than asserted.</strong> <code>scripts/parity-check.py</code> runs <code>vbx-cli</code> and
 <code>bv</code> over the same workspace and diffs them command by command, stripping only
 an enumerated list of volatile fields — timestamps, wall-clock durations,
@@ -358,6 +370,18 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 <td>0</td>
 </tr>
 <tr>
+<td><code>load_stats</code> (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records</td>
+<td>App: the warnings badge lists the loader's warnings, without counts. <strong>Not built:</strong> <code>vbx-cli</code> emits no <code>load_stats</code> (vbx-dv5)</td>
+<td>Engine + Native</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>source_authority</code> / <code>authority_hash</code> (bv 0.25 multi-source ranking)</td>
+<td>Deliberately not ported — vbx resolves one source and ranks none; declared envelope-only in the parity harness (ADR-023, ADR-024)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
 <td>Legacy field aliases (<code>depends_on</code>, <code>target_id</code>)</td>
 <td>Transparent</td>
 <td>Engine</td>
@@ -371,9 +395,15 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td>Multi-repo workspace (<code>.bv/workspace.yaml</code>)</td>
-<td>Sidebar "Repos" section, repo picker</td>
+<td>Sidebar "Repos" section, repo picker; loader is vbx's port of bv's, held to it by <code>TestWorkspaceLoaderMatchesBV</code></td>
 <td>Engine + Native</td>
 <td>2</td>
+</tr>
+<tr>
+<td><code>.bv/workspace.yaml</code> discovery: bv 0.25 uses it only when no <code>.beads</code> is reachable, <code>--workspace</code> overrides</td>
+<td><strong>Not built:</strong> vbx prefers a found workspace over the repo's own <code>.beads</code>, an unrecorded divergence; <code>vbx-cli</code> has no <code>--workspace</code> (vbx-1y5)</td>
+<td>Engine</td>
+<td>—</td>
 </tr>
 <tr>
 <td>Repo auto-discovery, monorepo layouts</td>
@@ -625,6 +655,12 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 <td>Alerts list, severity-grouped</td>
 <td>Engine + Native</td>
 <td>4</td>
+</tr>
+<tr>
+<td>bv 0.25 alert types (<code>velocity_drop</code>, <code>high_impact_unblock</code>, <code>abandoned_claim</code>, <code>potential_duplicate</code>, <code>priority_mismatch</code>, <code>scope_creep</code>) with <code>suggested_action</code> and <code>labels</code></td>
+<td><strong>Engine and <code>vbx-cli</code>: built</strong> — bv's <code>drift.Calculator</code> emits them, parity-checked. Alerts panel lists the new types (its type picker is data-driven). <strong>Not built:</strong> the panel shows neither <code>suggested_action</code> nor <code>labels</code> (vbx-fc7)</td>
+<td>Engine + Native</td>
+<td>—</td>
 </tr>
 <tr>
 <td>Baseline save / show / drift check</td>
@@ -932,9 +968,15 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td>Recipe picker (<code>'</code>) and recipe files</td>
-<td>Sidebar section + form editor</td>
+<td>Sidebar section + form editor; <code>.beads/recipes/*.yaml</code> files listed through bv's own <code>recipe.Loader</code></td>
 <td>Engine + Native</td>
 <td>2</td>
+</tr>
+<tr>
+<td><code>defer_until</code> (bv 0.25 scheduler deferral)</td>
+<td><strong>Engine: built</strong> — readiness, triage, plan and next honour it, and <code>issues</code> carries the field. <strong>Not built:</strong> the app never shows the date (vbx-upz)</td>
+<td>Engine + Native</td>
+<td>—</td>
 </tr>
 <tr>
 <td>Repo picker (<code>w</code>)</td>
@@ -1127,6 +1169,12 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
+<td><code>--search-min-score</code>, guaranteed exact-ID hit (bv 0.25)</td>
+<td><strong>Not built:</strong> no min-score; an exact id is promoted only when already among the fetched candidates (vbx-52c)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
 <td><code>--robot-suggest</code> (+ type, bead, confidence)</td>
 <td>✓</td>
 <td>Inspector suggestions</td>
@@ -1179,6 +1227,12 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>✓</td>
 <td>Recipe sidebar</td>
 <td>6</td>
+</tr>
+<tr>
+<td><code>--recipe &lt;name or path.yaml&gt;</code> as a global scope on robot commands (bv 0.25)</td>
+<td><strong>Not built:</strong> honoured only by vbx's own <code>--robot-recipe-apply</code>, and by name only (vbx-7d5)</td>
+<td>Recipe sidebar applies by name</td>
+<td>—</td>
 </tr>
 <tr>
 <td><code>--robot-by-label</code>, <code>--robot-by-assignee</code></td>
@@ -1244,9 +1298,15 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <tbody>
 <tr>
 <td><code>--export-md</code> Markdown report with Mermaid</td>
-<td>File → Export → Markdown Report (<code>⌘⇧E</code>)</td>
+<td>File → Export → Markdown Report (<code>⌘⇧E</code>); <code>vbx-cli</code> has no <code>--export-md</code></td>
 <td>Engine + Native</td>
 <td>7</td>
+</tr>
+<tr>
+<td><code>--export</code> with <code>--export-format</code> (markdown, json, csv or mermaid), <code>--export-template</code>, <code>--export-include-graph</code>, recipe export defaults (bv 0.25, <code>export.GenerateReport</code>)</td>
+<td><strong>Not built</strong> in the engine, <code>vbx-cli</code> or the app (vbx-im9)</td>
+<td>Engine + Native</td>
+<td>—</td>
 </tr>
 <tr>
 <td>Priority brief, agent brief bundle</td>
@@ -1434,6 +1494,10 @@ decision, not an omission.</p>
 <tr>
 <td>ASCII sparklines and heatmaps become real charts</td>
 <td>The whole point of a native UI</td>
+</tr>
+<tr>
+<td>No <code>source_authority</code> / <code>authority_hash</code> in the robot envelope</td>
+<td>vbx resolves one source and ranks none, so a ported report would assert checks it never ran (ADR-023); vbx also keeps its own read of a <code>beads.db</code> (ADR-024)</td>
 </tr>
 </tbody>
 </table></div>

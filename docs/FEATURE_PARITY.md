@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | **Status** | Living document — the Phase column is the *plan*, not the build state |
-| **Date** | 2026-08-20 |
+| **Date** | 2026-08-20; bv 0.21–0.25 capabilities mapped 2026-10-01 (vbx-htg) |
 | **Build state** | See "Implementation status" below, and the root `README.md` |
 
 Companion to the [vbx Design Document](VBX_DESIGN.md). Every capability of `bv` is listed
@@ -23,6 +23,19 @@ History view, time travel with diff badges, recipes, alerts and drift with
 baselines, the sprint dashboard, multi-repository workspaces, App Intents, the
 `vbx://` URL scheme, Spotlight indexing, the tutorial, and `vbx-cli` speaking
 the robot protocol with TOON output.
+
+**Except the bv 0.21–0.25 additions.** The engine runs on bv v0.25.2, and the
+capabilities bv gained between 0.21 and 0.25 are mapped below with their real
+state. Built: the six new alert types with `suggested_action` (engine and
+`vbx-cli`), `defer_until` in readiness, `.beads/recipes/*.yaml` recipe files,
+the multi-repository loader, and triage feedback. Not yet built, each with a
+child bead of epic vbx-htg: `--export` reports in four formats (vbx-im9),
+`--search-min-score` and bv's exact-ID guarantee (vbx-52c), `defer_until` in
+the app (vbx-upz), `load_stats` in the robot envelope (vbx-dv5), suggested
+actions in the Alerts panel (vbx-fc7), `--recipe` as a robot scope and recipe
+file paths (vbx-7d5), and bv's `.beads`-first workspace discovery with
+`--workspace` (vbx-1y5). A row naming a bead is not built until that bead
+closes.
 
 **Verified rather than asserted.** `scripts/parity-check.py` runs `vbx-cli` and
 `bv` over the same workspace and diffs them command by command, stripping only
@@ -87,9 +100,12 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.
 | `bd` workspace layout detection | Document open | Engine | 0 |
 | `BEADS_DIR` override | Settings + env | Engine | 0 |
 | BOM stripping, 10 MB line cap, malformed-line skip with warnings | Warnings banner in the window, expandable to a list | Engine + Native | 0 |
+| `load_stats` (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records | App: the warnings badge lists the loader's warnings, without counts. **Not built:** `vbx-cli` emits no `load_stats` (vbx-dv5) | Engine + Native | — |
+| `source_authority` / `authority_hash` (bv 0.25 multi-source ranking) | Deliberately not ported — vbx resolves one source and ranks none; declared envelope-only in the parity harness (ADR-023, ADR-024) | — | — |
 | Legacy field aliases (`depends_on`, `target_id`) | Transparent | Engine | 0 |
 | Comment ID as UUIDv7 or legacy integer | Transparent | Engine | 0 |
-| Multi-repo workspace (`.bv/workspace.yaml`) | Sidebar "Repos" section, repo picker | Engine + Native | 2 |
+| Multi-repo workspace (`.bv/workspace.yaml`) | Sidebar "Repos" section, repo picker; loader is vbx's port of bv's, held to it by `TestWorkspaceLoaderMatchesBV` | Engine + Native | 2 |
+| `.bv/workspace.yaml` discovery: bv 0.25 uses it only when no `.beads` is reachable, `--workspace` overrides | **Not built:** vbx prefers a found workspace over the repo's own `.beads`, an unrecorded divergence; `vbx-cli` has no `--workspace` (vbx-1y5) | Engine | — |
 | Repo auto-discovery, monorepo layouts | Workspace open flow | Engine | 2 |
 | ID namespacing across repos | Displayed prefix badges on rows | Engine + Native | 2 |
 | Cross-repository dependency edges | Graph edges styled as cross-repo | Engine + Native | 3 |
@@ -143,6 +159,7 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 | Cross-label flow matrix and bottleneck scores | Flow Matrix heat map with drill-down | Engine + Native | 4 |
 | Label attention ranking | Attention view | Engine + Native | 4 |
 | Alerts (drift + proactive health) | Alerts list, severity-grouped | Engine + Native | 4 |
+| bv 0.25 alert types (`velocity_drop`, `high_impact_unblock`, `abandoned_claim`, `potential_duplicate`, `priority_mismatch`, `scope_creep`) with `suggested_action` and `labels` | **Engine and `vbx-cli`: built** — bv's `drift.Calculator` emits them, parity-checked. Alerts panel lists the new types (its type picker is data-driven). **Not built:** the panel shows neither `suggested_action` nor `labels` (vbx-fc7) | Engine + Native | — |
 | Baseline save / show / drift check | Toolbar menu + Alerts integration | Engine + Native | 4 |
 | Duplicate detection | Inspector "Possible duplicates" | Engine + Native | 4 |
 | Dependency suggestions | Inspector "Suggested dependencies" | Engine + Native | 4 |
@@ -203,7 +220,8 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 | Velocity comparison | Chart | Engine + Native | 4 |
 | History view (all modes) | See §4 | Engine + Native | 5 |
 | Alerts panel (`!`) | Severity-grouped list | Engine + Native | 4 |
-| Recipe picker (`'`) and recipe files | Sidebar section + form editor | Engine + Native | 2 |
+| Recipe picker (`'`) and recipe files | Sidebar section + form editor; `.beads/recipes/*.yaml` files listed through bv's own `recipe.Loader` | Engine + Native | 2 |
+| `defer_until` (bv 0.25 scheduler deferral) | **Engine: built** — readiness, triage, plan and next honour it, and `issues` carries the field. **Not built:** the app never shows the date (vbx-upz) | Engine + Native | — |
 | Repo picker (`w`) | Sidebar repos section | Engine + Native | 2 |
 | Time-travel mode + diff badges + summary | Revision scrubber + row badges | Engine + Native | 7 |
 | Shortcuts sidebar (`;`) | Menu bar, `⌘/` shortcuts sheet, `⌘K` palette | Native | 2 |
@@ -243,6 +261,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-orphans` | ✓ | History orphans tab | 6 |
 | `--robot-explain-correlation`, `--robot-confirm-correlation`, `--robot-reject-correlation`, `--robot-correlation-stats` | ✓ | History feedback controls | 6 |
 | `--robot-search` (+ mode, preset, weights, limit) | ✓ | Search field | 6 |
+| `--search-min-score`, guaranteed exact-ID hit (bv 0.25) | **Not built:** no min-score; an exact id is promoted only when already among the fetched candidates (vbx-52c) | — | — |
 | `--robot-suggest` (+ type, bead, confidence) | ✓ | Inspector suggestions | 6 |
 | `--robot-forecast`, `--robot-capacity` (+ agents, capacity-label, label scope) | ✓ | Inspector forecast, sprint scenarios | 6 |
 | `--robot-burndown`, `--robot-sprint-list`, `--robot-sprint-show` | ✓ | Sprint dashboard | 6 |
@@ -252,6 +271,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-diff`, `--diff-since`, `--as-of` | ✓ | Time-travel mode | 7 |
 | `--robot-graph` (+ format, root, depth) | ✓ | Graph export menu | 6 |
 | `--robot-recipes` | ✓ | Recipe sidebar | 6 |
+| `--recipe <name or path.yaml>` as a global scope on robot commands (bv 0.25) | **Not built:** honoured only by vbx's own `--robot-recipe-apply`, and by name only (vbx-7d5) | Recipe sidebar applies by name | — |
 | `--robot-by-label`, `--robot-by-assignee` | ✓ | Grouping controls | 6 |
 | `--robot-capabilities`, `--robot-schema`, `--robot-docs`, `--robot-help` | ✓ | Help menu → "Robot protocol reference" | 6 |
 | `--robot-not-ready-labels` (+ `BV_ROBOT_NOT_READY_LABELS`), `--robot-max-results`, `--robot-min-confidence` | ✓ (not-ready labels on triage and `--robot-next`, as in bv) | Corresponding UI controls | 6 |
@@ -267,7 +287,8 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 
 | `bv` capability | `vbx` surface | Mechanism | Phase |
 |---|---|---|---|
-| `--export-md` Markdown report with Mermaid | File → Export → Markdown Report (`⌘⇧E`) | Engine + Native | 7 |
+| `--export-md` Markdown report with Mermaid | File → Export → Markdown Report (`⌘⇧E`); `vbx-cli` has no `--export-md` | Engine + Native | 7 |
+| `--export` with `--export-format` (markdown, json, csv or mermaid), `--export-template`, `--export-include-graph`, recipe export defaults (bv 0.25, `export.GenerateReport`) | **Not built** in the engine, `vbx-cli` or the app (vbx-im9) | Engine + Native | — |
 | Priority brief, agent brief bundle | Export submenu | Engine + Native | 7 |
 | `--export-graph` interactive HTML | Export submenu; opens in the browser | Engine | 7 |
 | Static site export wizard | Native multi-step sheet | Engine + Native | 7 |
@@ -316,3 +337,4 @@ decision, not an omission.
 | Optional Core ML embedder for semantic search | Better on-device quality, but off by default because it changes ranking relative to the CLI |
 | Shell hooks restricted under the sandbox | Sandbox policy; `vbx-cli` retains full behaviour |
 | ASCII sparklines and heatmaps become real charts | The whole point of a native UI |
+| No `source_authority` / `authority_hash` in the robot envelope | vbx resolves one source and ranks none, so a ported report would assert checks it never ran (ADR-023); vbx also keeps its own read of a `beads.db` (ADR-024) |
