@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.23.1 — 2026-10-02
+
+### Fixes
+
+- vbx-cli withholds the claim on a workspace whose member dropped a record, as bv does ([#121](https://github.com/michel-onstein/vbx/pull/121))
+
 ## 0.23.0 — 2026-10-02
 
 ### Features
