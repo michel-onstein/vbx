@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.14.0 — 2026-10-02
+
+### Features
+
+- vbx-cli records triage feedback: --feedback-accept, --feedback-ignore, --feedback-reset, --feedback-show ([#107](https://github.com/michel-onstein/vbx/pull/107))
+
 ## 0.13.1 — 2026-10-02
 
 ### Fixes
