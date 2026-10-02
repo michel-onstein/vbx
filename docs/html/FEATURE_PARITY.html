@@ -254,9 +254,9 @@ the robot protocol with TOON output.</p>
 capabilities bv gained between 0.21 and 0.25 are mapped below with their real
 state. Built: the six new alert types with <code>suggested_action</code> (engine and
 <code>vbx-cli</code>), <code>defer_until</code> in readiness, <code>.beads/recipes/*.yaml</code> recipe files,
-the multi-repository loader, and triage feedback. Not yet built, each with a
-child bead of epic vbx-htg: <code>--export</code> reports in four formats (vbx-im9),
-<code>--search-min-score</code> and bv's exact-ID guarantee (vbx-52c), <code>defer_until</code> in
+the multi-repository loader, triage feedback, and <code>--export</code> reports in four
+formats (vbx-im9). Not yet built, each with a child bead of epic vbx-htg:
+export hooks around <code>vbx-cli --export</code> (vbx-uos), <code>--search-min-score</code> and bv's exact-ID guarantee (vbx-52c), <code>defer_until</code> in
 the app (vbx-upz), <code>load_stats</code> in the robot envelope (vbx-dv5), suggested
 actions in the Alerts panel (vbx-fc7), <code>--recipe</code> as a robot scope and recipe
 file paths (vbx-7d5), and bv's <code>.beads</code>-first workspace discovery with
@@ -1298,13 +1298,13 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <tbody>
 <tr>
 <td><code>--export-md</code> Markdown report with Mermaid</td>
-<td>File → Export → Markdown Report (<code>⌘⇧E</code>); <code>vbx-cli</code> has no <code>--export-md</code></td>
+<td><code>vbx-cli --export-md</code>; in the app, File → Export Report (<code>⌘⇧E</code>) with Markdown chosen</td>
 <td>Engine + Native</td>
 <td>7</td>
 </tr>
 <tr>
 <td><code>--export</code> with <code>--export-format</code> (markdown, json, csv or mermaid), <code>--export-template</code>, <code>--export-include-graph</code>, recipe export defaults (bv 0.25, <code>export.GenerateReport</code>)</td>
-<td><strong>Not built</strong> in the engine, <code>vbx-cli</code> or the app (vbx-im9)</td>
+<td>✓ <code>vbx-cli</code> with bv's flags, <code>--recipe</code> and <code>--label</code>; the engine's <code>export_report</code>; File → Export Report sheet (format, graph, template). Byte-identical to bv in <code>parity-check.py</code>, except the JSON report's <code>source_authority</code> (§9) (vbx-im9)</td>
 <td>Engine + Native</td>
 <td>—</td>
 </tr>
@@ -1364,7 +1364,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td>Hooks around export phases</td>
-<td>Full support in <code>vbx-cli</code>; in the sandboxed app via user-approved tasks</td>
+<td><strong>Not built</strong> — <code>vbx-cli --export</code> runs no hooks and has no <code>--no-hooks</code> (vbx-uos); the sandboxed app cannot run them</td>
 <td>Engine + Native</td>
 <td>7</td>
 </tr>

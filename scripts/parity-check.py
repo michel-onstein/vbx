@@ -398,6 +398,128 @@ FEEDBACK_COMPARISONS = [
 ]
 
 
+# Reports: bv 0.25's --export / --export-md (vbx-im9). Not robot commands —
+# each writes a file and prints two progress lines — so each is run once per
+# binary, writing to the same path in turn, and compared on its exit status,
+# stdout, stderr and the file it left. The clock is pinned, so the file is
+# compared byte for byte; only a JSON report is parsed, to drop
+# ENVELOPE_ONLY_KEYS from its top level exactly as from a robot envelope —
+# GenerateReport writes bv's source_authority, which vbx does not port.
+#
+# The placeholders are files written fresh for every workspace: {out} the
+# report, {template} EXPORT_TEMPLATE, and each EXPORT_RECIPES key its recipe,
+# whose export defaults the explicit flags then override or not. Over the demo
+# and the readiness fixture, whose tombstones, deferrals and missing blockers
+# are what decide each bead's claim command in the report.
+EXPORT_TEMPLATE = (
+    "# {{.Title}} ({{len .Issues}} beads, {{.GeneratedAt}})\n"
+    "{{range .Issues}}- [{{.Status}}] {{.ID}} P{{.Priority}} {{.Title}}"
+    "{{range .Labels}} #{{.}}{{end}}\n{{end}}"
+    "{{if .Graph}}\n```mermaid\n{{.Graph}}```\n{{end}}"
+)
+EXPORT_RECIPES = {
+    # Export defaults the flags leave alone, then override.
+    "recipe_json": "name: export-json\ndescription: Open beads as JSON\n"
+                   "filters:\n  status: [open]\n"
+                   "export:\n  format: json\n  include_graph: false\n",
+    # A template default, which an explicit empty --export-template disables.
+    "recipe_template": "name: export-template\ndescription: Templated\n"
+                       "export:\n  template: {template}\n",
+}
+EXPORT_ONLY = {"demo", "readiness"}
+EXPORT_COMPARISONS = [
+    {"name": f"export {' '.join(args)}".strip(), "args": args, "only": EXPORT_ONLY}
+    for args in (
+        [],
+        ["--export-format", "markdown"],
+        ["--export-format", "json"],
+        ["--export-format", "csv"],
+        ["--export-format", "mermaid"],
+        ["--export-include-graph=false"],
+        ["--export-format", "json", "--export-include-graph=false"],
+        ["--export-format", "csv", "--export-include-graph=false"],
+        ["--export-template", "{template}"],
+        ["--export-template={template}", "--export-include-graph=false"],
+        ["--recipe", "actionable"],
+        ["--recipe", "{recipe_json}"],
+        ["--recipe", "{recipe_json}", "--export-format", "csv"],
+        ["--recipe", "{recipe_json}", "--export-include-graph"],
+        ["--recipe", "{recipe_template}"],
+        ["--recipe", "{recipe_template}", "--export-template="],
+        ["--label", "engine"],
+        ["--label", "no-such-label"],
+        # Rejected combinations: each must fail on both sides with bv's text.
+        ["--export-format", "mermaid", "--export-include-graph=false"],
+        ["--export-format", "csv", "--export-include-graph"],
+        ["--export-format", "json", "--export-template", "{template}"],
+        ["--export-format", "pdf"],
+        ["--export-template", "{missing}"],
+    )
+] + [
+    # bv's older flag, which forces Markdown whatever --export-format says.
+    {"name": f"export-md {' '.join(args)}".strip(), "args": args, "flag": "--export-md",
+     "only": EXPORT_ONLY}
+    for args in ([], ["--export-format", "json"])
+]
+
+
+def write_export_inputs(scratch: Path) -> dict[str, str]:
+    """Writes the template and recipes into scratch; returns the placeholders."""
+    scratch.mkdir(parents=True, exist_ok=True)
+    places = {"out": str(scratch / "report"), "template": str(scratch / "template.md"),
+              "missing": str(scratch / "no-such-template.md")}
+    (scratch / "template.md").write_text(EXPORT_TEMPLATE)
+    for key, text in EXPORT_RECIPES.items():
+        path = scratch / f"{key}.yaml"
+        path.write_text(text.replace("{template}", places["template"]))
+        places[key] = str(path)
+    return places
+
+
+def run_export(binary: str, flag: str, args: list[str], places: dict[str, str],
+               workspace: Path) -> tuple[int, str, str, bytes | None]:
+    """Runs one export; returns (status, stdout, stderr, the file or None)."""
+    out = Path(places["out"])
+    if out.exists():
+        out.unlink()
+    status, stdout, stderr = run(
+        binary, [flag, str(out), *(arg.format(**places) for arg in args)], workspace)
+    return status, stdout, stderr, out.read_bytes() if out.exists() else None
+
+
+def export_differences(vbx_run, bv_run) -> list[str]:
+    """Every difference between two runs of one export."""
+    found: list[str] = []
+    (vs, vo, ve, vfile), (bs, bo, be, bfile) = vbx_run, bv_run
+    if vs != bs:
+        found.append(f"exit {vs} vs {bs}: {ve.strip()!r} vs {be.strip()!r}")
+    if vo != bo:
+        found.append(f"stdout {vo!r} vs {bo!r}")
+    if ve.strip() != be.strip():
+        found.append(f"stderr {ve.strip()!r} vs {be.strip()!r}")
+    if (vfile is None) != (bfile is None):
+        found.append("file: " + ("absent" if vfile is None else "written") + " on the vbx side, "
+                     + ("absent" if bfile is None else "written") + " on the bv side")
+    elif vfile is not None and vfile != bfile:
+        try:
+            left, right = json.loads(vfile), json.loads(bfile)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            left = right = None
+        if isinstance(left, dict) and isinstance(right, dict) and "issues" in right:
+            found.extend(f"file{difference}" for difference in describe_differences(
+                strip_envelope_only(left), strip_envelope_only(right)))
+        else:
+            vlines = vfile.decode(errors="replace").splitlines()
+            blines = bfile.decode(errors="replace").splitlines()
+            for number, (a, b) in enumerate(zip(vlines, blines), 1):
+                if a != b:
+                    found.append(f"file line {number}: {a!r} vs {b!r}")
+                    break
+            else:
+                found.append(f"file: {len(vfile)} bytes vs {len(bfile)}")
+    return found
+
+
 def strip_keys(value, keys: set[str]):
     """Drops `keys` at every depth."""
     if isinstance(value, dict):
@@ -763,7 +885,10 @@ def implemented_commands(vbx: str, cwd: Path) -> set[str]:
     if status != 0:
         print(f"could not list vbx-cli commands: {err}", file=sys.stderr)
         return set()
-    return {entry["flag"] for entry in json.loads(out)["commands"]}
+    listing = json.loads(out)
+    # The report flags are a mode rather than a robot command, listed apart.
+    return ({entry["flag"] for entry in listing["commands"]}
+            | set(listing.get("exports", [])))
 
 
 def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
@@ -865,6 +990,28 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
             vbx_run = run_feedback_sequence(vbx, entry["steps"], workspace, Path(scratch) / "vbx")
             bv_run = run_feedback_sequence(bv, entry["steps"], workspace, Path(scratch) / "bv")
         differences = feedback_differences(vbx_run, bv_run, entry["steps"])
+        if differences:
+            differed.append((name, differences))
+        else:
+            matched.append(name)
+
+    for entry in EXPORT_COMPARISONS:
+        name = entry["name"]
+        flag = entry.get("flag", "--export")
+        if flag.removeprefix("--") not in available:
+            missing.append(name)
+            continue
+        if label not in entry["only"]:
+            skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
+            continue
+        if bv_skip:
+            skipped.append((name, bv_skip))
+            continue
+        with tempfile.TemporaryDirectory(prefix="vbx-parity-export-") as scratch:
+            places = write_export_inputs(Path(scratch))
+            vbx_run = run_export(vbx, flag, entry["args"], places, workspace)
+            bv_run = run_export(bv, flag, entry["args"], places, workspace)
+        differences = export_differences(vbx_run, bv_run)
         if differences:
             differed.append((name, differences))
         else:

@@ -21,7 +21,6 @@ import (
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/correlation"
-	"github.com/Dicklesworthstone/beads_viewer/pkg/export"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/loader"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
@@ -410,8 +409,8 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 		return s.eta(req)
 	case "graph":
 		return s.graph()
-	case "export_markdown":
-		return s.exportMarkdown(req)
+	case "export_report":
+		return s.exportReport(req)
 	case "history":
 		return s.historyPayload(req)
 	case "causality":
@@ -1120,48 +1119,6 @@ func (s *Session) eta(req []byte) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(est)
-}
-
-type exportRequest struct {
-	Title string `json:"title"`
-	// Path, when set, writes the report to disk as well as returning it.
-	Path string `json:"path"`
-}
-
-// exportMarkdown renders bv's Markdown report, Mermaid diagrams included.
-//
-// The content always comes back in the response so a sandboxed caller can
-// write it wherever it has permission; Path is a convenience for the CLI.
-func (s *Session) exportMarkdown(req []byte) ([]byte, error) {
-	var r exportRequest
-	if len(req) > 0 {
-		if err := json.Unmarshal(req, &r); err != nil {
-			return nil, err
-		}
-	}
-	if r.Title == "" {
-		r.Title = "Bead Report"
-	}
-
-	issues, _, _ := s.snapshot()
-	content, err := export.GenerateMarkdown(issues, r.Title)
-	if err != nil {
-		return nil, fmt.Errorf("generating markdown: %w", err)
-	}
-
-	written := ""
-	if r.Path != "" {
-		if err := os.WriteFile(r.Path, []byte(content), 0o644); err != nil {
-			return nil, fmt.Errorf("writing %s: %w", r.Path, err)
-		}
-		written = r.Path
-	}
-
-	return json.Marshal(map[string]any{
-		"markdown": content,
-		"bytes":    len(content),
-		"path":     written,
-	})
 }
 
 // graphEdge is a blocking dependency edge, the only edge type that

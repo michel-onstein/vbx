@@ -370,8 +370,63 @@ def test_feedback_recording(parity) -> None:
           any("feedback.json" in difference for difference in absent), str(absent))
 
 
+def test_report_exports(parity) -> None:
+    print("\nReport exports (vbx-im9)")
+    formats = set()
+    for entry in parity.EXPORT_COMPARISONS:
+        args = entry["args"]
+        if "--export-format" in args:
+            formats.add(args[args.index("--export-format") + 1])
+    check("every bv export format is compared",
+          {"markdown", "json", "csv", "mermaid"} <= formats, str(formats))
+    names = [entry["name"] for entry in parity.EXPORT_COMPARISONS]
+    check("each export run has its own name", len(names) == len(set(names)), str(names))
+    joined = [" ".join(entry["args"]) for entry in parity.EXPORT_COMPARISONS]
+    check("a template, a graph-less run and a recipe default are all compared",
+          any("{template}" in a for a in joined)
+          and any("--export-include-graph=false" in a for a in joined)
+          and any("{recipe_json}" in a for a in joined), str(joined))
+    check("--export-md is compared too",
+          any(entry.get("flag") == "--export-md" for entry in parity.EXPORT_COMPARISONS))
+
+    with tempfile.TemporaryDirectory() as scratch:
+        places = parity.write_export_inputs(Path(scratch))
+        recipe = Path(places["recipe_template"]).read_text()
+        check("a recipe's template default names the written template",
+              places["template"] in recipe and "{template}" not in recipe, recipe)
+
+    ok = (0, "Exporting 1 issues to r...\nDone!\n", "", b"# Beads Export\n*Generated: x*\n")
+    check("identical runs are no difference", parity.export_differences(ok, ok) == [])
+    other = (0, ok[1], "", b"# Beads Export\n*Generated: y*\n")
+    found = parity.export_differences(other, ok)
+    check("a differing line is reported by number",
+          len(found) == 1 and "line 2" in found[0], str(found))
+    check("a file only one side wrote is a difference",
+          len(parity.export_differences((0, ok[1], "", None), ok)) == 1)
+    failed = parity.export_differences((1, "", "a\n", None), (1, "", "b\n", None))
+    check("a failure's stderr is compared", len(failed) == 1, str(failed))
+
+    def report(authority) -> bytes:
+        body = {"title": "Beads Export", "source_authority": authority,
+                "data_hash": "h", "issues": [{"id": "a"}]}
+        if authority is not None:
+            body["authority_hash"] = "x"
+        return parity.json.dumps(body).encode()
+
+    vbx_json = (0, ok[1], "", report(None))
+    bv_json = (0, ok[1], "", report({"claim_safe": True}))
+    check("a JSON report drops only the envelope-only keys",
+          parity.export_differences(vbx_json, bv_json) == [],
+          str(parity.export_differences(vbx_json, bv_json)))
+    changed = (0, ok[1], "", report(None).replace(b'"h"', b'"g"'))
+    found = parity.export_differences(changed, bv_json)
+    check("a JSON report's data hash is still compared",
+          any("data_hash" in difference for difference in found), str(found))
+
+
 def main() -> int:
     parity = load_parity()
+    test_report_exports(parity)
     test_feedback_recording(parity)
     test_triage_feedback_and_not_ready(parity)
     test_bv_version_gate(parity)

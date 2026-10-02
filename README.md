@@ -226,7 +226,7 @@ with `library 'vbxgo' not found`.
 | Offscreen view snapshot tests (no screen-recording permission needed) | ✅ |
 | `vbx-cli` with JSON output for agents | ✅ Full robot-protocol coverage, checked against `bv` by `scripts/parity-check.py` |
 | Git correlation and the history view | ✅ Reads the object store directly, so it works sandboxed (ADR-006) |
-| Markdown report export (Mermaid diagrams, bv-identical) | ✅ |
+| Report export — Markdown, JSON, CSV, Mermaid, custom templates (bv-identical) | ✅ |
 | Time travel, recipes, sprint dashboard, static-site export | ✅ |
 | Live reload via FSEvents, debounced and hash-gated | ✅ |
 | Label analytics dashboard (health, velocity, completion) | ✅ |

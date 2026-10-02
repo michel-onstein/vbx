@@ -60,6 +60,7 @@ struct WorkspaceWindow: View {
 
     @StateObject private var store = ProjectStore()
     @State private var showingExportWizard = false
+    @State private var showingReportExport = false
 
     var body: some View {
         ContentView()
@@ -98,6 +99,10 @@ struct WorkspaceWindow: View {
                 ExportWizard().environmentObject(store)
             }
             .focusedSceneValue(\.exportWizardPresented, $showingExportWizard)
+            .sheet(isPresented: $showingReportExport) {
+                ReportExportSheet().environmentObject(store)
+            }
+            .focusedSceneValue(\.reportExportPresented, $showingReportExport)
     }
 
     /// `<workspace>/.beads/issues.jsonl` → `<workspace>`.
@@ -157,6 +162,11 @@ private struct ExportWizardKey: FocusedValueKey {
     typealias Value = Binding<Bool>
 }
 
+/// The key window's report-export sheet, for File ▸ Export Report.
+private struct ReportExportKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
 extension FocusedValues {
     var projectStore: ProjectStore? {
         get { self[ProjectStoreKey.self] }
@@ -166,6 +176,11 @@ extension FocusedValues {
     var exportWizardPresented: Binding<Bool>? {
         get { self[ExportWizardKey.self] }
         set { self[ExportWizardKey.self] = newValue }
+    }
+
+    var reportExportPresented: Binding<Bool>? {
+        get { self[ReportExportKey.self] }
+        set { self[ReportExportKey.self] = newValue }
     }
 }
 
@@ -178,6 +193,7 @@ extension FocusedValues {
 struct VBXCommands: Commands {
     @FocusedValue(\.projectStore) private var store: ProjectStore?
     @FocusedValue(\.exportWizardPresented) private var exportWizardPresented: Binding<Bool>?
+    @FocusedValue(\.reportExportPresented) private var reportExportPresented: Binding<Bool>?
     @ObservedObject private var recents = RecentWorkspaces.shared
     @Environment(\.openWindow) private var openWindow
 
@@ -224,9 +240,9 @@ struct VBXCommands: Commands {
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(store?.isLoaded != true)
             Divider()
-            Button("Export Markdown Report…") { Task { await store?.exportMarkdown() } }
+            Button("Export Report…") { reportExportPresented?.wrappedValue = true }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(store?.isLoaded != true)
+                .disabled(store?.isLoaded != true || reportExportPresented == nil)
             Button("Export Static Site…") { exportWizardPresented?.wrappedValue = true }
                 .keyboardShortcut("e", modifiers: [.command, .option])
                 .disabled(store?.isLoaded != true || exportWizardPresented == nil)

@@ -28,9 +28,9 @@ the robot protocol with TOON output.
 capabilities bv gained between 0.21 and 0.25 are mapped below with their real
 state. Built: the six new alert types with `suggested_action` (engine and
 `vbx-cli`), `defer_until` in readiness, `.beads/recipes/*.yaml` recipe files,
-the multi-repository loader, and triage feedback. Not yet built, each with a
-child bead of epic vbx-htg: `--export` reports in four formats (vbx-im9),
-`--search-min-score` and bv's exact-ID guarantee (vbx-52c), `defer_until` in
+the multi-repository loader, triage feedback, and `--export` reports in four
+formats (vbx-im9). Not yet built, each with a child bead of epic vbx-htg:
+export hooks around `vbx-cli --export` (vbx-uos), `--search-min-score` and bv's exact-ID guarantee (vbx-52c), `defer_until` in
 the app (vbx-upz), `load_stats` in the robot envelope (vbx-dv5), suggested
 actions in the Alerts panel (vbx-fc7), `--recipe` as a robot scope and recipe
 file paths (vbx-7d5), and bv's `.beads`-first workspace discovery with
@@ -287,8 +287,8 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 
 | `bv` capability | `vbx` surface | Mechanism | Phase |
 |---|---|---|---|
-| `--export-md` Markdown report with Mermaid | File → Export → Markdown Report (`⌘⇧E`); `vbx-cli` has no `--export-md` | Engine + Native | 7 |
-| `--export` with `--export-format` (markdown, json, csv or mermaid), `--export-template`, `--export-include-graph`, recipe export defaults (bv 0.25, `export.GenerateReport`) | **Not built** in the engine, `vbx-cli` or the app (vbx-im9) | Engine + Native | — |
+| `--export-md` Markdown report with Mermaid | `vbx-cli --export-md`; in the app, File → Export Report (`⌘⇧E`) with Markdown chosen | Engine + Native | 7 |
+| `--export` with `--export-format` (markdown, json, csv or mermaid), `--export-template`, `--export-include-graph`, recipe export defaults (bv 0.25, `export.GenerateReport`) | ✓ `vbx-cli` with bv's flags, `--recipe` and `--label`; the engine's `export_report`; File → Export Report sheet (format, graph, template). Byte-identical to bv in `parity-check.py`, except the JSON report's `source_authority` (§9) (vbx-im9) | Engine + Native | — |
 | Priority brief, agent brief bundle | Export submenu | Engine + Native | 7 |
 | `--export-graph` interactive HTML | Export submenu; opens in the browser | Engine | 7 |
 | Static site export wizard | Native multi-step sheet | Engine + Native | 7 |
@@ -298,7 +298,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | WASM hybrid search scorer for the static bundle | Built and embedded as `bv` does | Engine | 7 |
 | Graph snapshots (SVG/PNG) | Export + drag-out from the canvas + Share sheet | Engine + Native | 3 |
 | Shell script emission | Export submenu; copy to clipboard | Engine + Native | 7 |
-| Hooks around export phases | Full support in `vbx-cli`; in the sandboxed app via user-approved tasks | Engine + Native | 7 |
+| Hooks around export phases | **Not built** — `vbx-cli --export` runs no hooks and has no `--no-hooks` (vbx-uos); the sandboxed app cannot run them | Engine + Native | 7 |
 | `AGENTS.md` / `CLAUDE.md` blurb management | Menu item "Add bv blurb to AGENTS.md" | Engine + Native | 7 |
 | Self-update engine | Sparkle 2 with a signed appcast | Native | 7 |
 

@@ -330,6 +330,75 @@ let robotCommands: [RobotCommand] = [
         summary: "The verdicts and adjusted weights", printsMessage: true),
 ]
 
+// MARK: - Report export
+
+/// bv's report flags. `--export` and `--export-md` are not robot commands —
+/// they write a file and print progress, as bv's do — so they are a mode of
+/// their own rather than an entry in `robotCommands`.
+let exportFlags = ["export", "export-md"]
+
+/// The flags that only mean something beside `--export` or `--export-md`.
+/// bv rejects each on its own, and so does vbx-cli.
+let exportModifiers = ["export-format", "export-include-graph", "export-template"]
+
+/// Parses a Go `strconv.ParseBool` value, which is what pflag accepts for
+/// `--export-include-graph=<value>`.
+func parseGoBool(_ value: String) -> Bool? {
+    switch value {
+    case "1", "t", "T", "TRUE", "true", "True": true
+    case "0", "f", "F", "FALSE", "false", "False": false
+    default: nil
+    }
+}
+
+/// The engine request for an export. Only the modifiers that were given are
+/// sent, so a recipe's `export:` defaults apply to the rest — bv's
+/// `ReportOverrides`. `--export-md` forces Markdown whatever `--export-format`
+/// says, as it does in bv.
+func exportRequest(_ options: Options, path: String) -> [String: Any] {
+    var request: [String: Any] = ["path": path]
+    if let value = options.exportFormat { request["format"] = value }
+    if let value = options.exportIncludeGraph { request["include_graph"] = value }
+    if let value = options.exportTemplate { request["template"] = value }
+    if options.exportMarkdownPath != nil { request["format"] = "markdown" }
+    if let value = options.recipe { request["recipe"] = value }
+    if let value = options.label, !value.isEmpty { request["label"] = value }
+    return request
+}
+
+/// Runs `--export` / `--export-md`: renders the report, writes it, and prints
+/// bv's two progress lines. Failures print the engine's message bare on
+/// stderr, which is bv's own text for the same failure.
+func runExport(_ options: Options, path: String, engine: BeadsEngine) async -> Int32 {
+    struct Reply: Decodable {
+        let issueCount: Int
+        let labelMatches: Int?
+        private enum CodingKeys: String, CodingKey {
+            case issueCount = "issue_count"
+            case labelMatches = "label_matches"
+        }
+    }
+    do {
+        let data = try await engine.rawJSON(
+            "export_report", request: exportRequest(options, path: path))
+        let reply = try JSONDecoder().decode(Reply.self, from: data)
+        if reply.labelMatches == 0, let label = options.label {
+            // bv's warning, word for word: an unknown label exports an empty
+            // report rather than failing.
+            complain("Warning: No issues found with label \"\(label)\"")
+        }
+        emit("Exporting \(reply.issueCount) issues to \(path)...")
+        emit("Done!")
+        return 0
+    } catch EngineError.callFailed(_, let message) {
+        complain(message)
+        return 1
+    } catch {
+        complain("Error exporting: \(error.localizedDescription)")
+        return 1
+    }
+}
+
 // MARK: - Options
 
 struct Options {
@@ -361,6 +430,14 @@ struct Options {
     var byLabel: String?
     var byAssignee: String?
     var notReadyLabels: String?
+    var exportPath: String?
+    var exportMarkdownPath: String?
+    var exportFormat: String?
+    var exportIncludeGraph: Bool?
+    var exportTemplate: String?
+    /// Every flag given, by name, so a modifier can be checked against the
+    /// command it needs whether or not it carried a value.
+    var given: Set<String> = []
     var pretty = false
     var listCommands = false
     var showHelp = false
@@ -395,8 +472,35 @@ func parseArguments() throws -> Options {
     }
 
     while index < args.count {
-        let arg = args[index]
+        var arg = args[index]
+        // pflag's `--flag=value` spelling, for the report flags: bv's
+        // `--export-include-graph` is a boolean that takes its value only that
+        // way, and `--export-template=` is how an empty template is written.
+        var inline: String?
+        if arg.hasPrefix("--export"), let equals = arg.firstIndex(of: "=") {
+            inline = String(arg[arg.index(after: equals)...])
+            arg = String(arg[..<equals])
+        }
+        func value(_ flag: String) throws -> String {
+            if let inline { return inline }
+            return try next(flag)
+        }
+        if arg.hasPrefix("--") { options.given.insert(String(arg.dropFirst(2))) }
         switch arg {
+        case "--export": options.exportPath = try value(arg)
+        case "--export-md": options.exportMarkdownPath = try value(arg)
+        case "--export-format": options.exportFormat = try value(arg)
+        case "--export-template": options.exportTemplate = try value(arg)
+        case "--export-include-graph":
+            if let inline {
+                guard let parsed = parseGoBool(inline) else {
+                    throw UsageError(
+                        message: "invalid argument \"\(inline)\" for --export-include-graph")
+                }
+                options.exportIncludeGraph = parsed
+            } else {
+                options.exportIncludeGraph = true
+            }
         case "--path": options.path = try next(arg)
         case "--format", "-f": options.format = try next(arg).lowercased()
         case "--json": options.format = "json"
@@ -454,6 +558,24 @@ func parseArguments() throws -> Options {
         index += 1
     }
 
+    for modifier in exportModifiers where options.given.contains(modifier) {
+        if options.exportPath == nil, options.exportMarkdownPath == nil {
+            throw UsageError(message: "--\(modifier) requires one of --export or --export-md")
+        }
+    }
+    if options.exportPath != nil || options.exportMarkdownPath != nil {
+        if options.exportPath != nil, options.exportMarkdownPath != nil {
+            throw UsageError(message: "--export and --export-md specify conflicting output paths")
+        }
+        if let command = options.command {
+            throw UsageError(message: "--\(command) cannot be combined with an export")
+        }
+        if options.revision != nil {
+            // bv exports a historical snapshot under --as-of; vbx-cli does
+            // not, and silently exporting the present would be wrong.
+            throw UsageError(message: "--as-of is not supported with an export")
+        }
+    }
     guard ["json", "toon"].contains(options.format) else {
         throw UsageError(message: "invalid --format \(options.format) (expected json or toon)")
     }
@@ -514,6 +636,16 @@ func usageText() -> String {
         "  --format json|toon   Output format (default json)",
         "  --pretty             Indent JSON output",
         "  --list-commands      Print the command list as JSON",
+        "",
+        "REPORTS (bv's --export):",
+        "  --export FILE        Write a report; a --recipe supplies export defaults",
+        "  --export-md FILE     The same, always Markdown",
+        "  --export-format markdown|json|csv|mermaid",
+        "  --export-include-graph[=false]",
+        "                       Include the dependency context (default: all but csv)",
+        "  --export-template FILE",
+        "                       A Go text/template for the Markdown report;",
+        "                       --export-template= disables a recipe's",
         "",
         "TRIAGE AND --robot-next:",
         "  --robot-not-ready-labels A,B",
@@ -580,11 +712,27 @@ func run() async -> Int32 {
         let entries = robotCommands.map {
             ["flag": $0.flag, "method": $0.method, "summary": $0.summary]
         }
-        let payload: [String: Any] = ["commands": entries, "formats": ["json", "toon"]]
+        let payload: [String: Any] = [
+            "commands": entries, "formats": ["json", "toon"], "exports": exportFlags,
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         else { return 1 }
         emit(String(decoding: data, as: UTF8.self))
         return 0
+    }
+
+    if let path = options.exportPath ?? options.exportMarkdownPath {
+        let engine = BeadsEngine()
+        do {
+            // Live tracker actions, as for the robot commands: a report's
+            // per-bead claim commands come from the same binding (ADR-020).
+            _ = try await engine.open(path: options.path, liveTrackerActions: true)
+        } catch {
+            complain("Error: \(error.localizedDescription)")
+            return 1
+        }
+        defer { Task { await engine.close() } }
+        return await runExport(options, path: path, engine: engine)
     }
 
     guard let name = options.command,
