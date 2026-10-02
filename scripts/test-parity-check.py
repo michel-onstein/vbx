@@ -325,8 +325,54 @@ def test_triage_feedback_and_not_ready(parity) -> None:
               entry.get("bv_args") == entry.get("vbx_args"), str(entry))
 
 
+def test_feedback_recording(parity) -> None:
+    print("\nRecording triage feedback (vbx-rt3)")
+    flags = {step[0] for entry in parity.FEEDBACK_COMPARISONS for step in entry["steps"]}
+    check("all four of bv's feedback flags are compared",
+          flags == {"--feedback-accept", "--feedback-ignore", "--feedback-reset", "--feedback-show"},
+          str(flags))
+
+    steps = [["--feedback-accept", "fb-5"], ["--feedback-show"]]
+    show = '{"total_events": 5, "updated_at": "%s", "effective_weights": {"Risk": %s}}'
+    stored = {"version": "1.0", "updated_at": "%s",
+              "events": [{"issue_id": "fb-5", "score": 0.376, "timestamp": "%s"}]}
+
+    def side(stamp: str, weight: str, score: float = 0.376, volatile: bool = True):
+        file = parity.json.loads(parity.json.dumps(stored).replace("%s", stamp))
+        file["events"][0]["score"] = score
+        return ([(0, "Recorded accept feedback for fb-5 (score: 0.376)\n", "", False),
+                 (0, show % (stamp, weight), "", volatile)], file)
+
+    same = parity.feedback_differences(
+        side("2026-10-01T10:00:00Z", "0.12121212121212123"),
+        side("2026-10-01T10:00:01Z", "0.12121212121212122"), steps)
+    check("wall-clock stamps and last-bit float noise are not differences", same == [], str(same))
+
+    pinned = parity.feedback_differences(
+        side("2026-10-01T10:00:00Z", "0.1", volatile=False),
+        side("2026-10-01T10:00:01Z", "0.1", volatile=False), steps)
+    check("show's updated_at is compared when nothing was written",
+          any("updated_at" in difference for difference in pinned), str(pinned))
+
+    scored = parity.feedback_differences(
+        side("t", "0.1"), side("t", "0.1", score=0.377), steps)
+    check("a recorded score that differs is a difference",
+          any("score" in difference for difference in scored), str(scored))
+
+    vbx_steps, vbx_file = side("t", "0.1")
+    failed = parity.feedback_differences(
+        ([(1, "", "Issue not found: x\n", False)], None),
+        ([(1, "", "Issue not found: y\n", False)], None), [["--feedback-accept", "x"]])
+    check("a failing step's stderr is compared", len(failed) == 1, str(failed))
+    absent = parity.feedback_differences(
+        (vbx_steps, vbx_file), (vbx_steps, None), steps)
+    check("a file only one side wrote is a difference",
+          any("feedback.json" in difference for difference in absent), str(absent))
+
+
 def main() -> int:
     parity = load_parity()
+    test_feedback_recording(parity)
     test_triage_feedback_and_not_ready(parity)
     test_bv_version_gate(parity)
     test_label_scoped_runs(parity)

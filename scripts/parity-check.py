@@ -362,6 +362,122 @@ COMPARISONS = [
 ]
 
 
+# Recording triage feedback: bv's --feedback-accept/-ignore/-reset/-show
+# (vbx-rt3). These are not robot commands — they print prose, and all but show
+# write .beads/feedback.json — so they are run as sequences rather than as one
+# robot call each. Every sequence runs on a fresh copy of the workspace's
+# .beads per binary, so the fixture is never touched and the two sides start
+# from the same file. Each step's exit status and output are compared — the
+# prose exactly, show's JSON parsed with the float tolerance — a failing step's
+# stderr too, and then the feedback.json each side was left with, parsed, with
+# FEEDBACK_TIME_KEYS dropped.
+#
+# The clock: bv stamps every event and adjustment with time.Now and scores the
+# verdict at the wall clock — its --feedback-accept never reads
+# SOURCE_DATE_EPOCH — and vbx matches it there. The stamps are dropped; the
+# score is computed by both sides within the same second or two, and differs
+# by far less than the float tolerance. A show after a write, or with no file,
+# reports a wall-clock updated_at, which is dropped there and only there.
+FEEDBACK_TIME_KEYS = {"created_at", "updated_at", "timestamp", "last_updated"}
+FEEDBACK_COMPARISONS = [
+    # Over every fixture: most have no feedback.json, so these prove the
+    # defaults, an unknown bead, and that reset creates the file bv creates.
+    {"name": "feedback-show", "steps": [["--feedback-show"]]},
+    {"name": "feedback-reset", "steps": [["--feedback-reset"], ["--feedback-show"]]},
+    {"name": "feedback-accept no-such-bead",
+     "steps": [["--feedback-accept", "no-such-bead"]]},
+    # Verdicts on beads with an impact score and on a closed one (score 0).
+    # Over feedback-few, the third verdict is the one that turns the weights
+    # on; over feedback, they add to four.
+    {"name": "feedback-accept/ignore", "only": {"feedback", "feedback-few"},
+     "steps": [["--feedback-accept", "fb-5"], ["--feedback-ignore", "fb-1"],
+               ["--feedback-ignore", "fb-8"], ["--feedback-show"]]},
+    # A tombstone is not found; the bead it blocked is.
+    {"name": "feedback-accept tombstone", "only": {"readiness", "readiness (beads.db)"},
+     "steps": [["--feedback-accept", "rdy-10"], ["--feedback-accept", "rdy-11"]]},
+]
+
+
+def strip_keys(value, keys: set[str]):
+    """Drops `keys` at every depth."""
+    if isinstance(value, dict):
+        return {key: strip_keys(item, keys) for key, item in value.items() if key not in keys}
+    if isinstance(value, list):
+        return [strip_keys(item, keys) for item in value]
+    return value
+
+
+def read_feedback_file(beads: Path):
+    """The parsed feedback.json in `beads`, None when there is none."""
+    path = beads / "feedback.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError as error:
+        return f"<unparseable: {error}>"
+
+
+def run_feedback_sequence(binary: str, steps: list[list[str]], workspace: Path,
+                          scratch: Path) -> tuple[list[tuple[int, str, str, bool]], object]:
+    """Runs `steps` on a fresh copy of the workspace's .beads.
+
+    Returns each step's (status, stdout, stderr, volatile) — volatile when the
+    step is a show whose updated_at is the wall clock — and the feedback.json
+    left behind.
+    """
+    if scratch.exists():
+        shutil.rmtree(scratch)
+    shutil.copytree(workspace / ".beads", scratch / ".beads")
+    wrote = not (scratch / ".beads" / "feedback.json").exists()
+    results = []
+    for step in steps:
+        status, out, err = run(binary, step, scratch)
+        results.append((status, out, err, step[0] == "--feedback-show" and wrote))
+        if step[0] != "--feedback-show":
+            wrote = True
+    return results, read_feedback_file(scratch / ".beads")
+
+
+def feedback_differences(vbx_run, bv_run, steps: list[list[str]]) -> list[str]:
+    """Every difference between two runs of one feedback sequence."""
+    (vbx_steps, vbx_file), (bv_steps, bv_file) = vbx_run, bv_run
+    found: list[str] = []
+    for step, (vs, vo, ve, volatile), (bs, bo, be, _) in zip(steps, vbx_steps, bv_steps):
+        where = " ".join(step)
+        if vs != bs:
+            found.append(f"{where}: exit {vs} vs {bs}")
+            continue
+        if vs != 0:
+            if ve.strip() != be.strip():
+                found.append(f"{where}: stderr {ve.strip()!r} vs {be.strip()!r}")
+            continue
+        if step[0] == "--feedback-show":
+            # Parsed, not compared as text: bv normalises the effective
+            # weights by summing a Go map, whose order is random, so two runs
+            # of bv itself differ in the last bit.
+            dropped = {"updated_at"} if volatile else set()
+            try:
+                left = strip_keys(json.loads(vo), dropped)
+                right = strip_keys(json.loads(bo), dropped)
+            except json.JSONDecodeError as error:
+                found.append(f"{where}: could not parse output: {error}")
+                continue
+            found.extend(f"{where} {difference}"
+                         for difference in describe_differences(left, right))
+        elif vo != bo:
+            found.append(f"{where}: stdout {vo!r} vs {bo!r}")
+    if (vbx_file is None) != (bv_file is None):
+        found.append("feedback.json: " + ("absent" if vbx_file is None else "written")
+                     + " on the vbx side, " + ("absent" if bv_file is None else "written")
+                     + " on the bv side")
+    elif vbx_file is not None:
+        found.extend(
+            f"feedback.json{difference}" for difference in describe_differences(
+                strip_keys(vbx_file, FEEDBACK_TIME_KEYS), strip_keys(bv_file, FEEDBACK_TIME_KEYS)))
+    return found
+
+
 BEADS_VIEWER_MODULE = "github.com/Dicklesworthstone/beads_viewer"
 GET_MATCHING_BV = (
     "Install the matching bv: `brew upgrade bv`, or the release binary from "
@@ -731,6 +847,27 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
         if undeclared:
             differed.append((name, undeclared))
         elif not accepted:
+            matched.append(name)
+
+    for entry in FEEDBACK_COMPARISONS:
+        name = entry["name"]
+        flags = {step[0].removeprefix("--") for step in entry["steps"]}
+        if not flags <= available:
+            missing.append(name)
+            continue
+        if "only" in entry and label not in entry["only"]:
+            skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
+            continue
+        if bv_skip:
+            skipped.append((name, bv_skip))
+            continue
+        with tempfile.TemporaryDirectory(prefix="vbx-parity-feedback-") as scratch:
+            vbx_run = run_feedback_sequence(vbx, entry["steps"], workspace, Path(scratch) / "vbx")
+            bv_run = run_feedback_sequence(bv, entry["steps"], workspace, Path(scratch) / "bv")
+        differences = feedback_differences(vbx_run, bv_run, entry["steps"])
+        if differences:
+            differed.append((name, differences))
+        else:
             matched.append(name)
 
     # Report.

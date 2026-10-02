@@ -670,7 +670,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td>Feedback system (adaptive recommendation weights)</td>
-<td><strong>Applied:</strong> <code>.beads/feedback.json</code> reweights triage, <code>--robot-next</code> and <code>--robot-priority</code> from 3 verdicts, and triage reports the <code>feedback</code> block; an edit to the file alone reloads (vbx-5ba). <strong>Recording</strong> (<code>--feedback-accept</code> / <code>-ignore</code> / <code>-reset</code> / <code>-show</code>, thumbs up/down) is not built — vbx-htg</td>
+<td><strong>Applied:</strong> <code>.beads/feedback.json</code> reweights triage, <code>--robot-next</code> and <code>--robot-priority</code> from 3 verdicts, and triage reports the <code>feedback</code> block; an edit to the file alone reloads (vbx-5ba). <strong>Recording, CLI:</strong> <code>vbx-cli --feedback-accept</code> / <code>-ignore</code> / <code>-reset</code> / <code>-show</code>, through bv's own <code>FeedbackData</code>, output as bv's; parity-checked (vbx-rt3). <strong>Recording, app</strong> (accept / ignore on a triage recommendation) is not built — vbx-442</td>
 <td>Engine + Native</td>
 <td>4</td>
 </tr>
@@ -1196,6 +1196,12 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td><code>--robot-not-ready-labels</code> (+ <code>BV_ROBOT_NOT_READY_LABELS</code>), <code>--robot-max-results</code>, <code>--robot-min-confidence</code></td>
 <td>✓ (not-ready labels on triage and <code>--robot-next</code>, as in bv)</td>
 <td>Corresponding UI controls</td>
+<td>6</td>
+</tr>
+<tr>
+<td><code>--feedback-accept ID</code>, <code>--feedback-ignore ID</code>, <code>--feedback-reset</code>, <code>--feedback-show</code> (not robot commands: bv prints prose and writes <code>.beads/feedback.json</code>)</td>
+<td>✓ (vbx-rt3; two at once is a usage error where bv picks one)</td>
+<td>Not built — triage panel accept / ignore, vbx-442</td>
 <td>6</td>
 </tr>
 <tr>

@@ -76,6 +76,9 @@ type Session struct {
 	// alone still reloads. See feedback.go.
 	feedback            *analysis.FeedbackData
 	feedbackFingerprint string
+	// feedbackWriteMu serialises the load-modify-save of a feedback write,
+	// so two verdicts recorded at once cannot each overwrite the other.
+	feedbackWriteMu sync.Mutex
 
 	loadedAt time.Time
 
@@ -487,6 +490,12 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 		return s.diffSince(req)
 	case "commit_patch":
 		return s.commitPatch(req)
+	case "triage_feedback":
+		return s.triageFeedbackShow()
+	case "triage_feedback_record":
+		return s.triageFeedbackRecord(req)
+	case "triage_feedback_reset":
+		return s.triageFeedbackReset()
 	case "correlation_feedback":
 		return s.correlationFeedback()
 	case "correlation_confirm":

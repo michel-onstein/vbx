@@ -36,10 +36,15 @@ struct RobotCommand {
     /// bv does: `--label` scopes the issue set, and `--alert-label` filters
     /// the alerts computed over it, `--capacity-label` the beads simulated.
     var labelScoped = false
+    /// True when the command prints the engine's `message` — bv's own text
+    /// for the same flag — rather than the payload. The feedback commands are
+    /// the only ones: bv prints prose for them whatever `--format` says, and
+    /// its errors are plain lines on stderr.
+    var printsMessage = false
 
     init(
         _ flag: String, method: String, summary: String, waitsForPhase2: Bool = false,
-        labelScoped: Bool = false,
+        labelScoped: Bool = false, printsMessage: Bool = false,
         request: @escaping (Options) throws -> [String: Any]? = { _ in nil }
     ) {
         self.flag = flag
@@ -48,6 +53,7 @@ struct RobotCommand {
         self.request = request
         self.waitsForPhase2 = waitsForPhase2
         self.labelScoped = labelScoped
+        self.printsMessage = printsMessage
     }
 
     /// The engine request: the command's own, plus the label scope.
@@ -304,6 +310,24 @@ let robotCommands: [RobotCommand] = [
     RobotCommand("robot-repos", method: "repos", summary: "Repositories in the workspace"),
     RobotCommand("robot-info", method: "info", summary: "Resolved source and hash"),
     RobotCommand("robot-issues", method: "issues", summary: "Every bead"),
+
+    // Triage feedback: .beads/feedback.json, which triage, next and priority
+    // apply once it holds three verdicts. The accept and ignore flags take the
+    // bead id as their value, as bv's do. These write inside the workspace.
+    RobotCommand(
+        "feedback-accept", method: "triage_feedback_record",
+        summary: "Record that a recommendation was taken", printsMessage: true,
+        request: { options in ["id": options.id ?? "", "action": "accept"] }),
+    RobotCommand(
+        "feedback-ignore", method: "triage_feedback_record",
+        summary: "Record that a recommendation was passed over", printsMessage: true,
+        request: { options in ["id": options.id ?? "", "action": "ignore"] }),
+    RobotCommand(
+        "feedback-reset", method: "triage_feedback_reset",
+        summary: "Clear every verdict and weight adjustment", printsMessage: true),
+    RobotCommand(
+        "feedback-show", method: "triage_feedback",
+        summary: "The verdicts and adjusted weights", printsMessage: true),
 ]
 
 // MARK: - Options
@@ -355,6 +379,21 @@ func parseArguments() throws -> Options {
         return args[index]
     }
 
+    /// Makes `arg` the invocation's command.
+    func select(_ arg: String) throws {
+        let name = String(arg.dropFirst(2))
+        guard robotCommands.contains(where: { $0.flag == name }) else {
+            throw UsageError(message: "unknown command \(arg)")
+        }
+        if let existing = options.command, existing != name {
+            // Two primary commands in one invocation is ambiguous, and
+            // silently picking one would produce the wrong payload — or, for
+            // a feedback command, write the wrong verdict.
+            throw UsageError(message: "--\(existing) and \(arg) cannot be used together")
+        }
+        options.command = name
+    }
+
     while index < args.count {
         let arg = args[index]
         switch arg {
@@ -393,19 +432,19 @@ func parseArguments() throws -> Options {
         case "--pretty": options.pretty = true
         case "--list-commands": options.listCommands = true
         case "--help", "-h": options.showHelp = true
+        case "--feedback-accept", "--feedback-ignore":
+            try select(arg)
+            // bv's spelling: the id is the flag's value, not --id.
+            let value = try next(arg)
+            guard !value.isEmpty, !value.hasPrefix("-") else {
+                throw UsageError(message: "\(arg) requires a bead id")
+            }
+            options.id = value
+        case "--feedback-reset", "--feedback-show":
+            try select(arg)
         default:
             if arg.hasPrefix("--robot-") || arg == "--bead-history" {
-                let name = String(arg.dropFirst(2))
-                guard robotCommands.contains(where: { $0.flag == name }) else {
-                    throw UsageError(message: "unknown command \(arg)")
-                }
-                if let existing = options.command, existing != name {
-                    // Two primary commands in one invocation is ambiguous, and
-                    // silently picking one would produce the wrong payload.
-                    throw UsageError(
-                        message: "--\(existing) and \(arg) cannot be used together")
-                }
-                options.command = name
+                try select(arg)
             } else if arg.hasPrefix("-") {
                 throw UsageError(message: "unknown flag \(arg)")
             } else {
@@ -481,12 +520,38 @@ func usageText() -> String {
         "                       Labels whose beads are never a claimable top pick",
         "                       (env: BV_ROBOT_NOT_READY_LABELS)",
         "",
+        "TRIAGE FEEDBACK (writes .beads/feedback.json, as bv does):",
+        "  --feedback-accept ID / --feedback-ignore ID",
+        "                       Record a verdict on a recommendation; the weights",
+        "                       apply to triage once three verdicts exist",
+        "  --feedback-show      The verdicts and adjusted weights",
+        "  --feedback-reset     Clear them",
+        "",
         "EXIT CODES:",
         "  0  Success",
         "  1  Error",
         "  2  Invalid arguments",
     ])
     return lines.joined(separator: "\n")
+}
+
+/// Runs a command that prints bv's text: the engine's `message` on stdout, or
+/// the engine's error — itself bv's stderr line — on stderr, exit 1.
+func printMessage(
+    of command: RobotCommand, request: [String: Any]?, engine: BeadsEngine
+) async -> Int32 {
+    struct Reply: Decodable { let message: String }
+    do {
+        let data = try await engine.rawJSON(command.method, request: request)
+        emit(try JSONDecoder().decode(Reply.self, from: data).message)
+        return 0
+    } catch EngineError.callFailed(_, let message) {
+        complain(message)
+        return 1
+    } catch {
+        complain("Error handling --\(command.flag): \(error.localizedDescription)")
+        return 1
+    }
 }
 
 // MARK: - Main
@@ -558,6 +623,10 @@ func run() async -> Int32 {
         // which is correct but useless for a command whose whole answer is a
         // ranking derived from them.
         _ = try? await engine.rawJSON("wait_phase2")
+    }
+
+    if command.printsMessage {
+        return await printMessage(of: command, request: request, engine: engine)
     }
 
     do {

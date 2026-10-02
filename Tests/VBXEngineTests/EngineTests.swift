@@ -419,3 +419,61 @@ func toonRestampsOutputFormat() async throws {
     let list = RobotEnvelope.stamping(format: "toon", on: [1, 2]) as? [Int]
     #expect(list == [1, 2])
 }
+
+// vbx-rt3: recording a triage verdict is an engine call like any other, so it
+// crosses the C ABI, writes `.beads/feedback.json` through bv's own functions,
+// and reaches triage only through the reload the app's file watch triggers.
+@Test("A triage verdict is written through the bridge and picked up by the next reload")
+func triageFeedbackRecordsThroughTheBridge() async throws {
+    let source = URL(fileURLWithPath: fixturePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("feedback-few/.beads")
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vbx-feedback-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.copyItem(at: source, to: root.appendingPathComponent(".beads"))
+
+    let engine = BeadsEngine()
+    _ = try await engine.open(path: root.path)
+    defer { Task { await engine.close() } }
+
+    struct Reply: Decodable {
+        struct Block: Decodable {
+            let applied: Bool
+            let totalEvents: Int
+            enum CodingKeys: String, CodingKey {
+                case applied
+                case totalEvents = "total_events"
+            }
+        }
+        let feedback: Block
+        let message: String
+        let path: String
+        let score: Double?
+    }
+    func call(_ method: String, _ request: [String: Any]? = nil) async throws -> Reply {
+        try JSONDecoder().decode(Reply.self, from: try await engine.rawJSON(method, request: request))
+    }
+
+    let shown = try await call("triage_feedback")
+    #expect(shown.feedback.totalEvents == 2 && !shown.feedback.applied)
+
+    let recorded = try await call("triage_feedback_record", ["id": "fb-5", "action": "accept"])
+    #expect(recorded.feedback.totalEvents == 3 && recorded.feedback.applied)
+    #expect(recorded.message.hasPrefix("Recorded accept feedback for fb-5 (score: "))
+    #expect(recorded.score != nil)
+    let written = try Data(contentsOf: URL(fileURLWithPath: recorded.path))
+    let file = try #require(try JSONSerialization.jsonObject(with: written) as? [String: Any])
+    #expect((file["events"] as? [Any])?.count == 3)
+
+    // The reload the file watch would trigger sees the write as a change.
+    let reload = try await engine.rawJSON("reload")
+    let changed = try #require(try JSONSerialization.jsonObject(with: reload) as? [String: Any])
+    #expect(changed["changed"] as? Bool == true)
+
+    await #expect(throws: EngineError.self) {
+        _ = try await engine.rawJSON(
+            "triage_feedback_record", request: ["id": "no-such-bead", "action": "accept"])
+    }
+}
