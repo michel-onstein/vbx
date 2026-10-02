@@ -152,6 +152,31 @@ func workspaceDiscoveryCrossesTheBridge() async throws {
     await engine.close()
 }
 
+@Test("vbx-cli's feedback flags reach the engine ahead of discovery, as bv answers them")
+func feedbackCommandSkipsDiscovery() async throws {
+    // vbx-v1t: at a workspace root with no .beads, bv's --feedback-accept
+    // reads the root as one repository and fails, where every robot command
+    // answers over the workspace.
+    let root = try copiedWorkspace()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appendingPathComponent(".bv/workspace.yaml").path
+
+    let engine = BeadsEngine()
+    let opened = try await engine.open(
+        path: root.path, skipPhase2: true, workspace: config, feedbackCommand: true)
+    #expect(opened.source.isEmpty)
+    #expect(opened.loadStderr.isEmpty)
+    var failure: String?
+    do {
+        _ = try await engine.recordTriageFeedback(id: "api-1", verdict: .accept)
+    } catch EngineError.callFailed(_, let message) {
+        failure = message
+    }
+    #expect(failure?.hasPrefix("Error loading issues: failed to read beads directory") == true)
+    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(".beads").path))
+    await engine.close()
+}
+
 @Test("Issues cross the bridge with their fields intact")
 func issuesDecode() async throws {
     let engine = BeadsEngine()

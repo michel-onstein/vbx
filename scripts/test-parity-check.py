@@ -505,7 +505,8 @@ def test_triage_feedback_and_not_ready(parity) -> None:
 
 def test_feedback_recording(parity) -> None:
     print("\nRecording triage feedback (vbx-rt3)")
-    flags = {step[0] for entry in parity.FEEDBACK_COMPARISONS for step in entry["steps"]}
+    flags = {parity.feedback_step(step)[1][0]
+             for entry in parity.FEEDBACK_COMPARISONS for step in entry["steps"]}
     check("all four of bv's feedback flags are compared",
           flags == {"--feedback-accept", "--feedback-ignore", "--feedback-reset", "--feedback-show"},
           str(flags))
@@ -519,7 +520,7 @@ def test_feedback_recording(parity) -> None:
         file = parity.json.loads(parity.json.dumps(stored).replace("%s", stamp))
         file["events"][0]["score"] = score
         return ([(0, "Recorded accept feedback for fb-5 (score: 0.376)\n", "", False),
-                 (0, show % (stamp, weight), "", volatile)], file)
+                 (0, show % (stamp, weight), "", volatile)], {".beads/feedback.json": file})
 
     same = parity.feedback_differences(
         side("2026-10-01T10:00:00Z", "0.12121212121212123"),
@@ -537,15 +538,45 @@ def test_feedback_recording(parity) -> None:
     check("a recorded score that differs is a difference",
           any("score" in difference for difference in scored), str(scored))
 
-    vbx_steps, vbx_file = side("t", "0.1")
+    vbx_steps, vbx_files = side("t", "0.1")
     failed = parity.feedback_differences(
-        ([(1, "", "Issue not found: x\n", False)], None),
-        ([(1, "", "Issue not found: y\n", False)], None), [["--feedback-accept", "x"]])
+        ([(1, "", "Issue not found: x\n", False)], {}),
+        ([(1, "", "Issue not found: y\n", False)], {}), [["--feedback-accept", "x"]])
     check("a failing step's stderr is compared", len(failed) == 1, str(failed))
     absent = parity.feedback_differences(
-        (vbx_steps, vbx_file), (vbx_steps, None), steps)
+        (vbx_steps, vbx_files), (vbx_steps, {}), steps)
     check("a file only one side wrote is a difference",
           any("feedback.json" in difference for difference in absent), str(absent))
+    # vbx-v1t: from a folder below a workspace, the file landing in the
+    # root's .beads rather than the folder's is the bug, so where is compared.
+    elsewhere = parity.feedback_differences(
+        (vbx_steps, {".beads/feedback.json": vbx_files[".beads/feedback.json"]}),
+        (vbx_steps, {"notes/.beads/feedback.json": vbx_files[".beads/feedback.json"]}), steps)
+    check("the same file written to another directory is a difference",
+          any(difference.startswith(".beads/feedback.json") for difference in elsewhere)
+          and any(difference.startswith("notes/") for difference in elsewhere), str(elsewhere))
+    check("a step run from a folder is named with it",
+          parity.feedback_step_text({"cwd": "notes", "args": ["--feedback-show"]})
+          == "(in notes) --feedback-show")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        workspace = Path(scratch) / "workspace"
+        (workspace / "notes").mkdir(parents=True)
+        (workspace / ".beads").mkdir()
+        (workspace / "member").mkdir()
+        script = Path(scratch) / "fake-bv"
+        # Fails naming the folder it ran in, as bv's errors name the path.
+        script.write_text("#!/bin/sh\necho \"Error: open $PWD/.beads\" >&2\nexit 1\n")
+        script.chmod(0o755)
+        runs = [parity.run_feedback_sequence(
+                    str(script), [{"cwd": "notes", "args": ["--feedback-reset"]}], workspace,
+                    Path(scratch) / side, whole=True)
+                for side in ("vbx", "bv")]
+        check("a whole-workspace sequence copies the folders discovery reads",
+              (Path(scratch) / "vbx" / "member").is_dir(), str(list(Path(scratch).iterdir())))
+        check("each side's copy is named alike in what it prints",
+              runs[0][0][0][2] == runs[1][0][0][2] and "<copy>/notes/.beads" in runs[0][0][0][2],
+              str(runs))
 
 
 def test_report_exports(parity) -> None:
@@ -641,6 +672,49 @@ def test_export_hooks(parity) -> None:
           str(found))
     found = parity.hook_differences(((0, "Done!\n", "", b"r"), {}), ok)
     check("a marker only one side left is a difference", len(found) == 1, str(found))
+
+
+def cli_before_discovery_commands() -> set[str]:
+    """The vbx-cli commands answered before workspace discovery, from its table."""
+    import re
+    source = (ROOT / "Sources" / "vbx-cli" / "main.swift").read_text()
+    table = source.split("let robotCommands: [RobotCommand] = [", 1)[1].split("\n]\n", 1)[0]
+    found = set()
+    for block in re.split(r"RobotCommand\(", table)[1:]:
+        flag = re.match(r'\s*"([^"]+)"', block)
+        if flag and "answersBeforeDiscovery: true" in block:
+            found.add(flag.group(1))
+    return found
+
+
+def test_feedback_before_discovery(parity) -> None:
+    print("\nFeedback flags answer before workspace discovery (vbx-v1t)")
+    found = cli_before_discovery_commands()
+    check("the four feedback flags, and nothing else in the table, skip discovery",
+          found == {"feedback-accept", "feedback-ignore", "feedback-reset", "feedback-show"},
+          str(found))
+    by_fixture = {}
+    for entry in parity.FEEDBACK_COMPARISONS:
+        for fixture in entry.get("only", ()):
+            by_fixture.setdefault(fixture, []).append(entry)
+    for fixture in ("dropped (workspace)", "discovery"):
+        entries = by_fixture.get(fixture, [])
+        check(f"feedback is compared over {fixture}, on a copy of the whole workspace",
+              entries and all(entry.get("whole_workspace") for entry in entries),
+              str([entry["name"] for entry in entries]))
+        flags = {parity.feedback_step(step)[1][0] for entry in entries for step in entry["steps"]}
+        check(f"all four flags are compared over {fixture}",
+              {"--feedback-accept", "--feedback-reset", "--feedback-show"} <= flags, str(flags))
+    discovered = by_fixture.get("dropped (workspace)", [])
+    check("a verdict on a member's bead and one naming --workspace are compared",
+          any(parity.feedback_step(step)[1][:2] == ["--feedback-accept", "api-1"]
+              for entry in discovered for step in entry["steps"])
+          and any("--workspace" in parity.feedback_step(step)[1]
+                  for entry in discovered for step in entry["steps"]))
+    below = by_fixture.get("discovery", [])
+    check("over the discovery fixture, steps run from the folder below the root",
+          any(parity.feedback_step(step)[0] == "notes"
+              for entry in below for step in entry["steps"]))
 
 
 def test_workspace_discovery(parity) -> None:
@@ -749,6 +823,7 @@ def main() -> int:
     test_report_exports(parity)
     test_export_hooks(parity)
     test_feedback_recording(parity)
+    test_feedback_before_discovery(parity)
     test_triage_feedback_and_not_ready(parity)
     test_bv_version_gate(parity)
     test_label_scoped_runs(parity)
