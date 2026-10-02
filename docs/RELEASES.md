@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.18.0 — 2026-10-02
+
+### Features
+
+- Show a bead's defer_until in the Inspector and as a sortable list column ([#115](https://github.com/michel-onstein/vbx/pull/115))
+
 ## 0.17.0 — 2026-10-02
 
 ### Features
