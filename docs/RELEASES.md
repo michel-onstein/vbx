@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.12.0 — 2026-10-02
+
+### Features
+
+- vbx-cli --robot-capacity matches bv, with --capacity-label and the --label scope ([#103](https://github.com/michel-onstein/vbx/pull/103))
+
 ## 0.11.0 — 2026-10-02
 
 ### Features
