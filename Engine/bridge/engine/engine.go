@@ -500,6 +500,8 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 		return s.labelAttention(req)
 	case "eta":
 		return s.eta(req)
+	case "forecast":
+		return s.forecast(req)
 	case "graph":
 		return s.graph()
 	case "export_report":
@@ -571,7 +573,7 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 	case "alerts":
 		return s.alerts(req)
 	case "drift":
-		return s.driftPayload()
+		return s.driftPayload(req)
 	case "baseline_save":
 		return s.saveBaseline(req)
 	case "baseline_info":

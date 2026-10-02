@@ -104,6 +104,7 @@ view snapshots for inspection.
 | `Fixtures/dropped` | 4 valid beads, a line cut off mid-record and one whose `updated_at` precedes its `created_at`: what bv's `load_stats` counts. Deliberately unwritable by `br`. Tests and parity only, as JSONL and as a `beads.db` |
 | `Fixtures/dropped-workspace` | Two repositories (`api`, `web`) under one `.bv/workspace.yaml`; `web` holds a line cut off mid-record. Parity's workspace claim gate (vbx-koc) and, with the demo's `.beads` added at the root, its discovery comparisons (vbx-1y5). Parity copies it out of this repository first: from inside, discovery reaches the repository's own `.beads` and never the workspace (ADR-026) |
 | `Fixtures/feedback`, `Fixtures/feedback-few` | The same 8 beads with a triage `feedback.json` of 4 verdicts (applied: fb-5 outranks the hub fb-1) and of 2 (reported, not applied); fb-6 carries the not-ready label `needs-design`. Tests and parity only |
+| parity's `history` fixture (no directory) | A git repository `parity-check.py` builds at run time (`build_history_workspace`): 8 beads over 13 commits with fixed authors and dates, so the SHAs never change, a tombstone and a late dependency cycle, plus a drift baseline bv saves from the day-4 beads. `--workspace history` runs it alone. Diff and drift parity (vbx-9gl) |
 | `Resources` | App icon: generated `vbx-icon.svg` and the committed `vbx.icns` |
 | `Resources/entitlements` | Developer ID entitlements, plus the App Store *template* |
 | `docs/images` | `vbx-icon.png`, the same artwork at 512px for the README |

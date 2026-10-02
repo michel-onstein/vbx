@@ -330,12 +330,22 @@ its path, and runs the same commands with a built-in (<code>actionable</code>,
 pairs; an unknown name and a missing path must be refused as bv refuses them
 (vbx-7d5) — <code>--robot-correlation-stats</code> too, whose output reads neither flag
 but whose recipe bv still resolves.</p>
-<p>bv scopes a few more post-load commands that vbx does not yet: the
-git-history family (history, related, impact-network, causality, orphans,
-file-beads, file-hotspots, file-relations, impact), diff, drift and forecast.
-<code>vbx-cli</code> refuses <code>--label</code> and <code>--recipe</code> with those (exit 2) rather than
-answer over every bead as if scoped (vbx-9gl). Commands bv answers before it
-loads issues — the recipe list, triage feedback — ignore both, as bv does.</p>
+<p><code>--robot-diff</code>, <code>--robot-drift</code> and <code>--robot-forecast</code> are scoped too, in
+bv's shapes (vbx-9gl). The diff compares the whole revision with the scope's
+beads, tombstones dropped on both sides; drift is bv's <code>--check-drift
+--robot-drift</code> — a fresh analysis of the scope against the saved baseline, no
+envelope, and the verdict as the exit code; the forecast estimates the scope's
+candidates, filtered by <code>--forecast-label</code> and <code>--forecast-sprint</code>. The harness
+builds a <code>history</code> workspace for the first two — a git repository with
+deterministic commits, and a baseline bv saves into it — and compares all three
+unscoped and under a label, an unknown label, recipes, and both.</p>
+<p>bv scopes nine more post-load commands that vbx does not yet: the history
+correlation family (history, related, impact-network, causality, orphans,
+file-beads, file-hotspots, file-relations, impact). Their unscoped output does
+not match bv 0.25.2's correlator either, so <code>vbx-cli</code> refuses <code>--label</code> and
+<code>--recipe</code> with them (exit 2) rather than answer over every bead as if scoped
+(vbx-k7j). Commands bv answers before it loads issues — the recipe list,
+triage feedback — ignore both, as bv does.</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
 <p><strong>Mechanism legend</strong></p>
@@ -1225,7 +1235,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-forecast</code>, <code>--robot-capacity</code> (+ agents, capacity-label, label scope)</td>
+<td><code>--robot-forecast</code>, <code>--robot-capacity</code> (+ agents, forecast-label, forecast-sprint, capacity-label, label and recipe scope)</td>
 <td>✓</td>
 <td>Inspector forecast, sprint scenarios</td>
 <td>6</td>
@@ -1249,13 +1259,13 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-drift</code>, <code>--check-drift</code>, baseline save/show</td>
+<td><code>--robot-drift</code>, <code>--check-drift</code> (+ label and recipe scope; bv's exit code), baseline save/show</td>
 <td>✓</td>
 <td>Alerts + baseline menu</td>
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-diff</code>, <code>--diff-since</code>, <code>--as-of</code></td>
+<td><code>--robot-diff</code>, <code>--diff-since</code> (+ label and recipe scope), <code>--as-of</code></td>
 <td>✓</td>
 <td>Time-travel mode</td>
 <td>7</td>
@@ -1274,7 +1284,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--recipe &lt;name or path.yaml&gt;</code> as a global scope on robot commands (bv 0.25)</td>
-<td>✓ <code>vbx-cli</code> triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show and burndown, alone or with <code>--label</code>, with <code>scope.recipe</code> and <code>scope_hash</code>; a path wherever a name goes (also <code>--robot-recipe-apply</code> and <code>--export</code>); an unknown recipe refused with bv's message and list. Matched in <code>parity-check.py</code> (vbx-7d5, vbx-shz). <strong>Not built:</strong> history, related, impact-network, causality, orphans, the file commands, impact, diff, drift and forecast, which refuse either flag (vbx-9gl)</td>
+<td>✓ <code>vbx-cli</code> triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show, burndown, diff, drift and forecast, alone or with <code>--label</code>, with <code>scope.recipe</code> and <code>scope_hash</code>; a path wherever a name goes (also <code>--robot-recipe-apply</code> and <code>--export</code>); an unknown recipe refused with bv's message and list. Matched in <code>parity-check.py</code> (vbx-7d5, vbx-shz). <strong>Not built:</strong> history, related, impact-network, causality, orphans, the file commands, impact, diff, drift and forecast, which refuse either flag (vbx-9gl)</td>
 <td>Recipe sidebar applies by name</td>
 <td>—</td>
 </tr>

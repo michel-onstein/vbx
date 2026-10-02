@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -151,9 +152,11 @@ def test_default_run_covers_every_fixture(parity) -> None:
           " both forms and as a workspace member, and the discovery layout are all compared",
           names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
                     "feedback-few", "search", "recipes", "dropped", "dropped (beads.db)",
-                    "dropped (workspace)", "discovery"],
+                    "dropped (workspace)", "discovery", "history"],
           str(names))
     for fixture in parity.FIXTURES:
+        if fixture.get("history"):
+            continue  # built at run time; see test_history_workspace
         root = ROOT / fixture["workspace"]
         path = root / ".beads" / "issues.jsonl"
         if (root / ".bv" / "workspace.yaml").exists():
@@ -187,6 +190,52 @@ def test_default_run_covers_every_fixture(parity) -> None:
             check(f"--{entry['vbx']} is scoped to a real fixture ({name})", name in names)
     sprints = ROOT / "Fixtures" / "sprints" / ".beads" / "sprints.jsonl"
     check("the sprints fixture has a sprint file", sprints.exists(), str(sprints))
+
+
+def test_history_workspace(parity) -> None:
+    print("\nThe history fixture (vbx-9gl)")
+    with tempfile.TemporaryDirectory() as scratch:
+        heads = []
+        for name in ("one", "two"):
+            workspace = parity.build_history_workspace(Path(scratch) / name, None)
+            head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=workspace,
+                                  capture_output=True, text=True, check=True).stdout.strip()
+            count = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=workspace,
+                                   capture_output=True, text=True, check=True).stdout.strip()
+            heads.append(head)
+        beads = [json.loads(line) for line in
+                 (workspace / ".beads" / "issues.jsonl").read_text().splitlines()]
+        baseline = workspace / ".bv" / "baseline.json"
+        day_four = [json.loads(line) for line in
+                    parity.history_beads_jsonl(4, {"hist-1": ("closed", 4)}).splitlines()]
+
+    # Fixed authors, dates and configuration: the same SHAs on every run, so
+    # a difference in a resolved revision is never the fixture's.
+    check("two builds have the same HEAD", heads[0] == heads[1], str(heads))
+    check("every commit is built", count == str(len(parity.HISTORY_COMMITS)), count)
+    status = {bead["id"]: bead["status"] for bead in beads}
+    check("hist-8 ends as a tombstone, hist-1 closed and hist-7 present",
+          status.get("hist-8") == "tombstone" and status.get("hist-1") == "closed"
+          and "hist-7" in status, str(status))
+    blockers = {bead["id"]: [dep["depends_on_id"] for dep in bead.get("dependencies", [])]
+                for bead in beads}
+    check("hist-6 and hist-7 block each other, the cycle drift must report",
+          blockers.get("hist-6") == ["hist-7"] and blockers.get("hist-7") == ["hist-6"],
+          str(blockers))
+    check("the day-4 beads have neither hist-7 nor the cycle",
+          "hist-7" not in {bead["id"] for bead in day_four}
+          and not any(bead.get("dependencies") and bead["id"] == "hist-6" for bead in day_four),
+          str(day_four))
+    check("no bv, no baseline: nothing to compare against", not baseline.exists())
+
+    # bv's drift exits 1 or 2 when it finds drift, so its runs compare the
+    # exit status rather than skipping bv's non-zero one.
+    drift = [entry for entry in parity.COMPARISONS
+             if entry["vbx"] == "robot-drift" and not entry.get("rejects")]
+    check("every drift run compares the exit status",
+          drift and all(entry.get("exits") for entry in drift), str(drift))
+    check("every drift run asks bv for --check-drift",
+          all(entry["bv_args"][:1] == ["--check-drift"] for entry in drift))
 
 
 def test_bv_zero_times_are_dropped_only_when_zero(parity) -> None:
@@ -850,6 +899,7 @@ def main() -> int:
     test_dropped_fixture_drops_what_it_says(parity)
     test_every_difference_is_reported(parity)
     test_default_run_covers_every_fixture(parity)
+    test_history_workspace(parity)
     test_bv_zero_times_are_dropped_only_when_zero(parity)
     print()
     if FAILURES:

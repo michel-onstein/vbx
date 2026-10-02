@@ -14,7 +14,8 @@ import Foundation
 //   - **stdout carries structured data only.** Diagnostics and errors go to
 //     stderr, so a caller can pipe stdout into a parser without filtering.
 //   - **Exit codes are 0, 1 and 2.** 0 succeeded, 1 failed, 2 means the
-//     arguments were wrong.
+//     arguments were wrong — except after --robot-drift prints its verdict,
+//     where 1 is critical drift and 2 a warning, as bv's --check-drift exits.
 
 // MARK: - Robot command table
 
@@ -37,7 +38,7 @@ enum ScopeRule {
     /// a recipe that does not resolve fails the command, and otherwise the
     /// flags change nothing.
     case validated
-    /// bv scopes the command and vbx does not yet (vbx-9gl). Either flag is
+    /// bv scopes the command and vbx does not yet (vbx-k7j). Either flag is
     /// refused rather than answered over every bead, which would look like a
     /// scoped answer and not be one.
     case unported
@@ -78,11 +79,16 @@ struct RobotCommand {
     /// repository and its own `.beads/feedback.json`, even where every other
     /// command answers over the workspace above it (vbx-v1t).
     var answersBeforeDiscovery = false
+    /// True when the process exits with the payload's `exit_code` after
+    /// printing it, as bv's --check-drift does: 0 no drift, 1 critical, 2
+    /// warning. Only drift.
+    var exitsWithPayloadCode = false
 
     init(
         _ flag: String, method: String, summary: String, waitsForPhase2: Bool = false,
         scope: ScopeRule = .ignored, printsMessage: Bool = false, bvErrorText: Bool = false,
         printsLoadWarnings: Bool = false, answersBeforeDiscovery: Bool = false,
+        exitsWithPayloadCode: Bool = false,
         request: @escaping (Options) throws -> [String: Any]? = { _ in nil }
     ) {
         self.flag = flag
@@ -95,6 +101,7 @@ struct RobotCommand {
         self.bvErrorText = bvErrorText
         self.printsLoadWarnings = printsLoadWarnings
         self.answersBeforeDiscovery = answersBeforeDiscovery
+        self.exitsWithPayloadCode = exitsWithPayloadCode
     }
 
     /// True when a `--recipe` must resolve before the command runs: bv
@@ -205,9 +212,11 @@ let robotCommands: [RobotCommand] = [
             if let value = options.alertLabel { request["alert_label"] = value }
             return request.isEmpty ? nil : request
         }),
+    // bv's --check-drift --robot-drift: no envelope, and the process exits
+    // with the verdict's code — 1 critical, 2 warning — as bv's does.
     RobotCommand(
         "robot-drift", method: "drift", summary: "Drift against the saved baseline",
-        scope: .unported),
+        scope: .scoped, bvErrorText: true, exitsWithPayloadCode: true),
     RobotCommand("robot-baseline", method: "baseline_info", summary: "The saved baseline"),
 
     // Labels
@@ -258,7 +267,8 @@ let robotCommands: [RobotCommand] = [
         "robot-search-presets", method: "search_presets", summary: "Available weight presets"),
 
     // History and correlation. bv builds each report from its scoped issues;
-    // vbx's is the whole workspace's, so the scope is refused (vbx-9gl).
+    // vbx's report is the whole workspace's, and its shapes predate bv 0.25.2's
+    // correlator, so the scope is refused until both are ported (vbx-k7j).
     RobotCommand(
         "robot-history", method: "history", summary: "Bead-to-commit correlation",
         scope: .unported,
@@ -335,7 +345,7 @@ let robotCommands: [RobotCommand] = [
         request: { options in options.revision.map { ["revision": $0] } }),
     RobotCommand(
         "robot-diff", method: "diff", summary: "Diff against a revision",
-        scope: .unported,
+        scope: .scoped,
         request: { options in
             guard let revision = options.revision else {
                 throw UsageError(message: "--robot-diff requires --diff-since")
@@ -362,14 +372,19 @@ let robotCommands: [RobotCommand] = [
             if let value = options.capacityLabel { request["capacity_label"] = value }
             return request
         }),
+    // bv's --robot-forecast takes the bead id or `all` as its value; here it
+    // is --id, as for every other command naming a bead.
     RobotCommand(
-        "robot-forecast", method: "eta", summary: "ETA for one bead",
-        scope: .unported,
+        "robot-forecast", method: "forecast", summary: "ETA forecasts, one bead or all",
+        scope: .scoped, bvErrorText: true,
         request: { options in
-            [
-                "id": try requireID(options, for: "robot-forecast"),
-                "agents": options.agents,
+            var request: [String: Any] = [
+                "target": try requireID(options, for: "robot-forecast"),
+                "agents": options.forecastAgents,
             ]
+            if let value = options.forecastLabel { request["forecast_label"] = value }
+            if let value = options.forecastSprint { request["forecast_sprint"] = value }
+            return request
         }),
 
     // Recipes and workspace
@@ -532,6 +547,11 @@ struct Options {
     var alertType: String?
     var alertLabel: String?
     var capacityLabel: String?
+    /// bv's --forecast-label, --forecast-sprint and --forecast-agents: which
+    /// beads --robot-forecast estimates, and over how many agents.
+    var forecastLabel: String?
+    var forecastSprint: String?
+    var forecastAgents = 1
     var graphFormat: String?
     var agents = 1
     var depth: Int?
@@ -639,6 +659,9 @@ func parseArguments() throws -> Options {
         case "--alert-type": options.alertType = try next(arg)
         case "--alert-label": options.alertLabel = try next(arg)
         case "--capacity-label": options.capacityLabel = try next(arg)
+        case "--forecast-label": options.forecastLabel = try next(arg)
+        case "--forecast-sprint": options.forecastSprint = try next(arg)
+        case "--forecast-agents": options.forecastAgents = Int(try next(arg)) ?? 1
         case "--graph-format": options.graphFormat = try next(arg)
         case "--agents": options.agents = Int(try next(arg)) ?? 1
         case "--depth": options.depth = Int(try next(arg))
@@ -715,7 +738,7 @@ func parseArguments() throws -> Options {
         for (flag, value) in [("label", options.label), ("recipe", options.recipe)] {
             if let value, !value.isEmpty {
                 throw UsageError(
-                    message: "--\(flag) does not scope --\(name) in vbx-cli yet (vbx-9gl)")
+                    message: "--\(flag) does not scope --\(name) in vbx-cli yet (vbx-k7j)")
             }
         }
     }
@@ -810,7 +833,7 @@ func usageText() -> String {
     lines.append(contentsOf: wrapped(
         "Scoped: " + scopeNames(.scoped), indent: "                       "))
     lines.append(contentsOf: wrapped(
-        "Refused, not yet scoped (vbx-9gl): " + scopeNames(.unported),
+        "Refused, not yet scoped (vbx-k7j): " + scopeNames(.unported),
         indent: "                       "))
     lines.append(contentsOf: [
         "",
@@ -832,6 +855,16 @@ func usageText() -> String {
         "  --search-mode text|hybrid / --search-preset NAME / --limit N",
         "  --search-min-score S Minimum text similarity before hybrid ranking",
         "                       (-1..1); exact ids also obey it",
+        "",
+        "FORECAST (--robot-forecast):",
+        "  --id ID|all          One bead's ETA, or every open bead's with a summary",
+        "  --forecast-label L   Only beads carrying the label (not the --label scope)",
+        "  --forecast-sprint S  Only the sprint's beads",
+        "  --forecast-agents N  Agents working in parallel (default 1)",
+        "",
+        "DRIFT (--robot-drift, bv's --check-drift --robot-drift):",
+        "  Compares the scope against the saved baseline; exits 1 on critical",
+        "  drift and 2 on a warning, as bv does",
         "",
         "TRIAGE AND --robot-next:",
         "  --robot-not-ready-labels A,B",
@@ -870,6 +903,16 @@ func printMessage(
         complain("Error handling --\(command.flag): \(error.localizedDescription)")
         return 1
     }
+}
+
+/// The `exit_code` a payload carries — drift's verdict — or 0 when it has
+/// none.
+func payloadExitCode(_ data: Data) -> Int32 {
+    struct Verdict: Decodable {
+        let exitCode: Int32?
+        private enum CodingKeys: String, CodingKey { case exitCode = "exit_code" }
+    }
+    return (try? JSONDecoder().decode(Verdict.self, from: data))?.exitCode ?? 0
 }
 
 /// bv's `env.Robot.Bool()`: `BV_ROBOT` set to 1, true, yes or on, in any case
@@ -1054,6 +1097,7 @@ func run() async -> Int32 {
 
     do {
         let data = try await engine.rawJSON(command.method, request: request)
+        let status = command.exitsWithPayloadCode ? payloadExitCode(data) : 0
 
         if options.format == "toon" {
             let object = RobotEnvelope.stamping(
@@ -1062,11 +1106,11 @@ func run() async -> Int32 {
             struct Wrapper: Decodable { let toon: String }
             let decoded = try JSONDecoder().decode(Wrapper.self, from: wrapped)
             emit(decoded.toon)
-            return 0
+            return status
         }
 
         emit(options.pretty ? prettyPrinted(data) : String(decoding: data, as: UTF8.self))
-        return 0
+        return status
     } catch EngineError.callFailed(_, let message) where command.bvErrorText {
         complain(message)
         return 1
