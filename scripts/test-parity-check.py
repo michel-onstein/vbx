@@ -93,13 +93,18 @@ def test_dropped_fixture_drops_what_it_says(parity) -> None:
     invalid = [record["id"] for record in records
                if record.get("updated_at", "") < record.get("created_at", "")]
     check("exactly one record is updated before it was created", invalid == ["drop-6"], str(invalid))
-    skips = {fixture["name"]: fixture.get("skip_feedback") for fixture in parity.FIXTURES}
-    check("both dropped fixtures skip the feedback sequences, naming the bead",
-          all("vbx-1l6" in (skips.get(name) or "") for name in ("dropped", "dropped (beads.db)")),
-          str(skips))
-    check("no other fixture skips them",
-          [name for name, reason in skips.items() if reason and not name.startswith("dropped")]
-          == [], str(skips))
+    # vbx-1l6: the feedback runs compare stderr, where bv prints the loader's
+    # warnings, so they run over the dropped records rather than skipping them.
+    check("no fixture skips the feedback sequences",
+          all("skip_feedback" not in fixture for fixture in parity.FIXTURES))
+    over_dropped = [entry["name"] for entry in parity.FEEDBACK_COMPARISONS
+                    if "dropped" in entry.get("only", {"dropped"})]
+    check("a feedback verdict that lands is compared over the dropped records",
+          "feedback-accept over dropped records" in over_dropped, str(over_dropped))
+    exported = [entry["name"] for entry in parity.EXPORT_COMPARISONS
+                if {"dropped", "dropped (beads.db)", "dropped (workspace)"} <= entry["only"]]
+    check("an export, an export-md and an unmatched label are compared over the dropped records",
+          {"export", "export-md", "export --label no-such-label"} <= set(exported), str(exported))
     check("load_stats is lifted with the rest of the envelope", "load_stats" in parity.ENVELOPE_KEYS,
           str(parity.ENVELOPE_KEYS))
     keyed = {entry["vbx"] for entry in parity.COMPARISONS
@@ -319,6 +324,35 @@ def cli_scope_rules() -> dict[str, str]:
         if flag:
             rules[flag.group(1)] = rule.group(1) if rule else "ignored"
     return rules
+
+
+def cli_load_warning_commands() -> set[str]:
+    """The vbx-cli commands that print the loader's warnings, read from its table."""
+    import re
+    source = (ROOT / "Sources" / "vbx-cli" / "main.swift").read_text()
+    table = source.split("let robotCommands: [RobotCommand] = [", 1)[1].split("\n]\n", 1)[0]
+    found = set()
+    for block in re.split(r"RobotCommand\(", table)[1:]:
+        flag = re.match(r'\s*"([^"]+)"', block)
+        if flag and "printsLoadWarnings: true" in block:
+            found.add(flag.group(1))
+    return found
+
+
+def test_load_warnings_follow_bv(parity) -> None:
+    print("\nThe loader's warnings reach stderr where bv prints them (vbx-1l6)")
+    # bv prints them whenever it loads issues outside robot mode. Of the
+    # flags in the command table that is the two feedback verdicts: show and
+    # reset answer before bv loads, and every --robot-* flag is robot mode.
+    found = cli_load_warning_commands()
+    check("feedback-accept and feedback-ignore print them, and nothing else in the table",
+          found == {"feedback-accept", "feedback-ignore"}, str(found))
+    source = (ROOT / "Sources" / "vbx-cli" / "main.swift").read_text()
+    export = source.split("if let path = options.exportPath ?? options.exportMarkdownPath {", 1)[1]
+    export = export.split("\n    }\n", 1)[0]
+    check("--export and --export-md print them, after --recipe resolves and before the export",
+          export.index("recipeResolves") < export.index("printLoadWarnings(info)")
+          < export.index("runExport"), export)
 
 
 def test_every_scoped_command_is_compared_under_scope(parity) -> None:
@@ -707,6 +741,7 @@ def main() -> int:
     test_bv_version_gate(parity)
     test_label_scoped_runs(parity)
     test_every_scoped_command_is_compared_under_scope(parity)
+    test_load_warnings_follow_bv(parity)
     test_envelope_only_keys_are_one_list(parity)
     test_declared_differences_are_narrow(parity)
     test_sqlite_workspace_keeps_every_record(parity)

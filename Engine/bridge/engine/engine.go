@@ -71,6 +71,9 @@ type Session struct {
 	// gate both include them.
 	tombstoneIDs []string
 	warnings     []string
+	// loadStderr is what bv writes to stderr while loading the same source
+	// outside robot mode, line for line. See loadstderr.go.
+	loadStderr []string
 	// sourceLoads is each source's parse accounting — one for a single
 	// repository, one per member for a workspace — from which the robot
 	// envelope's load_stats is built. See loadstats.go.
@@ -133,29 +136,33 @@ func Open(cfg OpenConfig) (*Session, error) {
 // resolveSource applies bv's discovery rules: an explicit file wins, then a
 // .beads directory is searched for issues.jsonl -> beads.jsonl ->
 // beads.base.jsonl, and beads.db is the fallback when no JSONL has content.
-func resolveSource(path string) (src string, kind string, warnings []string, err error) {
+//
+// stderr is the part of warnings bv itself reports — its discovery warnings,
+// as the lines it prints outside robot mode (loadstderr.go). The rest are
+// vbx's own, and bv prints nothing for them.
+func resolveSource(path string) (src string, kind string, warnings, stderr []string, err error) {
 	if path == "" {
 		path, err = os.Getwd()
 		if err != nil {
-			return "", "", nil, err
+			return "", "", nil, nil, err
 		}
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 
 	info, err := os.Stat(abs)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("cannot read %s: %w", abs, err)
+		return "", "", nil, nil, fmt.Errorf("cannot read %s: %w", abs, err)
 	}
 
 	if !info.IsDir() {
 		switch strings.ToLower(filepath.Ext(abs)) {
 		case ".db", ".sqlite", ".sqlite3":
-			return abs, "sqlite", nil, nil
+			return abs, "sqlite", nil, nil, nil
 		case ".jsonl":
-			return abs, "jsonl", nil, nil
+			return abs, "jsonl", nil, nil, nil
 		default:
 			// Anything else is refused rather than assumed to be JSONL.
 			//
@@ -165,7 +172,7 @@ func resolveSource(path string) (src string, kind string, warnings []string, err
 			// choice failed later, in the loader. That is exactly the
 			// panel/loader disagreement Probe's header says it exists to
 			// design out.
-			return "", "", nil, fmt.Errorf(
+			return "", "", nil, nil, fmt.Errorf(
 				"%s is not bead data: expected a .jsonl or .db file, or a folder holding .beads",
 				filepath.Base(abs))
 		}
@@ -178,7 +185,7 @@ func resolveSource(path string) (src string, kind string, warnings []string, err
 		} else if _, serr := os.Stat(filepath.Join(abs, ".beads")); serr == nil {
 			beadsDir = filepath.Join(abs, ".beads")
 		} else {
-			return "", "", nil, fmt.Errorf("no .beads directory found under %s", abs)
+			return "", "", nil, nil, fmt.Errorf("no .beads directory found under %s", abs)
 		}
 	}
 
@@ -187,10 +194,11 @@ func resolveSource(path string) (src string, kind string, warnings []string, err
 	// beads.db is common in bd-managed repos and must not read as "no data".
 	jsonlPath, jerr := loader.FindJSONLPathWithWarnings(beadsDir, func(msg string) {
 		warnings = append(warnings, msg)
+		stderr = append(stderr, stderrWarning(msg))
 	})
 	if jerr == nil && jsonlPath != "" {
 		if st, serr := os.Stat(jsonlPath); serr == nil && st.Size() > 0 {
-			return jsonlPath, "jsonl", warnings, nil
+			return jsonlPath, "jsonl", warnings, stderr, nil
 		}
 		warnings = append(warnings,
 			fmt.Sprintf("%s is empty; falling back to SQLite", filepath.Base(jsonlPath)))
@@ -198,12 +206,12 @@ func resolveSource(path string) (src string, kind string, warnings []string, err
 
 	db := filepath.Join(beadsDir, "beads.db")
 	if _, serr := os.Stat(db); serr == nil {
-		return db, "sqlite", warnings, nil
+		return db, "sqlite", warnings, stderr, nil
 	}
 	if jsonlPath != "" {
-		return jsonlPath, "jsonl", warnings, nil
+		return jsonlPath, "jsonl", warnings, stderr, nil
 	}
-	return "", "", warnings, fmt.Errorf("no bead data found in %s", beadsDir)
+	return "", "", warnings, stderr, fmt.Errorf("no bead data found in %s", beadsDir)
 }
 
 // phase1OnlyConfig disables every metric in bv's expensive tier, leaving
@@ -230,12 +238,12 @@ func (s *Session) load() error {
 		return s.loadWorkspaceSession(configPath)
 	}
 
-	src, kind, warnings, err := resolveSource(s.config.Path)
+	src, kind, warnings, stderr, err := resolveSource(s.config.Path)
 	if err != nil {
 		return err
 	}
 
-	records, read, complete, err := s.readSource(src, kind, &warnings)
+	records, read, complete, err := s.readSource(src, kind, &warnings, &stderr)
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", src, err)
 	}
@@ -246,7 +254,7 @@ func (s *Session) load() error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.source, s.kind, s.warnings = src, kind, warnings
+	s.source, s.kind, s.warnings, s.loadStderr = src, kind, warnings, stderr
 	s.sourceLoads = []sourceLoad{read}
 	s.workspacePath, s.repoLoads = "", nil
 	s.issues, s.records, s.readiness = issues, records, readiness
@@ -264,7 +272,11 @@ func (s *Session) load() error {
 // sourceLoad is the read's parse accounting, for load_stats: bv's own
 // loader's for a JSONL, and vbx's SQLite reader's for a beads.db, which drops
 // and counts rows by bv's SQLite rule.
-func (s *Session) readSource(src, kind string, warnings *[]string) ([]model.Issue, sourceLoad, bool, error) {
+//
+// A JSONL's parse warnings are added to stderr too, because bv prints them;
+// a beads.db's dropped rows are not, because bv's SQLite reader only counts
+// them (loadstderr.go).
+func (s *Session) readSource(src, kind string, warnings, stderr *[]string) ([]model.Issue, sourceLoad, bool, error) {
 	var (
 		issues []model.Issue
 		err    error
@@ -283,6 +295,7 @@ func (s *Session) readSource(src, kind string, warnings *[]string) ([]model.Issu
 		opts := loader.ParseOptions{
 			WarningHandler: func(msg string) {
 				*warnings = append(*warnings, msg)
+				*stderr = append(*stderr, stderrWarning(msg))
 				kept.add(msg)
 			},
 			Stats: &parsed,
@@ -571,7 +584,11 @@ type infoPayload struct {
 	// load kept and dropped — present only when it dropped one. The app's
 	// warnings badge states the counts from it (vbx-dv5).
 	LoadStats *loadStats `json:"load_stats,omitempty"`
-	LoadedAt  string     `json:"loaded_at"`
+	// LoadStderr is what bv prints to stderr while loading the same source
+	// outside robot mode, line for line — for vbx-cli's non-robot commands,
+	// which print it as bv does (vbx-1l6). See loadstderr.go.
+	LoadStderr []string `json:"load_stderr"`
+	LoadedAt   string   `json:"loaded_at"`
 	// WatchPaths is the directories the app's file watch follows: what was
 	// read, and what is read alongside it. One for a single repository; for a
 	// workspace, every member's beads directory as well (vbx-zot).
@@ -595,6 +612,10 @@ func (s *Session) info() ([]byte, error) {
 	if w == nil {
 		w = []string{}
 	}
+	stderr := s.loadStderr
+	if stderr == nil {
+		stderr = []string{}
+	}
 	return json.Marshal(infoPayload{
 		Source:        s.source,
 		Kind:          s.kind,
@@ -602,6 +623,7 @@ func (s *Session) info() ([]byte, error) {
 		DataHash:      hash,
 		Warnings:      w,
 		LoadStats:     robotLoadStats(s.sourceLoads),
+		LoadStderr:    stderr,
 		LoadedAt:      s.loadedAt.Format(time.RFC3339),
 		WatchPaths:    s.watchPathsLocked(),
 		GitWatchPaths: s.gitWatchPathsLocked(),
@@ -725,12 +747,12 @@ func (s *Session) reload() ([]byte, error) {
 		return s.reloadWorkspace(workspacePath)
 	}
 
-	src, kind, warnings, err := resolveSource(s.config.Path)
+	src, kind, warnings, stderr, err := resolveSource(s.config.Path)
 	if err != nil {
 		return nil, err
 	}
 
-	records, read, complete, err := s.readSource(src, kind, &warnings)
+	records, read, complete, err := s.readSource(src, kind, &warnings, &stderr)
 	if err != nil {
 		return nil, fmt.Errorf("reloading %s: %w", src, err)
 	}
@@ -756,7 +778,7 @@ func (s *Session) reload() ([]byte, error) {
 		// cannot see one appear: a malformed line appended to the file
 		// leaves the bead set as it was. The load's accounting is still kept
 		// current — and reported as a change, so the app's badge follows it.
-		accountingChanged := s.refreshAccounting([]sourceLoad{read}, warnings, complete)
+		accountingChanged := s.refreshAccounting([]sourceLoad{read}, warnings, stderr, complete)
 		payload, err := s.info()
 		if err != nil {
 			return nil, err
@@ -768,7 +790,7 @@ func (s *Session) reload() ([]byte, error) {
 	an, stats := s.analyse(issues, readiness, nil)
 
 	s.mu.Lock()
-	s.source, s.kind, s.warnings = src, kind, warnings
+	s.source, s.kind, s.warnings, s.loadStderr = src, kind, warnings, stderr
 	s.sourceLoads = []sourceLoad{read}
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = nil

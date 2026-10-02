@@ -91,9 +91,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Why the dropped-records fixtures skip the feedback comparisons.
-_NO_LOAD_WARNINGS = "vbx-cli prints no loader warnings to stderr where bv does (vbx-1l6)"
-
 # The workspaces every default run covers. A `sqlite` entry is the named
 # fixture's JSONL rebuilt as a beads.db in a temporary directory, so the run
 # reaches the SQLite loader too: vbx carries its own (Engine/bridge/engine/
@@ -130,12 +127,11 @@ FIXTURES = [
     # runs over it, so each envelope bv gives `load_stats` is compared — the
     # clean fixtures above prove the key stays absent when nothing dropped.
     # As a beads.db the malformed line never becomes a row, and the invalid
-    # one is dropped by the SQLite loaders instead. `skip_feedback`: bv's
-    # feedback commands print the loader's warnings to stderr and vbx-cli's do
-    # not (vbx-1l6), which is not what this fixture is for.
-    {"name": "dropped", "workspace": "Fixtures/dropped", "skip_feedback": _NO_LOAD_WARNINGS},
-    {"name": "dropped (beads.db)", "workspace": "Fixtures/dropped", "sqlite": True,
-     "skip_feedback": _NO_LOAD_WARNINGS},
+    # one is dropped by the SQLite loaders instead. The feedback and export
+    # runs compare stderr, where bv prints the JSONL loader's warnings outside
+    # robot mode, and the beads.db's none (vbx-1l6).
+    {"name": "dropped", "workspace": "Fixtures/dropped"},
+    {"name": "dropped (beads.db)", "workspace": "Fixtures/dropped", "sqlite": True},
     # A multi-repository workspace whose `web` member holds a line cut off
     # mid-record (vbx-koc). bv withholds every claim when any member dropped a
     # record, not only when one failed to load; vbx used to count only the
@@ -687,6 +683,10 @@ FEEDBACK_COMPARISONS = [
     # A tombstone is not found; the bead it blocked is.
     {"name": "feedback-accept tombstone", "only": {"readiness", "readiness (beads.db)"},
      "steps": [["--feedback-accept", "rdy-10"], ["--feedback-accept", "rdy-11"]]},
+    # A verdict that lands over a load that dropped records: the loader's
+    # warnings first on stderr, then bv's two lines on stdout (vbx-1l6).
+    {"name": "feedback-accept over dropped records", "only": {"dropped", "dropped (beads.db)"},
+     "steps": [["--feedback-ignore", "drop-1"], ["--feedback-show"]]},
 ]
 
 
@@ -719,8 +719,15 @@ EXPORT_RECIPES = {
                        "export:\n  template: {template}\n",
 }
 EXPORT_ONLY = {"demo", "readiness"}
+# bv prints the loader's warnings before an export's progress lines, and before
+# its warning for a label that matches nothing; these runs cover the
+# dropped-records fixtures too, a workspace member's warnings among them
+# (vbx-1l6).
+EXPORT_DROPPED = {"dropped", "dropped (beads.db)", "dropped (workspace)"}
+EXPORT_OVER_DROPPED = ([], ["--label", "no-such-label"])
 EXPORT_COMPARISONS = [
-    {"name": f"export {' '.join(args)}".strip(), "args": args, "only": EXPORT_ONLY}
+    {"name": f"export {' '.join(args)}".strip(), "args": args,
+     "only": EXPORT_ONLY | EXPORT_DROPPED if args in EXPORT_OVER_DROPPED else EXPORT_ONLY}
     for args in (
         [],
         ["--export-format", "markdown"],
@@ -750,7 +757,7 @@ EXPORT_COMPARISONS = [
 ] + [
     # bv's older flag, which forces Markdown whatever --export-format says.
     {"name": f"export-md {' '.join(args)}".strip(), "args": args, "flag": "--export-md",
-     "only": EXPORT_ONLY}
+     "only": EXPORT_ONLY | EXPORT_DROPPED if args in EXPORT_OVER_DROPPED else EXPORT_ONLY}
     for args in ([], ["--export-format", "json"])
 ]
 
@@ -1342,14 +1349,11 @@ def implemented_commands(vbx: str, cwd: Path) -> set[str]:
 
 
 def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
-                      label: str, verbose: bool, only_named: bool = False,
-                      skip_feedback: str | None = None) -> tuple[int, int]:
+                      label: str, verbose: bool, only_named: bool = False) -> tuple[int, int]:
     """Runs every comparison over one workspace and prints the result.
 
     only_named, for a fixture built for a few commands, runs only the
     comparisons whose `only` names it; the rest are reported skipped.
-    skip_feedback, when set, is why the feedback sequences are reported
-    skipped over this workspace.
 
     bv_skip, when set, is why no command is compared against bv — it is not
     installed, or it is not the engine's version — and every comparable
@@ -1458,9 +1462,6 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
             continue
         if "only" in entry and label not in entry["only"]:
             skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
-            continue
-        if skip_feedback:
-            skipped.append((name, skip_feedback))
             continue
         if bv_skip:
             skipped.append((name, bv_skip))
@@ -1625,8 +1626,7 @@ def main() -> int:
                     workspace, root / "Fixtures" / "demo", Path(scratch) / "discovery")
             d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
                                      fixture["name"], args.verbose,
-                                     fixture.get("only_named", False),
-                                     fixture.get("skip_feedback"))
+                                     fixture.get("only_named", False))
             differed += d
             missing += m
 

@@ -28,8 +28,9 @@ import (
 // workspace functions; only the unexported orchestration is copied.
 // `TestWorkspaceLoaderMatchesBV` holds the port to bv's own loader on the same
 // inputs, so an upgrade that changes bv's behaviour fails there rather than
-// drifting here. Not ported: bv's stderr diagnostics, which it silences when a
-// caller sets a logger, as this is always silent.
+// drifting here. bv's stderr diagnostics are not printed: each goes to the
+// reader's warn instead, at the point bv prints it, so vbx-cli can print the
+// same lines where bv would (vbx-1l6) and the app stays silent.
 
 // workspaceReader is what a workspace load may do beyond reading files.
 type workspaceReader struct {
@@ -39,6 +40,11 @@ type workspaceReader struct {
 	// refreshBDExport runs `bd export` for a Dolt-backed repository before
 	// reading its compatibility JSONL, as bv's loader always does.
 	refreshBDExport bool
+	// warn receives each warning bv prints to stderr outside robot mode, at
+	// the point it prints it: a member's source fallback and its parse
+	// warnings, every one rather than the ten a LoadResult keeps. Nil
+	// discards them.
+	warn func(message string)
 }
 
 // workspaceReader returns what this session's workspace load may do. Only
@@ -74,6 +80,13 @@ type aggregateLoader struct {
 	config *workspace.Config
 	root   string
 	reader workspaceReader
+}
+
+// warn passes on a warning bv would print to stderr.
+func (l *aggregateLoader) warn(message string) {
+	if l.reader.warn != nil {
+		l.reader.warn(message)
+	}
 }
 
 // loadAll is `AggregateLoader.LoadAll`. Repositories load one after another
@@ -390,6 +403,7 @@ func (l *aggregateLoader) loadSingleRepo(repo workspace.RepoConfig, known map[st
 		if len(result.AuthorityWarnings) < 10 {
 			result.AuthorityWarnings = append(result.AuthorityWarnings, message)
 		}
+		l.warn(message)
 	}
 	jsonlPath, err := loader.PrepareBeadsDirForRead(beadsDir, l.reader.refreshBDExport, warnSourceFallback)
 	if err != nil {
@@ -404,6 +418,7 @@ func (l *aggregateLoader) loadSingleRepo(repo workspace.RepoConfig, known map[st
 		if len(result.ParseWarnings) < 10 {
 			result.ParseWarnings = append(result.ParseWarnings, message)
 		}
+		l.warn(message)
 	}
 	issues, err := loader.LoadIssuesFromFileWithOptions(jsonlPath, options)
 	if err != nil {

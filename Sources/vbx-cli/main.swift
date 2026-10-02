@@ -67,10 +67,17 @@ struct RobotCommand {
     /// failure, so it is printed bare rather than wrapped — an unknown
     /// `--robot-blocker-chain` bead, which a scope can also leave out.
     var bvErrorText = false
+    /// True when bv answers the flag outside robot mode *after loading
+    /// issues*, so the loader's warnings reach stderr first — see
+    /// ``printLoadWarnings(_:environment:)``. Every robot command is false: bv
+    /// keeps stderr clean in robot mode. So are feedback-show and
+    /// feedback-reset, which bv answers without loading.
+    var printsLoadWarnings = false
 
     init(
         _ flag: String, method: String, summary: String, waitsForPhase2: Bool = false,
         scope: ScopeRule = .ignored, printsMessage: Bool = false, bvErrorText: Bool = false,
+        printsLoadWarnings: Bool = false,
         request: @escaping (Options) throws -> [String: Any]? = { _ in nil }
     ) {
         self.flag = flag
@@ -81,6 +88,7 @@ struct RobotCommand {
         self.scope = scope
         self.printsMessage = printsMessage
         self.bvErrorText = bvErrorText
+        self.printsLoadWarnings = printsLoadWarnings
     }
 
     /// True when a `--recipe` must resolve before the command runs: bv
@@ -378,10 +386,12 @@ let robotCommands: [RobotCommand] = [
     RobotCommand(
         "feedback-accept", method: "triage_feedback_record",
         summary: "Record that a recommendation was taken", printsMessage: true,
+        printsLoadWarnings: true,
         request: { options in ["id": options.id ?? "", "action": "accept"] }),
     RobotCommand(
         "feedback-ignore", method: "triage_feedback_record",
         summary: "Record that a recommendation was passed over", printsMessage: true,
+        printsLoadWarnings: true,
         request: { options in ["id": options.id ?? "", "action": "ignore"] }),
     RobotCommand(
         "feedback-reset", method: "triage_feedback_reset",
@@ -853,6 +863,30 @@ func printMessage(
     }
 }
 
+/// bv's `env.Robot.Bool()`: `BV_ROBOT` set to 1, true, yes or on, in any case
+/// and with surrounding space, forces robot mode on every command.
+func robotModeForced(_ environment: [String: String]) -> Bool {
+    let value = (environment["BV_ROBOT"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+    return ["1", "true", "yes", "on"].contains(value)
+}
+
+/// Prints the loader's warnings as bv does when it loads issues outside robot
+/// mode: each line on stderr, before anything the command prints itself
+/// (vbx-1l6). The lines are the engine's — bv's text for the same load — so
+/// all this decides is *whether*: the one place vbx-cli prints them, for every
+/// command bv answers that way. Those are `--export`, `--export-md` and each
+/// command whose ``RobotCommand/printsLoadWarnings`` is set. Call it after
+/// `--recipe` resolves, because bv resolves it before loading: a recipe that
+/// fails stops bv before there is anything to warn about.
+func printLoadWarnings(
+    _ info: WorkspaceInfo,
+    environment: [String: String] = ProcessInfo.processInfo.environment
+) {
+    guard !robotModeForced(environment) else { return }
+    for line in info.loadStderr { complain(line) }
+}
+
 /// Resolves `--recipe` before anything runs, as bv does, and refuses one that
 /// names no recipe or no loadable file with bv's stderr: the error, the
 /// loader's warnings, and — for an unknown name — the recipes it could have
@@ -928,12 +962,13 @@ func run() async -> Int32 {
 
     if let path = options.exportPath ?? options.exportMarkdownPath {
         let engine = BeadsEngine()
+        let info: WorkspaceInfo
         do {
             // Live tracker actions, as for the robot commands: a report's
             // per-bead claim commands come from the same binding (ADR-020).
             // Export hooks are repository-configured commands, run as bv runs
             // them; the CLI is never sandboxed, and the app never asks.
-            _ = try await engine.open(
+            info = try await engine.open(
                 path: options.path, liveTrackerActions: true, exportHooks: !options.noHooks,
                 workspace: options.workspace)
         } catch {
@@ -944,6 +979,7 @@ func run() async -> Int32 {
         if let recipe = options.recipe, !(await recipeResolves(recipe, engine: engine)) {
             return 1
         }
+        printLoadWarnings(info)
         return await runExport(options, path: path, engine: engine)
     }
 
@@ -967,11 +1003,12 @@ func run() async -> Int32 {
     }
 
     let engine = BeadsEngine()
+    let info: WorkspaceInfo
     do {
         // The CLI is never sandboxed, so it alone may ask `br` what it
         // supports — which is what puts claim commands in triage and
         // --robot-next (ADR-020). The app leaves this off.
-        _ = try await engine.open(
+        info = try await engine.open(
             path: options.path, liveTrackerActions: true, workspace: options.workspace)
     } catch {
         complain("Error: \(error.localizedDescription)")
@@ -986,6 +1023,10 @@ func run() async -> Int32 {
         !(await recipeResolves(recipe, engine: engine))
     {
         return 1
+    }
+
+    if command.printsLoadWarnings {
+        printLoadWarnings(info)
     }
 
     if command.waitsForPhase2 {

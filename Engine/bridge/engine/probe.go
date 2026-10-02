@@ -94,7 +94,7 @@ func Probe(path string) ProbeResult {
 		return result
 	}
 
-	source, kind, _, err := resolveSource(path)
+	source, kind, _, _, err := resolveSource(path)
 	if err != nil {
 		result.Reason = friendlyProbeReason(path, err)
 		return result
