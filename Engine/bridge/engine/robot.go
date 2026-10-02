@@ -304,6 +304,7 @@ func (s *Session) next(req []byte) ([]byte, error) {
 		SeedDataHash:   v.seedHash(),
 		NotReadyLabels: notReadyLabels(r.NotReadyLabels),
 		Weights:        s.feedbackWeights(),
+		RootIssueID:    r.GraphRoot,
 	}
 	triage := analysis.ComputeTriageWithOptionsAndTime(issues, opts, now)
 

@@ -81,6 +81,9 @@ public enum ModifierRules {
         ModifierRule("robot-diff", requires: ["diff-since"], section: nil),
         ModifierRule("robot-search", requires: ["search"], section: nil),
         ModifierRule(
+            "search-limit", requires: ["search"], section: .search,
+            usage: "--search-limit N", help: "Results returned (default 10)"),
+        ModifierRule(
             "search-min-score", requires: ["search"], section: .search,
             usage: "--search-min-score S",
             help: "Minimum text similarity before hybrid ranking (-1..1); exact ids also obey it"),
@@ -97,8 +100,20 @@ public enum ModifierRules {
             "suggest-confidence", requires: ["robot-suggest"], section: .suggest,
             usage: "--suggest-confidence C", help: "Suggestions at or above C (0.0-1.0)"),
         ModifierRule(
+            "suggest-bead", requires: ["robot-suggest"], section: .suggest,
+            usage: "--suggest-bead ID", help: "Only suggestions involving the bead"),
+        ModifierRule(
             "graph-format", requires: ["robot-graph"], section: .graph,
             usage: "--graph-format json|dot|mermaid", help: "The export's format"),
+        ModifierRule(
+            "graph-root",
+            requires: ["robot-graph", "robot-triage", "robot-triage-by-track", "robot-triage-by-label",
+                       "robot-next"],
+            section: .graph, usage: "--graph-root ID",
+            help: "The subgraph below a bead: what the graph exports, and what triage and next rank"),
+        ModifierRule(
+            "graph-depth", requires: ["robot-graph"], section: .graph,
+            usage: "--graph-depth N", help: "How deep below --graph-root (default 0, unlimited)"),
         ModifierRule(
             "severity", requires: ["robot-alerts"], section: .alerts,
             usage: "--severity S", help: "Only info, warning or critical alerts"),
@@ -234,5 +249,114 @@ public enum ModifierRules {
         }
         if !empty { lines.append(line) }
         return lines
+    }
+}
+
+/// A flag whose value must be one of a fixed set — bv's `enumFlagRule`, from
+/// `cmd/bv/main.go` at the engine's beads_viewer version. bv checks these
+/// right after its modifier rules, with the same exit status 1.
+public struct EnumRule: Sendable, Equatable {
+    /// The flag, without the leading `--`.
+    public let flag: String
+    /// The values it accepts, in bv's order — the order its error lists them.
+    public let allowed: [String]
+
+    /// bv's `validateEnumFlags` for one given value: nil when the value,
+    /// trimmed and lowercased, is allowed, else bv's message word for word,
+    /// with its "did you mean" when a value is close enough.
+    public func violation(_ value: String) -> String? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let expected = "invalid --\(flag) \(goQuoted(value)) (expected one of "
+            + allowed.joined(separator: ", ") + ")"
+        if normalized.isEmpty { return expected }
+        if allowed.contains(normalized) { return nil }
+        guard let suggestion = closest(to: normalized) else { return expected }
+        return expected + "; did you mean \(goQuoted(suggestion))?"
+    }
+
+    /// bv's `suggestClosest`: the nearest allowed value by byte edit distance,
+    /// within a bound that grows with the value's length; a tie goes to the
+    /// candidate that sorts first, by bv's own comparison.
+    func closest(to value: String) -> String? {
+        var best: String?
+        var bestDistance: Int
+        switch value.utf8.count {
+        case ...4: bestDistance = 2
+        case ...10: bestDistance = 3
+        default: bestDistance = 4
+        }
+        for candidate in allowed {
+            let normalized = candidate.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if normalized.isEmpty { continue }
+            let distance = EnumRule.editDistance(value, normalized)
+            if distance <= bestDistance,
+                best == nil || distance < bestDistance || normalized < best!.lowercased()
+            {
+                best = candidate
+                bestDistance = distance
+            }
+        }
+        return best
+    }
+
+    /// bv's `levenshteinDistance`, over bytes as Go indexes a string.
+    static func editDistance(_ a: String, _ b: String) -> Int {
+        let a = Array(a.utf8)
+        let b = Array(b.utf8)
+        if a == b { return 0 }
+        if a.isEmpty { return b.count }
+        if b.isEmpty { return a.count }
+        var previous = Array(0...b.count)
+        for i in 1...a.count {
+            var current = [i] + Array(repeating: 0, count: b.count)
+            for j in 1...b.count {
+                let cost = a[i - 1] == b[j - 1] ? 0 : 1
+                current[j] = min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost)
+            }
+            previous = current
+        }
+        return previous[b.count]
+    }
+}
+
+/// Go's `%q` for the values a flag is given: quoted, with the quote, the
+/// backslash and the common control characters escaped.
+func goQuoted(_ value: String) -> String {
+    var out = "\""
+    for scalar in value.unicodeScalars {
+        switch scalar {
+        case "\"": out += "\\\""
+        case "\\": out += "\\\\"
+        case "\n": out += "\\n"
+        case "\t": out += "\\t"
+        case "\r": out += "\\r"
+        default:
+            if scalar.value < 0x20 || scalar.value == 0x7f {
+                out += String(format: "\\x%02x", scalar.value)
+            } else {
+                out.unicodeScalars.append(scalar)
+            }
+        }
+    }
+    return out + "\""
+}
+
+public enum EnumRules {
+    /// bv's enum rules for every enum flag vbx-cli accepts, in bv's order.
+    /// bv's `--script-format` is left out: vbx-cli has no `--emit-script`.
+    public static let all: [EnumRule] = [
+        EnumRule(flag: "graph-format", allowed: ["json", "dot", "mermaid"])
+    ]
+
+    /// The first given flag whose value is not allowed: bv's
+    /// `validateEnumFlags`. `value` returns a flag's value as given, or nil
+    /// when the flag was not on the command line — bv's `Changed`.
+    public static func violation(value: (String) -> String?) -> String? {
+        for rule in all {
+            if let given = value(rule.flag), let message = rule.violation(given) {
+                return message
+            }
+        }
+        return nil
     }
 }

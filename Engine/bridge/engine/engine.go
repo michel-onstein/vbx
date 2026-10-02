@@ -971,6 +971,7 @@ func (s *Session) triage(req []byte) ([]byte, error) {
 		SeedDataHash:   v.seedHash(),
 		NotReadyLabels: notReadyLabels(r.NotReadyLabels),
 		Weights:        s.feedbackWeights(),
+		RootIssueID:    r.GraphRoot,
 	}
 
 	historyStatus := "skipped"

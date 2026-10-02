@@ -140,11 +140,13 @@ func (s *Session) feedbackBlock() *analysis.FeedbackJSON {
 	return &block
 }
 
-// triageRequest is what triage and next accept: bv's --label scope and its
-// --robot-not-ready-labels value, as written.
+// triageRequest is what triage and next accept: bv's --label scope, its
+// --robot-not-ready-labels value, as written, and its --graph-root, which
+// ranks only the subgraph rooted at that bead (bv-140).
 type triageRequest struct {
 	scopeRequest
 	NotReadyLabels string `json:"not_ready_labels"`
+	GraphRoot      string `json:"graph_root"`
 }
 
 func parseTriageRequest(req []byte) (triageRequest, error) {

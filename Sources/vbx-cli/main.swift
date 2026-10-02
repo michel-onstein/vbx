@@ -186,11 +186,15 @@ func requireID(_ options: Options, for flag: String) throws -> String {
 /// rule: where the flag applies is where its environment variable does.
 let notReadyCommands = Set(ModifierRules.rule("robot-not-ready-labels")?.requires ?? [])
 
-/// bv's opt-in not-ready label-class for triage and --robot-next: the flag when
-/// it is set, else `BV_ROBOT_NOT_READY_LABELS`. Passed as written — the engine
-/// splits and trims it, as bv's `resolveNotReadyLabels` does.
-func notReadyRequest(_ options: Options) -> [String: Any]? {
-    options.notReadyLabels.map { ["not_ready_labels": $0] }
+/// Triage's and --robot-next's request. bv's opt-in not-ready label-class: the
+/// flag when it is set, else `BV_ROBOT_NOT_READY_LABELS`, passed as written —
+/// the engine splits and trims it, as bv's `resolveNotReadyLabels` does. And
+/// bv's --graph-root, which ranks only the subgraph below the bead.
+func triageRequest(_ options: Options) -> [String: Any]? {
+    var request: [String: Any] = [:]
+    if let value = options.notReadyLabels { request["not_ready_labels"] = value }
+    if let value = options.graphRoot, !value.isEmpty { request["graph_root"] = value }
+    return request.isEmpty ? nil : request
 }
 
 /// Resolves the flag against the environment variable bv falls back to.
@@ -208,10 +212,10 @@ let robotCommands: [RobotCommand] = [
     // Triage and planning
     RobotCommand(
         "robot-triage", method: "triage", summary: "Ranked recommendations",
-        waitsForPhase2: true, scope: .scoped, request: notReadyRequest),
+        waitsForPhase2: true, scope: .scoped, request: triageRequest),
     RobotCommand(
         "robot-next", method: "next", summary: "The single claim-safe next bead",
-        waitsForPhase2: true, scope: .scoped, request: notReadyRequest),
+        waitsForPhase2: true, scope: .scoped, request: triageRequest),
     RobotCommand(
         "robot-plan", method: "plan", summary: "Parallel execution tracks",
         scope: .scoped),
@@ -228,8 +232,7 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-insights", method: "insights", summary: "Deep graph metrics",
-        waitsForPhase2: true, scope: .scoped,
-        request: { options in options.limit.map { ["limit": $0] } }),
+        waitsForPhase2: true, scope: .scoped),
     RobotCommand(
         "robot-actionable", method: "actionable", summary: "Beads with nothing blocking them"),
     RobotCommand(
@@ -246,7 +249,7 @@ let robotCommands: [RobotCommand] = [
             var request: [String: Any] = [:]
             if let value = options.suggestType { request["type"] = value }
             if let value = options.suggestConfidence { request["min_confidence"] = value }
-            if let value = options.id { request["bead"] = value }
+            if let value = options.suggestBead { request["bead"] = value }
             return request.isEmpty ? nil : request
         }),
     RobotCommand(
@@ -291,8 +294,8 @@ let robotCommands: [RobotCommand] = [
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.graphFormat { request["format"] = value }
-            if let value = options.root { request["root"] = value }
-            if let value = options.depth { request["depth"] = value }
+            if let value = options.graphRoot { request["root"] = value }
+            if let value = options.graphDepth { request["depth"] = value }
             return request.isEmpty ? nil : request
         }),
     RobotCommand(
@@ -312,7 +315,7 @@ let robotCommands: [RobotCommand] = [
             var request: [String: Any] = ["query": options.query ?? ""]
             if let value = options.searchMode { request["mode"] = value }
             if let value = options.searchPreset { request["preset"] = value }
-            if let value = options.limit { request["limit"] = value }
+            if let value = options.searchLimit { request["limit"] = value }
             if let value = options.searchMinScore { request["min_score"] = value }
             return request
         }),
@@ -602,7 +605,6 @@ struct Options {
     var file: String?
     var files: [String]?
     var label: String?
-    var root: String?
     var recipe: String?
     var revision: String?
     var query: String?
@@ -621,17 +623,22 @@ struct Options {
     var forecastLabel: String?
     var forecastSprint: String?
     var forecastAgents = 1
+    /// bv's --graph-format, --graph-root and --graph-depth: the export's
+    /// format and the subgraph it covers. --graph-root also roots triage and
+    /// next, as in bv.
     var graphFormat: String?
+    var graphRoot: String?
+    var graphDepth: Int?
     var agents = 1
-    var depth: Int?
-    var limit: Int?
+    /// bv's --search-limit and --suggest-bead.
+    var searchLimit: Int?
+    var suggestBead: String?
     /// bv's --robot-max-results and --robot-min-confidence, which priority
     /// reads; --suggest-confidence, suggest's; --min-confidence, history's.
     var maxResults: Int?
     var robotMinConfidence: Double?
     var suggestConfidence: Double?
     var minConfidence: Double?
-    var threshold: Double?
     /// The history commands' modifiers, under bv's names: --history-limit,
     /// --history-since, --hotspots-limit, --relations-threshold,
     /// --relations-limit, --file-beads-limit, --network-depth,
@@ -773,7 +780,6 @@ func parseArguments() throws -> Options {
         case "--files":
             options.files = try next(arg).split(separator: ",").map(String.init)
         case "--label": options.label = try next(arg)
-        case "--root": options.root = try next(arg)
         case "--recipe": options.recipe = try next(arg)
         case "--diff-since", "--as-of", "--revision": options.revision = try next(arg)
         case "--search": options.query = try next(arg)
@@ -790,11 +796,12 @@ func parseArguments() throws -> Options {
         case "--forecast-agents": options.forecastAgents = Int(try next(arg)) ?? 1
         case "--graph-format": options.graphFormat = try next(arg)
         case "--agents": options.agents = Int(try next(arg)) ?? 1
-        case "--depth": options.depth = Int(try next(arg))
-        case "--limit": options.limit = Int(try next(arg))
+        case "--graph-root": options.graphRoot = try next(arg)
+        case "--graph-depth": options.graphDepth = try intValue(try next(arg), flag: arg)
+        case "--search-limit": options.searchLimit = try intValue(try next(arg), flag: arg)
+        case "--suggest-bead": options.suggestBead = try next(arg)
         case "--min-confidence": options.minConfidence = Double(try next(arg))
         case "--suggest-confidence": options.suggestConfidence = Double(try next(arg))
-        case "--threshold": options.threshold = Double(try next(arg))
         case "--history-limit": options.historyLimit = try intValue(try next(arg), flag: arg)
         case "--history-since": options.historySince = try next(arg)
         case "--hotspots-limit": options.hotspotsLimit = try intValue(try next(arg), flag: arg)
@@ -859,6 +866,12 @@ func parseArguments() throws -> Options {
     if let message = ModifierRules.violation(
         given: options.given, isActive: { isActive($0, options) })
     {
+        throw UsageError(message: message, status: 1)
+    }
+    // Then its enum flags' values, with the same status.
+    if let message = EnumRules.violation(value: { flag in
+        flag == "graph-format" && options.given.contains(flag) ? options.graphFormat : nil
+    }) {
         throw UsageError(message: message, status: 1)
     }
     if options.given.contains("workspace"), options.given.contains("path") {
@@ -1008,7 +1021,6 @@ func usageText() -> String {
         "",
         "SEARCH (--robot-search):",
         "  --search QUERY       The query; a bead id returns that bead first",
-        "  --limit N            Results returned",
     ])
     lines.append(contentsOf: modifiers(.search))
     lines.append(contentsOf: ["", "SUGGEST (--robot-suggest):"])
@@ -1016,8 +1028,6 @@ func usageText() -> String {
     lines.append(contentsOf: ["", "GRAPH (--robot-graph):"])
     lines.append(contentsOf: modifiers(.graph))
     lines.append(contentsOf: [
-        "  --root ID / --depth N",
-        "                       The subgraph below a bead, to a depth",
         "",
         "ALERTS (--robot-alerts):",
     ])

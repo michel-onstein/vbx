@@ -166,7 +166,13 @@ bv's own source at the go.mod version, and the harness compares one refusal per
 rule plus the accepted pairings. Priority and suggest take bv's spellings
 `--robot-by-label`, `--robot-by-assignee`, `--robot-max-results`,
 `--robot-min-confidence` and `--suggest-confidence`; `--min-confidence` is the
-history's alone, as in bv.
+history's alone, as in bv. Search, suggest and the graph take bv's spellings too
+— `--search-limit`, `--suggest-bead`, `--graph-root` and `--graph-depth`, which
+`vbx-cli` once called `--limit`, `--id`, `--root` and `--depth` — and
+`--graph-root` roots triage and `--robot-next` as it does in bv. `--graph-format`
+is held to bv's values by bv's enum rule, `EnumRules` beside `ModifierRules`: an
+unknown value is bv's `invalid --graph-format "svg" (expected one of json, dot,
+mermaid)`, with its "did you mean", and exit 1 (vbx-pfy).
 
 The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.
@@ -340,8 +346,8 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 
 | `bv` command | `vbx-cli` | GUI surface | Phase |
 |---|---|---|---|
-| `--robot-triage`, `--robot-triage-by-track`, `--robot-triage-by-label` | ✓ | Insights triage section | 6 |
-| `--robot-next` | ✓ (claim command from the live tracker, CLI only — ADR-020) | "Next bead" toolbar action + Shortcuts intent | 6 |
+| `--robot-triage`, `--robot-triage-by-track`, `--robot-triage-by-label` (+ `--graph-root`) | ✓ (`--robot-triage` takes `--graph-root`, vbx-pfy) | Insights triage section | 6 |
+| `--robot-next` (+ `--graph-root`) | ✓ (claim command from the live tracker, CLI only — ADR-020) | "Next bead" toolbar action + Shortcuts intent | 6 |
 | `--robot-plan` | ✓ | Actionable Plan view | 6 |
 | `--robot-insights`, `--robot-metrics` | ✓ | Insights dashboard | 6 |
 | `--robot-priority` | ✓ | Priority hints overlay | 6 |
@@ -353,16 +359,16 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-file-beads`, `--robot-file-hotspots`, `--robot-file-relations` (+ their limits and threshold, label and recipe scope) | ✓ bv's correlator (vbx-k7j) | History file drill-down | 6 |
 | `--robot-orphans` (+ `--orphans-min-score`, label and recipe scope) | ✓ bv's detector (vbx-k7j) | History orphans tab | 6 |
 | `--robot-explain-correlation`, `--robot-confirm-correlation`, `--robot-reject-correlation`, `--robot-correlation-stats` | ✓ | History feedback controls | 6 |
-| `--robot-search` (+ mode, preset, weights, limit) | ✓ | Search field | 6 |
+| `--robot-search` (+ mode, preset, weights, `--search-limit`) | ✓ | Search field | 6 |
 | `--search-min-score`, guaranteed exact-ID hit (bv 0.25) | ✓ through bv's `SearchTopKWithOptions`; `vbx-cli --search-min-score` with bv's validation and `min_score` echo (vbx-52c). No threshold control in the app yet (vbx-c1j) | Search field (hybrid mode gets the exact-ID hit) | 6 |
-| `--robot-suggest` (+ `--suggest-type`, bead, `--suggest-confidence`) | ✓ (bead as `--id`) | Inspector suggestions | 6 |
+| `--robot-suggest` (+ `--suggest-type`, `--suggest-bead`, `--suggest-confidence`) | ✓ | Inspector suggestions | 6 |
 | `--robot-forecast`, `--robot-capacity` (+ agents, forecast-label, forecast-sprint, capacity-label, label and recipe scope) | ✓ | Inspector forecast, sprint scenarios | 6 |
 | `--robot-burndown`, `--robot-sprint-list`, `--robot-sprint-show` | ✓ | Sprint dashboard | 6 |
 | `--robot-label-health`, `--robot-label-flow`, `--robot-label-attention` (+ label and recipe scope) | ✓ | Label dashboard, Flow matrix, Attention | 6 |
 | `--robot-alerts` (+ severity, alert-type, alert-label, label scope) | ✓ | Alerts panel | 6 |
 | `--robot-drift`, `--check-drift` (+ label and recipe scope; bv's exit code), baseline save/show | ✓ (`vbx-cli --save-baseline DESC` in bv's file format and prose, the commit read from the workspace's object store rather than a `git` process — vbx-6s8. **Not built:** `--label` / `--recipe` on the save, refused) | Alerts + baseline menu | 6 |
 | `--robot-diff`, `--diff-since` (+ label and recipe scope), `--as-of` | ✓ | Time-travel mode | 7 |
-| `--robot-graph` (+ format, root, depth) | ✓ | Graph export menu | 6 |
+| `--robot-graph` (+ `--graph-format`, `--graph-root`, `--graph-depth`) | ✓ | Graph export menu | 6 |
 | `--robot-recipes` | ✓ | Recipe sidebar | 6 |
 | `--recipe <name or path.yaml>` as a global scope on robot commands (bv 0.25) | ✓ `vbx-cli` triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show, burndown, diff, drift and forecast, diff, drift, forecast and the nine history commands, alone or with `--label`, with `scope.recipe` and `scope_hash`; a path wherever a name goes (also `--robot-recipe-apply` and `--export`); an unknown recipe refused with bv's message and list. Matched in `parity-check.py` (vbx-7d5, vbx-shz, vbx-9gl, vbx-k7j). **Not built:** `--save-baseline`, which refuses either flag | Recipe sidebar applies by name | — |
 | `--robot-by-label`, `--robot-by-assignee` | ✓ (refused beside any command but `--robot-priority`, as in bv — vbx-uao) | Grouping controls | 6 |

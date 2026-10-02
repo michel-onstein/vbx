@@ -529,12 +529,19 @@ MODIFIER_REJECTS = tuple(
         ("robot-triage", ["--export-template", "report.md"]),
         ("robot-diff", []),
         ("robot-search", []),
+        ("robot-triage", ["--search-limit", "3"]),
+        ("robot-search", ["--search-limit", "3"]),
         ("robot-triage", ["--search-min-score", "0.3"]),
         ("robot-triage", ["--search-mode", "text"]),
         ("robot-triage", ["--search-preset", "default"]),
         ("robot-plan", ["--suggest-type", "cycle"]),
         ("robot-plan", ["--suggest-confidence", "0.5"]),
+        ("robot-plan", ["--suggest-bead", "vbx-3"]),
         ("robot-triage", ["--graph-format", "dot"]),
+        ("robot-plan", ["--graph-root", "vbx-3"]),
+        ("robot-insights", ["--graph-root", "vbx-3"]),
+        ("robot-triage", ["--graph-depth", "2"]),
+        ("robot-next", ["--graph-depth", "2"]),
         ("robot-triage", ["--severity", "critical"]),
         ("robot-triage", ["--alert-type", "stale_issue"]),
         ("robot-triage", ["--alert-label", "engine"]),
@@ -559,6 +566,15 @@ MODIFIER_REJECTS = tuple(
         ("robot-triage", ["--robot-by-assignee", "ada"]),
         ("robot-orphans", ["--history-limit", "3", "--history-since", "2026-08-06"]),
         ("robot-history", ["--relations-limit", "2", "--network-depth", "2"]),
+        # bv's enum rule for --graph-format (vbx-pfy), checked after the
+        # modifier rules: a value outside json, dot and mermaid, with bv's
+        # "did you mean" when one is close; and a misplaced --graph-format
+        # with a bad value is refused for its placement first.
+        ("robot-graph", ["--graph-format", "svg"]),
+        ("robot-graph", ["--graph-format", "dott"]),
+        ("robot-graph", ["--graph-format", "mermiad"]),
+        ("robot-graph", ["--graph-format", ""]),
+        ("robot-triage", ["--graph-format", "svg"]),
     )
 ) + (
     ("robot-forecast", ["--id", "all", "--capacity-label", "ui"], ["all", "--capacity-label", "ui"]),
@@ -581,6 +597,18 @@ MODIFIER_RUNS = (
     ("robot-priority", ["--robot-min-confidence", "0.5", "--robot-max-results", "2"],
      {"bv_path": "recommendations", "vbx_path": "recommendations"}),
     ("robot-suggest", ["--suggest-confidence", "0.9"], {}),
+    # bv's spellings for what vbx-cli once called --id, --root and --depth
+    # (vbx-pfy), and --graph-root beside triage and next, which it also roots.
+    ("robot-suggest", ["--suggest-bead", "vbx-6"], {}),
+    ("robot-suggest", ["--suggest-bead", "no-such-bead"], {}),
+    ("robot-graph", ["--graph-root", "vbx-3"], {}),
+    ("robot-graph", ["--graph-root", "vbx-3", "--graph-depth", "1"], {}),
+    ("robot-graph", ["--graph-root", "vbx-3", "--graph-format", "mermaid"], {}),
+    ("robot-graph", ["--graph-format", "DOT"], {}),
+    ("robot-graph", ["--graph-depth", "1"], {}),
+    ("robot-triage", ["--graph-root", "vbx-3"], TRIAGE_PATHS),
+    ("robot-triage", ["--graph-root", "no-such-bead"], TRIAGE_PATHS),
+    ("robot-next", ["--graph-root", "vbx-3"], {}),
 )
 
 # What a diff comparison compares: bv's payload and envelope. vbx adds
@@ -758,7 +786,7 @@ COMPARISONS = [
     # recency reads the wall clock in vbx (vbx-48y), so its scores differ for
     # a reason that is not search's.
     {"vbx": "robot-search", "bv": "robot-search", "name": "robot-search " + " ".join(arg or "''" for arg in args),
-     "vbx_args": ["--search", query, "--limit", limit, *rest],
+     "vbx_args": ["--search", query, "--search-limit", limit, *rest],
      "bv_args": ["--search", query, "--search-limit", limit, *rest],
      "keys": SEARCH_KEYS, "only": {fixture}}
     for fixture, query, limit, rest in (
@@ -795,7 +823,7 @@ COMPARISONS = [
     # whole workspace's. Compared on the ranking and the scope it names.
     {"vbx": "robot-search", "bv": "robot-search",
      "name": f"robot-search {query} {limit} {' '.join(rest)}",
-     "vbx_args": ["--search", query, "--limit", limit, *rest],
+     "vbx_args": ["--search", query, "--search-limit", limit, *rest],
      "bv_args": ["--search", query, "--search-limit", limit, *rest],
      "keys": (*SEARCH_KEYS, "scope", "scope_hash", "data_hash"), "only": {fixture}}
     for fixture, query, limit, rest in (

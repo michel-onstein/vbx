@@ -382,7 +382,13 @@ bv's own source at the go.mod version, and the harness compares one refusal per
 rule plus the accepted pairings. Priority and suggest take bv's spellings
 <code>--robot-by-label</code>, <code>--robot-by-assignee</code>, <code>--robot-max-results</code>,
 <code>--robot-min-confidence</code> and <code>--suggest-confidence</code>; <code>--min-confidence</code> is the
-history's alone, as in bv.</p>
+history's alone, as in bv. Search, suggest and the graph take bv's spellings too
+— <code>--search-limit</code>, <code>--suggest-bead</code>, <code>--graph-root</code> and <code>--graph-depth</code>, which
+<code>vbx-cli</code> once called <code>--limit</code>, <code>--id</code>, <code>--root</code> and <code>--depth</code> — and
+<code>--graph-root</code> roots triage and <code>--robot-next</code> as it does in bv. <code>--graph-format</code>
+is held to bv's values by bv's enum rule, <code>EnumRules</code> beside <code>ModifierRules</code>: an
+unknown value is bv's <code>invalid --graph-format "svg" (expected one of json, dot,
+mermaid)</code>, with its "did you mean", and exit 1 (vbx-pfy).</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
 <p><strong>Mechanism legend</strong></p>
@@ -1182,13 +1188,13 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </thead>
 <tbody>
 <tr>
-<td><code>--robot-triage</code>, <code>--robot-triage-by-track</code>, <code>--robot-triage-by-label</code></td>
-<td>✓</td>
+<td><code>--robot-triage</code>, <code>--robot-triage-by-track</code>, <code>--robot-triage-by-label</code> (+ <code>--graph-root</code>)</td>
+<td>✓ (<code>--robot-triage</code> takes <code>--graph-root</code>, vbx-pfy)</td>
 <td>Insights triage section</td>
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-next</code></td>
+<td><code>--robot-next</code> (+ <code>--graph-root</code>)</td>
 <td>✓ (claim command from the live tracker, CLI only — ADR-020)</td>
 <td>"Next bead" toolbar action + Shortcuts intent</td>
 <td>6</td>
@@ -1260,7 +1266,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-search</code> (+ mode, preset, weights, limit)</td>
+<td><code>--robot-search</code> (+ mode, preset, weights, <code>--search-limit</code>)</td>
 <td>✓</td>
 <td>Search field</td>
 <td>6</td>
@@ -1272,8 +1278,8 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-suggest</code> (+ <code>--suggest-type</code>, bead, <code>--suggest-confidence</code>)</td>
-<td>✓ (bead as <code>--id</code>)</td>
+<td><code>--robot-suggest</code> (+ <code>--suggest-type</code>, <code>--suggest-bead</code>, <code>--suggest-confidence</code>)</td>
+<td>✓</td>
 <td>Inspector suggestions</td>
 <td>6</td>
 </tr>
@@ -1314,7 +1320,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>7</td>
 </tr>
 <tr>
-<td><code>--robot-graph</code> (+ format, root, depth)</td>
+<td><code>--robot-graph</code> (+ <code>--graph-format</code>, <code>--graph-root</code>, <code>--graph-depth</code>)</td>
 <td>✓</td>
 <td>Graph export menu</td>
 <td>6</td>

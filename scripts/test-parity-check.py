@@ -992,6 +992,73 @@ def bv_modifier_rules() -> list[tuple[str, list[str]]] | None:
                 r'\{modifier: "([^"]+)", requires: \[\]string\{([^}]*)\}\}', table)]
 
 
+def cli_enum_rules() -> list[tuple[str, list[str]]]:
+    """vbx-cli's enum rules, (flag, allowed values), in table order."""
+    source = (ROOT / "Sources" / "VBXCore" / "ModifierRules.swift").read_text()
+    table = source.split("public static let all: [EnumRule] = [", 1)[1].split("\n    ]\n", 1)[0]
+    return [(flag, re.findall(r'"([^"]+)"', allowed))
+            for flag, allowed in re.findall(
+                r'EnumRule\(flag: "([^"]+)", allowed: \[([^\]]*)\]\)', table)]
+
+
+def bv_enum_rules() -> list[tuple[str, list[str]]] | None:
+    """bv's enumRules from cmd/bv/main.go, or None when Go cannot name the
+    module's directory."""
+    try:
+        directory = subprocess.run(
+            ["go", "list", "-m", "-f", "{{.Dir}}", "github.com/Dicklesworthstone/beads_viewer"],
+            cwd=ROOT / "Engine" / "bridge", capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    main_go = Path(directory) / "cmd" / "bv" / "main.go"
+    if not directory or not main_go.exists():
+        return None
+    table = main_go.read_text().split("enumRules := []enumFlagRule{", 1)[1].split("\n\t\t}\n", 1)[0]
+    return [(flag, re.findall(r'"([^"]+)"', allowed))
+            for flag, allowed in re.findall(
+                r'\{name: "([^"]+)", allowed: \[\]string\{([^}]*)\}\}', table)]
+
+
+def test_enum_rules_and_bv_spellings(parity) -> None:
+    print("\nvbx-cli takes bv's spellings, and bv's enum rules (vbx-pfy)")
+    source = (ROOT / "Sources" / "vbx-cli" / "main.swift").read_text()
+    parsed = set(re.findall(r'case "--([a-z][a-z-]*)"', source))
+    # vbx-cli's own names for bv's flags are gone outright, and the flag it
+    # parsed and never read with them.
+    for old in ("limit", "depth", "root", "threshold"):
+        check(f"vbx-cli no longer parses --{old}", old not in parsed)
+    for new in ("search-limit", "graph-root", "graph-depth", "suggest-bead"):
+        check(f"vbx-cli parses bv's --{new}", new in parsed)
+
+    rules = cli_enum_rules()
+    check("the CLI's enum table was read",
+          ("graph-format", ["json", "dot", "mermaid"]) in rules, str(rules))
+    bv = bv_enum_rules()
+    check("bv's enum rules were read from its source", bool(bv), "go list found no module")
+    if bv:
+        check("every vbx-cli enum rule is bv's, with the same values",
+              all(rule in bv for rule in rules), str(rules))
+        unruled = [flag for flag, _ in bv if flag in parsed and flag not in dict(rules)]
+        check("every bv enum flag vbx-cli parses has its rule", not unruled, str(unruled))
+
+    refusals = {f"{command} {' '.join(bv_args)}".strip()
+                for command, _, bv_args in parity.MODIFIER_REJECTS}
+    check("a bad --graph-format is compared refused",
+          {"robot-graph --graph-format svg", "robot-graph --graph-format dott"} <= refusals)
+    accepted = {entry.get("name") or "" for entry in parity.COMPARISONS
+                if not entry.get("rejects")}
+    wanted = {"robot-graph --graph-root vbx-3 --graph-depth 1",
+              "robot-graph --graph-format DOT",
+              "robot-suggest --suggest-bead vbx-6",
+              "robot-triage --graph-root vbx-3", "robot-next --graph-root vbx-3"}
+    check("bv's spellings are compared beside the commands they modify", wanted <= accepted,
+          str(wanted - accepted))
+    searches = [entry for entry in parity.COMPARISONS if entry.get("vbx") == "robot-search"]
+    check("search is compared with bv's --search-limit on both sides",
+          searches and all("--limit" not in entry.get("vbx_args", []) for entry in searches))
+
+
 def test_modifier_rules(parity) -> None:
     print("\nvbx-cli's modifier rules are bv's, and each is compared refused (vbx-uao)")
     rules = cli_modifier_rules()
@@ -1047,6 +1114,7 @@ def test_modifier_rules(parity) -> None:
 def main() -> int:
     parity = load_parity()
     test_modifier_rules(parity)
+    test_enum_rules_and_bv_spellings(parity)
     test_workspace_discovery(parity)
     test_search(parity)
     test_report_exports(parity)
