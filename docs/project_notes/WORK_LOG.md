@@ -5,6 +5,28 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Triage, plan, alerts and metrics carry the robot envelope (vbx-6su)
+
+bv 0.25.2 wraps `--robot-triage`, `--robot-plan`, `--robot-alerts` and
+`--robot-metrics` in its robot envelope (`ctx.Envelope()` in
+`cmd/bv/robot_registry.go`): `generated_at`, `data_hash`, `output_format`,
+`source_path`, `source_kind`, `scope_hash`, `scope` under a label or recipe,
+and `load_stats` when a record was dropped. vbx returned the four as bare
+payloads, so none of those keys reached them. Each now goes through
+`withEnvelope` with the view's unscoped data hash and scope, so the envelope
+sits at the payload's top level beside the fields the app decodes. The Swift
+models need no change, and `envelopedPayloadsStillDecode` decodes all four
+through the app's own calls. `parity-check.py` lifts the envelope keys for
+triage and plan, which bv nests under `triage` and `plan`. Alerts compare
+`alerts`, `summary` and the envelope. Metrics, whose bv payload is runtime
+timings, compare the envelope alone. On the two `beads.db` fixtures,
+`data_hash` and `scope_hash` join ADR-024's declared differences. Parity has 0
+differing commands before and after. `--robot-metrics`, which was listed as
+vbx-only, is now compared and matches on six fixtures. On the two `beads.db`
+fixtures the four now report declared differences instead of matching. Filed vbx-h48, which covers `--robot-metrics`
+ignoring `--label`. Tests: `provenance_test.go`, `loadstats_test.go`,
+`EngineTests.swift`, `test-parity-check.py`.
+
 ## 2026-10-02 — `vbx-cli` prints the loader's warnings where bv does (vbx-1l6)
 
 bv 0.25.2 prints the loader's warnings to stderr whenever it loads issues

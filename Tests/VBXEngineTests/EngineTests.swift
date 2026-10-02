@@ -54,6 +54,41 @@ func loadStatsCrossTheBridge() async throws {
     await clean.close()
 }
 
+// vbx-6su: triage, plan, alerts and metrics gained bv's robot envelope at the
+// payload's top level. The app decodes the same four payloads, so the envelope
+// keys have to sit beside the fields it reads rather than wrap them.
+@Test("Triage, plan, alerts and metrics carry the envelope and still decode for the app")
+func envelopedPayloadsStillDecode() async throws {
+    let dropped = URL(fileURLWithPath: fixturePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("dropped")
+        .path
+    let engine = BeadsEngine()
+    _ = try await engine.open(path: dropped, skipPhase2: true)
+    defer { Task { await engine.close() } }
+
+    for method in ["triage", "plan", "alerts", "metrics"] {
+        let data = try await engine.rawJSON(method)
+        let payload = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        for key in ["generated_at", "data_hash", "output_format", "source_path", "source_kind",
+                    "scope_hash", "load_stats"]
+        {
+            #expect(payload[key] != nil, "\(method) has no \(key)")
+        }
+        #expect(payload["triage"] == nil && payload["plan"] == nil, "\(method) nests its payload")
+    }
+
+    // The typed decodes the app makes, over the same enveloped payloads.
+    let triage = try await engine.triage()
+    #expect(!triage.recommendations.isEmpty)
+    let plan = try await engine.executionPlan()
+    #expect(plan.totalActionable > 0)
+    let alerts = try await engine.alerts()
+    #expect(alerts.summary.total == alerts.alerts.count)
+    let metrics = try await engine.metrics()
+    #expect(metrics.nodeCount == 4)
+}
+
 @Test("A load's stderr crosses the bridge as bv prints it, and a clean load has none")
 func loadStderrCrossesTheBridge() async throws {
     let dropped = URL(fileURLWithPath: fixturePath)

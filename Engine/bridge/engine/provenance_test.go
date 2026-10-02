@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // provenanceShape is the part of bv 0.25's envelope vbx ports (ADR-023).
@@ -62,6 +63,11 @@ func TestEveryEnvelopeCarriesTheSameProvenance(t *testing.T) {
 		{"insights", nil},
 		{"graph_export", nil},
 		{"burndown", map[string]any{"id": "spr-sprint-2"}},
+		// Bare payloads until vbx-6su.
+		{"triage", nil},
+		{"plan", nil},
+		{"alerts", nil},
+		{"metrics", nil},
 	}
 	for _, c := range calls {
 		got := call[provenanceShape](t, s, c.method, c.req)
@@ -109,6 +115,34 @@ func TestLabelScopeHashMatchesBV(t *testing.T) {
 	unscoped := call[provenanceShape](t, s, "next", nil)
 	if unscoped.ScopeHash != "ae83d9fe042335945c1da01cec2e6ad03d1344e2727c0e25514fd0e2d75b8d1f" {
 		t.Errorf("unscoped scope_hash = %q, want bv 0.25.2's", unscoped.ScopeHash)
+	}
+}
+
+// Triage, plan and alerts carried no envelope until vbx-6su. Under a label
+// each names it and hashes its core, and carries the unscoped data hash and a
+// generated_at, as bv 0.25.2's --robot-triage, --robot-plan and --robot-alerts
+// --label engine do over Fixtures/demo.
+func TestTriagePlanAndAlertsCarryTheScopedEnvelope(t *testing.T) {
+	setClock(t, readinessClock)
+	s := openDemo(t)
+	type shape struct {
+		provenanceShape
+		GeneratedAt string `json:"generated_at"`
+	}
+	for _, method := range []string{"triage", "plan", "alerts"} {
+		got := call[shape](t, s, method, map[string]any{"label": "engine"})
+		if got.ScopeHash != "88f4076acefdc8f314976afc1e6976ff486f93ad8b1cf0ab4f6cc171ab9935d3" {
+			t.Errorf("%s: scope_hash = %q, want bv 0.25.2's", method, got.ScopeHash)
+		}
+		if got.DataHash != "0e588914e7e68afcd509715ec5986f236be5660fb00a548b78093a178f97808f" {
+			t.Errorf("%s: data_hash = %q, want bv 0.25.2's unscoped hash", method, got.DataHash)
+		}
+		if got.Scope == nil || got.Scope.Label != "engine" {
+			t.Errorf("%s: scope = %+v, want the label", method, got.Scope)
+		}
+		if got.GeneratedAt != readinessClock.Format(time.RFC3339) {
+			t.Errorf("%s: generated_at = %q, want the pinned clock", method, got.GeneratedAt)
+		}
 	}
 }
 

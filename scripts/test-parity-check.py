@@ -112,6 +112,17 @@ def test_dropped_fixture_drops_what_it_says(parity) -> None:
     check("the commands whose subtree leaves load_stats out compare it on its own",
           keyed == {"robot-priority", "robot-insights", "robot-sprint-list", "robot-search",
                     "robot-blocker-chain"}, str(sorted(keyed)))
+    # vbx-6su: triage, plan, alerts and metrics carry the envelope, so each
+    # comparison of them takes every envelope key — lifted from beside bv's
+    # nested payload, or named among the keys compared.
+    envelope = set(parity.ENVELOPE_KEYS)
+    four = {"robot-triage", "robot-plan", "robot-alerts", "robot-metrics"}
+    runs = [entry for entry in parity.COMPARISONS if entry["vbx"] in four and not entry.get("rejects")]
+    short = [entry.get("name", entry["vbx"]) for entry in runs
+             if not envelope <= set(entry.get("bv_lift", ())) | set(entry.get("keys", ()))
+             and (entry.get("bv_path") or entry.get("keys"))]
+    check("triage, plan, alerts and metrics compare their whole envelope",
+          {entry["vbx"] for entry in runs} == four and short == [], str(short))
 
 
 def test_every_difference_is_reported(parity) -> None:
@@ -266,7 +277,8 @@ def test_declared_differences_are_narrow(parity) -> None:
     check("beside it the declared one is still reported",
           [d for d, _ in accepted] == [velocity_diff], str(accepted))
 
-    undeclared, _, _ = parity.split_declared([hash_diff], "readiness (beads.db)", "robot-triage")
+    # Priority compares its recommendations alone, so it declares no hash.
+    undeclared, _, _ = parity.split_declared([hash_diff], "readiness (beads.db)", "robot-priority")
     check("a path declared for one command is not declared for another",
           undeclared == [hash_diff], str(undeclared))
 

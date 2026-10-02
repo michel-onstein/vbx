@@ -1257,9 +1257,16 @@ holds *and* it means what it means in bv; otherwise declare it envelope-only.
     capped at ten. bv's source-selection warnings — which only join the
     warning list — are the one part vbx cannot reproduce, because it ranks no
     sources. It rides the same shared helper, so it reaches exactly the
-    payloads that carry vbx's envelope; triage, plan, alerts and metrics carry
-    none yet (vbx-6su). `Fixtures/dropped`, as JSONL and as a `beads.db`,
-    compares it on every other command.
+    payloads that carry vbx's envelope. `Fixtures/dropped`, as JSONL and as a
+    `beads.db`, compares it on every command that does.
+  - Since vbx-6su triage, plan, alerts and metrics carry it too, through the
+    same `withEnvelope`, with the unscoped data hash bv's `ctx.Envelope()`
+    gives all four. bv nests triage under `triage` and the plan under `plan`;
+    vbx keeps each payload the result the app decodes, with the envelope
+    beside its fields, so the app's models are unchanged and the harness
+    lifts bv's envelope keys for them as for the label commands. bv's
+    `--robot-metrics` reports runtime timings rather than vbx's GraphStats,
+    so only its envelope is compared.
 - **Envelope-only**, in `parity-check.py`'s single `ENVELOPE_ONLY_KEYS`, each
   with its reason:
   - `source_authority` — bv's report of its multi-source selection: candidates

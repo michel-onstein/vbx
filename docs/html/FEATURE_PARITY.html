@@ -308,7 +308,9 @@ alerts and capacity all read it, so each is compared with a known label
 its <code>full_stats</code>, since bv shapes its top level differently. So do the label
 commands, the blocker chain, search and the sprint commands (vbx-shz): the
 label commands and the blocker chain lift bv's envelope keys into the subtree
-they compare, so <code>scope</code> and <code>scope_hash</code> are checked beside the data, and the
+they compare, so <code>scope</code> and <code>scope_hash</code> are checked beside the data — as
+triage and plan do since vbx-6su, and alerts and metrics compare them by key —
+and the
 sprint commands are compared over the sprints fixture with <code>at-risk</code>, an
 unknown label, <code>actionable</code>, and <code>actionable</code> within <code>burndown</code>.
 <code>test-parity-check.py</code> reads vbx-cli's command table and fails when a command
@@ -407,7 +409,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td><code>load_stats</code> (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records</td>
-<td><code>vbx-cli</code>: in every envelope vbx carries, JSONL, <code>beads.db</code> and workspace alike, compared against bv over <code>Fixtures/dropped</code> (vbx-dv5, ADR-023); triage, plan, alerts and metrics carry no envelope yet (vbx-6su). App: the warnings badge states how many records were dropped</td>
+<td><code>vbx-cli</code>: in every envelope vbx carries, JSONL, <code>beads.db</code> and workspace alike, compared against bv over <code>Fixtures/dropped</code> (vbx-dv5, ADR-023), triage, plan, alerts and metrics included (vbx-6su). App: the warnings badge states how many records were dropped</td>
 <td>Engine + Native</td>
 <td>—</td>
 </tr>

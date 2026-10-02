@@ -65,6 +65,7 @@ func TestEveryEnvelopeCarriesLoadStatsWhenRecordsDropped(t *testing.T) {
 		{"label_attention", nil}, {"capacity", nil}, {"sprint_list", nil},
 		{"search", map[string]any{"query": "import"}},
 		{"blocker_chain", map[string]any{"id": "drop-2"}},
+		{"triage", nil}, {"plan", nil}, {"alerts", nil}, {"metrics", nil},
 		// Not an envelope, but what the app's badge reads.
 		{"info", nil},
 	} {

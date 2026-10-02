@@ -266,6 +266,11 @@ DECLARED_DIFFERENCES = {
         ("robot-capacity", ".scope_hash"): _LOSSY_SCOPE,
         ("robot-capacity --agents 3", ".data_hash"): _LOSSY_HASH,
         ("robot-capacity --agents 3", ".scope_hash"): _LOSSY_SCOPE,
+    } | {
+        # The envelope these four gained in vbx-6su hashes the same read.
+        (command, path): reason
+        for command in ("robot-triage", "robot-plan", "robot-alerts", "robot-metrics")
+        for path, reason in ((".data_hash", _LOSSY_HASH), (".scope_hash", _LOSSY_SCOPE))
     },
     # The dropped-records beads as a beads.db (vbx-dv5) are there for
     # load_stats, which matches; their fingerprint differs as every beads.db's
@@ -274,7 +279,8 @@ DECLARED_DIFFERENCES = {
         (command, path): reason
         for command in ("robot-label-flow", "robot-label-health", "robot-label-attention",
                         "robot-suggest", "robot-graph", "robot-next", "robot-capacity",
-                        "robot-capacity --agents 3")
+                        "robot-capacity --agents 3", "robot-triage", "robot-plan",
+                        "robot-alerts", "robot-metrics")
         for path, reason in ((".data_hash", _LOSSY_HASH), (".scope_hash", _LOSSY_SCOPE))
     } | {("robot-suggest", ".suggestions.data_hash"): _LOSSY_HASH},
 }
@@ -328,10 +334,6 @@ SPRINT_OMITZERO = {"created_at", "updated_at"}
 # both binaries to refuse the arguments, and compares the exit status and the
 # first line of stderr — vbx-cli adds a pointer to --help after it.
 #
-# Triage's `feedback` block is lifted on every run, so a fixture with no
-# feedback.json proves vbx emits none, as well as the feedback fixtures
-# proving it emits bv's.
-TRIAGE_PATHS = {"bv_path": "triage", "bv_lift": ("feedback",)}
 # What a search comparison compares: the ranking and the request it echoes.
 SEARCH_KEYS = ("query", "mode", "limit", "min_score", "results")
 NOT_READY = "needs-design"
@@ -341,6 +343,16 @@ NOT_READY = "needs-design"
 # compares, so the scope and its hash are checked beside the data.
 ENVELOPE_KEYS = ("data_hash", "scope", "scope_hash", "output_format", "source_path",
                  "source_kind", "load_stats")
+# Triage's `feedback` block is lifted on every run, so a fixture with no
+# feedback.json proves vbx emits none, as well as the feedback fixtures
+# proving it emits bv's. bv nests triage and the plan under a key beside the
+# envelope, which vbx carries at the payload's top level (vbx-6su).
+TRIAGE_PATHS = {"bv_path": "triage", "bv_lift": ("feedback", *ENVELOPE_KEYS)}
+PLAN_PATHS = {"bv_path": "plan", "bv_lift": ENVELOPE_KEYS}
+# vbx's alerts payload adds the baseline it compared against; bv's adds
+# skipped checks and usage hints. The alerts, their counts and the envelope
+# are what the two share.
+ALERTS_PATHS = {"keys": ("alerts", "summary", *ENVELOPE_KEYS)}
 LABEL_HEALTH_PATHS = {"bv_path": "results", "bv_lift": ENVELOPE_KEYS}
 LABEL_FLOW_PATHS = {"bv_path": "flow", "bv_lift": ENVELOPE_KEYS}
 # bv projects a ranked subset of the attention scores, cut at
@@ -359,12 +371,12 @@ BLOCKER_CHAIN_RUN = {"vbx_args": ["--id", BLOCKER_CHAIN], "bv_args": [BLOCKER_CH
 SCOPED_RUNS = (
     ("robot-graph", {}),
     ("robot-triage", TRIAGE_PATHS),
-    ("robot-plan", {"bv_path": "plan"}),
+    ("robot-plan", PLAN_PATHS),
     ("robot-priority", {"bv_path": "recommendations", "vbx_path": "recommendations"}),
     ("robot-next", {}),
     ("robot-suggest", {}),
     ("robot-insights", {"bv_path": "full_stats", "vbx_path": "full_stats"}),
-    ("robot-alerts", {"bv_path": "alerts", "vbx_path": "alerts"}),
+    ("robot-alerts", ALERTS_PATHS),
     ("robot-capacity", {}),
     ("robot-label-health", LABEL_HEALTH_PATHS),
     ("robot-label-flow", LABEL_FLOW_PATHS),
@@ -389,12 +401,14 @@ COMPARISONS = [
     {"vbx": "robot-blocker-chain", "bv": "robot-blocker-chain", "only": {"demo"},
      **BLOCKER_CHAIN_RUN},
     {"vbx": "robot-triage", "bv": "robot-triage", **TRIAGE_PATHS},
-    {"vbx": "robot-plan", "bv": "robot-plan", "bv_path": "plan"},
+    {"vbx": "robot-plan", "bv": "robot-plan", **PLAN_PATHS},
     {"vbx": "robot-suggest", "bv": "robot-suggest"},
     {"vbx": "robot-recipes", "bv": "robot-recipes", "compare": False,
      "note": "bv lists summaries; vbx returns full definitions plus source"},
     {"vbx": "robot-graph", "bv": "robot-graph"},
-    {"vbx": "robot-metrics", "bv": None, "note": "vbx-only: raw GraphStats"},
+    # bv's --robot-metrics reports its own runtime timings where vbx's is the
+    # raw GraphStats, so only the envelope the two share is compared.
+    {"vbx": "robot-metrics", "bv": "robot-metrics", "keys": ENVELOPE_KEYS},
     {"vbx": "robot-actionable", "bv": None, "note": "vbx-only: actionable ids"},
     {"vbx": "robot-info", "bv": None, "note": "vbx-only: resolved source"},
     {"vbx": "robot-issues", "bv": None, "note": "vbx-only: the bead set"},
@@ -402,8 +416,7 @@ COMPARISONS = [
     {"vbx": "robot-revisions", "bv": None, "note": "vbx-only: bead-changing commits"},
     {"vbx": "robot-search-presets", "bv": None, "note": "vbx-only: weight presets"},
     {"vbx": "robot-baseline", "bv": None, "note": "vbx-only; bv prints prose"},
-    {"vbx": "robot-alerts", "bv": "robot-alerts", "bv_path": "alerts",
-     "vbx_path": "alerts"},
+    {"vbx": "robot-alerts", "bv": "robot-alerts", **ALERTS_PATHS},
     {"vbx": "robot-sprint-list", "bv": "robot-sprint-list", "bv_path": "sprints",
      "vbx_path": "sprints", "bv_omitzero": SPRINT_OMITZERO},
     # The sprint is named rather than `current`: bv resolves `current` against
@@ -508,7 +521,7 @@ COMPARISONS = [
     # `engine` and `ui` keep different alert types, and an unknown one.
     {"vbx": "robot-alerts", "bv": "robot-alerts", "name": f"robot-alerts --alert-label {label}",
      "vbx_args": ["--alert-label", label], "bv_args": ["--alert-label", label],
-     "only": {"demo"}, "bv_path": "alerts", "vbx_path": "alerts"}
+     "only": {"demo"}, **ALERTS_PATHS}
     for label in ("engine", "ui", "no-such-label")
 ] + [
     # bv's --capacity-label is likewise a filter of its own: an exact match on
@@ -584,8 +597,8 @@ COMPARISONS = [
 ] + [
     # load_stats on the envelope-carrying commands whose usual comparison
     # takes a subtree that leaves it out (vbx-dv5). The rest — label health,
-    # flow and attention, suggest, graph, next, capacity — compare it already,
-    # whole or lifted.
+    # flow and attention, suggest, graph, next, capacity, and triage, plan,
+    # alerts and metrics (vbx-6su) — compare it already, whole or lifted.
     {"vbx": command, "bv": command, "name": f"{command} load_stats",
      "vbx_args": vbx_args, "bv_args": bv_args,
      "keys": ("load_stats", "source_path", "source_kind"),
