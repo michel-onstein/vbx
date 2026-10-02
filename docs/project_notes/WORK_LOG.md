@@ -5,6 +5,19 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — vbx-cli --robot-metrics honours --label and --recipe (vbx-h48)
+
+bv 0.25.2's `--robot-metrics` envelope names the global scope and hashes it
+into `scope_hash`. vbx-cli ignored both flags, so it answered unscoped and its
+envelope named no scope. The engine's `metrics` method now takes the scope
+request and answers over the scoped view. The envelope matches bv's, and the
+GraphStats are the subgraph's: 13 nodes under `engine`, none under an unknown
+label. The app's call sends no scope, so it is unaffected. A recipe that does
+not resolve is refused, as bv refuses it. FEATURE_PARITY §9 and ADR-023 record
+the payload decision. The CLI's output changes, so semver:minor. Parity: 0
+differing commands before and after; the harness compares 11 more metrics runs
+(two labels, seven recipe scopes, two unresolved recipes).
+
 ## 2026-10-02 — vbx-cli takes bv's spellings for search, suggest and graph modifiers (vbx-pfy)
 
 `--limit`, `--depth`, `--root` and suggest's `--id` are now bv's

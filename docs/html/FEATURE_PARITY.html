@@ -1599,6 +1599,10 @@ decision, not an omission.</p>
 <td>The whole point of a native UI</td>
 </tr>
 <tr>
+<td><code>--robot-metrics</code> reports GraphStats, not runtime timings, and scopes them</td>
+<td>bv's payload is its own timings, cache and memory figures, which describe bv's process rather than the graph. vbx's is the GraphStats the app's metrics view decodes. Under <code>--label</code>/<code>--recipe</code> the envelope carries bv's <code>scope</code> and <code>scope_hash</code>, and the GraphStats are the scoped view's, as every other scoped command's analysis is. An envelope that names a scope over whole-load statistics would read as a scoped answer without being one. The app asks unscoped and still gets the whole load (vbx-h48, ADR-023)</td>
+</tr>
+<tr>
 <td>No <code>source_authority</code> / <code>authority_hash</code> in the robot envelope</td>
 <td>vbx resolves one source and ranks none, so a ported report would assert checks it never ran (ADR-023); vbx also keeps its own read of a <code>beads.db</code> (ADR-024)</td>
 </tr>

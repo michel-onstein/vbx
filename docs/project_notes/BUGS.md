@@ -4,6 +4,28 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — vbx-cli --robot-metrics ignored --label and --recipe
+
+**Symptom:** Over `Fixtures/demo`, `bv --robot-metrics --label engine` reports
+`scope: {label: engine}` and `scope_hash 88f4076a…`. `vbx-cli` with the same
+flags answered over all 18 beads, and its envelope named no scope. An unknown
+`--recipe` was accepted instead of refused. (vbx-h48, found in vbx-6su.)
+
+**Cause:** `robot-metrics` was `ScopeRule.ignored` in vbx-cli's command table,
+and the engine's `metrics` method read `wholeView()` and took no request.
+
+**Fix:** `robot-metrics` is `.scoped`, and `metrics` answers over
+`scopedView(req)`. The envelope carries bv's scope, and the GraphStats are the
+scoped view's (FEATURE_PARITY §9, ADR-023). The app and `wait_phase2` pass no
+request, so they still get the whole load.
+
+**Regression tests:** Go `TestScopedMetricsAreTheSubgraphsStats` checks 13 nodes
+under `engine`, none under an unknown label, the recipe's selection under
+`actionable`, and an unknown recipe refused. `TestLabelScopeReachesEveryEnvelope`
+now covers `metrics`. `parity-check.py` compares the metrics envelope under
+both labels, the seven recipe scopes and two unresolved recipes, and
+`test-parity-check.py` asserts every `.scoped` command has those runs.
+
 ## 2026-10-02 — vbx-cli spelled four bv modifiers its own way, so bv's rules for them never applied
 
 **Symptom:** `vbx-cli --robot-triage --limit 3` and `--robot-plan --depth 2`
