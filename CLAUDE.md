@@ -309,6 +309,14 @@ them.
   vbx-cli parses has no rule, a rule differs from bv's source, or a rule has
   no refused parity comparison. Never check a modifier by hand in
   `parseArguments` or a request builder. See BUGS.md, 2026-10-02 (vbx-uao).
+- **vbx-cli never resolves the working directory itself.** Without `--path` it
+  hands the engine `""`, and Go's `os.Getwd` keeps `$PWD`'s spelling of a
+  symlinked directory, as bv's does; `FileManager`'s `currentDirectoryPath` is
+  `getcwd()`, which spells macOS's `/var/…` as `/private/var/…` in every path
+  printed from it. Likewise anything that runs bv or vbx-cli with `cwd=` must
+  set `PWD` to match, or Go falls back to `getcwd()` and both sides resolve
+  alike — which is how the parity harness hid this. See BUGS.md, 2026-10-02
+  (vbx-9g1).
 - **Triage includes a bounded git-history walk**, because bv's does and it
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable

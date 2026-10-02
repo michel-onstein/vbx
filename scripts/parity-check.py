@@ -57,7 +57,11 @@ folder below it (vbx-1y5). Both are copied out of this repository first, since
 inside it discovery reaches the repository's own `.beads`. Last, `history`, a
 git repository built at run time with deterministic commits and a drift
 baseline bv saves into it, for the diff and drift comparisons (vbx-9gl), and
-`history (vbx baseline)`, the same with the baseline vbx-cli saves (vbx-6s8).
+`history (vbx baseline)`, the same with the baseline vbx-cli saves (vbx-6s8),
+and the dropped records and dropped workspace again, reached through a symlink
+with PWD spelled through it, so a path either binary prints from the working
+directory is compared as spelled (vbx-9g1). Every binary runs with PWD set to
+its working directory, as a shell would set it.
 `--workspace` narrows the run to one: a path, or a FIXTURES name.
 
 Each differing command reports its first difference and how many more there
@@ -159,7 +163,21 @@ FIXTURES = [
     # bv's --check-drift reading vbx's file, as `history` has vbx reading bv's.
     {"name": "history (vbx baseline)", "history": True, "only_named": True,
      "vbx_baseline": True},
+    # The dropped fixtures again, each copied out of this repository and
+    # reached through a symlink (vbx-9g1): both binaries run with the link as
+    # their working directory and $PWD spelled through it, as from a shell
+    # that cd'd into it. bv's os.Getwd keeps that spelling, so every path it
+    # prints from the working directory names the link — source_path, and the
+    # workspace discovery notice an export prints. vbx-cli used to resolve the
+    # link (getcwd), so on macOS it printed /private/var/… where bv printed
+    # /var/…. Neither side's path is rewritten: the spelling is what is
+    # compared. `only_named`: the source_path and export comparisons name them.
+    {"name": "dropped (symlinked)", "workspace": "Fixtures/dropped",
+     "only_named": True, "symlinked": True},
+    {"name": "dropped (workspace, symlinked)", "workspace": "Fixtures/dropped-workspace",
+     "only_named": True, "symlinked": True},
 ]
+SYMLINKED = {fixture["name"] for fixture in FIXTURES if fixture.get("symlinked")}
 
 # The recipe files of the `recipes` fixture, by path relative to the
 # workspace — which is both binaries' working directory, so the path recipe is
@@ -845,7 +863,7 @@ COMPARISONS = [
     {"vbx": command, "bv": command, "name": f"{command} load_stats",
      "vbx_args": vbx_args, "bv_args": bv_args,
      "keys": ("load_stats", "source_path", "source_kind"),
-     "only": {"dropped", "dropped (beads.db)"}}
+     "only": {"dropped", "dropped (beads.db)", "dropped (symlinked)"}}
     for command, vbx_args, bv_args in (
         ("robot-priority", [], []),
         ("robot-insights", [], []),
@@ -860,7 +878,8 @@ COMPARISONS = [
     # holds no `.beads`, so both binaries climb to the configuration — and
     # once named with --workspace on both sides (vbx-1y5).
     {"vbx": command, "bv": command, "name": f"{command} workspace claim gate{spelling}",
-     "only": {"dropped (workspace)"}, **paths, "vbx_args": args, "bv_args": args}
+     "only": {"dropped (workspace)", "dropped (workspace, symlinked)"}, **paths,
+     "vbx_args": args, "bv_args": args}
     for command, paths in (("robot-triage", TRIAGE_PATHS), ("robot-next", {}))
     for spelling, args in (("", []),
                            (" --workspace", ["--workspace", ".bv/workspace.yaml"]))
@@ -1103,7 +1122,7 @@ EXPORT_ONLY = {"demo", "readiness"}
 # its warning for a label that matches nothing; these runs cover the
 # dropped-records fixtures too, a workspace member's warnings among them
 # (vbx-1l6).
-EXPORT_DROPPED = {"dropped", "dropped (beads.db)", "dropped (workspace)"}
+EXPORT_DROPPED = {"dropped", "dropped (beads.db)", "dropped (workspace)", *SYMLINKED}
 EXPORT_OVER_DROPPED = ([], ["--label", "no-such-label"])
 EXPORT_COMPARISONS = [
     {"name": f"export {' '.join(args)}".strip(), "args": args,
@@ -1557,8 +1576,15 @@ def run(binary: str, args: list[str], cwd: Path,
 
     `env` adds variables on top of the inherited environment — a comparison's
     own, given identically to both binaries.
+
+    PWD is set to `cwd` as given, unresolved, as a shell sets it on `cd`.
+    subprocess changes the directory but not PWD, and Go's os.Getwd — bv's —
+    ignores a PWD naming another directory and falls back to getcwd, which
+    resolves symlinks. Inherited stale, it hid every difference in how the
+    two binaries spell a symlinked working directory (vbx-9g1).
     """
-    environment = dict(os.environ, SOURCE_DATE_EPOCH=PINNED_CLOCK, **(env or {}))
+    environment = dict(os.environ, SOURCE_DATE_EPOCH=PINNED_CLOCK,
+                       PWD=os.path.abspath(cwd), **(env or {}))
     result = subprocess.run(
         [binary, *args],
         cwd=cwd,
@@ -1634,6 +1660,24 @@ def build_discovery_workspace(source: Path, demo: Path, destination: Path) -> Pa
                 destination / ".beads" / "feedback.json")
     (destination / "notes").mkdir()
     return destination
+
+
+def build_symlinked_workspace(source: Path, destination: Path) -> Path:
+    """Copies the workspace at `source` to `destination`/real, outside this
+    repository, and returns `destination`/link, a symlink to it (vbx-9g1).
+
+    The link is returned unresolved, so `run` hands it to both binaries as
+    their working directory and their PWD, and a binary that resolves the
+    working directory spells it `…/real` where bv spells it `…/link`. That
+    holds on any platform, not only where the temporary directory itself sits
+    behind a symlink, as macOS's /var does.
+    """
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(source, destination / "real")
+    link = destination / "link"
+    link.symlink_to(destination / "real", target_is_directory=True)
+    return link
 
 
 # The history fixture (vbx-9gl): a git repository built at run time, whose
@@ -2294,6 +2338,9 @@ def main() -> int:
             if fixture.get("discovery"):
                 workspace = build_discovery_workspace(
                     workspace, root / "Fixtures" / "demo", Path(scratch) / "discovery")
+            if fixture.get("symlinked"):
+                workspace = build_symlinked_workspace(
+                    workspace, Path(scratch) / re.sub(r"\W+", "-", fixture["name"]).strip("-"))
             d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
                                      fixture["name"], args.verbose,
                                      fixture.get("only_named", False))

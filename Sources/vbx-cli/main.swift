@@ -595,7 +595,12 @@ func runExport(_ options: Options, path: String, engine: BeadsEngine) async -> I
 
 struct Options {
     var command: String?
-    var path = FileManager.default.currentDirectoryPath
+    /// Empty without --path: the engine resolves the working directory with
+    /// Go's os.Getwd, as bv does, which keeps $PWD's spelling of a symlinked
+    /// directory (/var/…). FileManager's currentDirectoryPath is getcwd(),
+    /// which resolves it (/private/var/…), so every path bv prints from the
+    /// working directory would be spelled differently (vbx-9g1).
+    var path = ""
     /// bv's --workspace: a workspace configuration loaded as given, with no
     /// discovery. Without it the path is discovered by bv's precedence, where
     /// a reachable `.beads` wins over a `.bv/workspace.yaml` (ADR-026).

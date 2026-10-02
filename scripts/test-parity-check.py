@@ -150,11 +150,13 @@ def test_default_run_covers_every_fixture(parity) -> None:
     names = [fixture["name"] for fixture in parity.FIXTURES]
     check("the demo, the readiness fixture, its beads.db form, the sprints, both feedback"
           " fixtures, the search fixture, the recipes workspace, the dropped records in"
-          " both forms and as a workspace member, and the discovery layout are all compared",
+          " both forms and as a workspace member, the discovery layout, and the dropped"
+          " records and workspace reached through a symlink are all compared",
           names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
                     "feedback-few", "search", "recipes", "dropped", "dropped (beads.db)",
                     "dropped (workspace)", "discovery", "history",
-                    "history (vbx baseline)"],
+                    "history (vbx baseline)", "dropped (symlinked)",
+                    "dropped (workspace, symlinked)"],
           str(names))
     for fixture in parity.FIXTURES:
         if fixture.get("history"):
@@ -848,7 +850,7 @@ def test_feedback_before_discovery(parity) -> None:
 def test_workspace_discovery(parity) -> None:
     print("\nWorkspace discovery (vbx-1y5)")
     gate = [entry for entry in parity.COMPARISONS
-            if entry.get("only") == {"dropped (workspace)"}]
+            if "dropped (workspace)" in entry.get("only", ())]
     check("the claim gate is compared once by discovery, naming no configuration",
           any(entry["vbx_args"] == [] and entry["bv_args"] == [] for entry in gate),
           str([entry["name"] for entry in gate]))
@@ -893,6 +895,43 @@ def test_workspace_discovery(parity) -> None:
           {(command, "notes", workspace)
            for command in ("robot-triage", "robot-next", "robot-priority")
            for workspace in (False, True)} <= scored, str(sorted(scored, key=str)))
+
+
+def test_symlinked_working_directory(parity) -> None:
+    print("\nA symlinked working directory (vbx-9g1)")
+    with tempfile.TemporaryDirectory() as scratch:
+        link = parity.build_symlinked_workspace(
+            ROOT / "Fixtures" / "dropped-workspace", Path(scratch) / "symlinked")
+        check("the workspace is reached through a symlink, returned unresolved",
+              link.is_symlink() and link.resolve() != link
+              and link.resolve() == (Path(scratch) / "symlinked" / "real").resolve(),
+              str(link))
+        check("the copy holds the fixture's configuration and members",
+              (link / ".bv" / "workspace.yaml").exists()
+              and (link / "web" / ".beads" / "issues.jsonl").exists())
+        # A stale PWD is what hid the bug: subprocess changes the directory
+        # and leaves PWD as the harness's own, which Go's os.Getwd ignores.
+        status, out, _ = parity.run("/usr/bin/env", [], link)
+        pwd = [line.removeprefix("PWD=") for line in out.splitlines()
+               if line.startswith("PWD=")]
+        check("run() gives each binary PWD spelled as its working directory was given",
+              status == 0 and pwd == [str(link)], str(pwd))
+
+    fixtures = {fixture["name"]: fixture for fixture in parity.FIXTURES}
+    check("both dropped fixtures are also compared through a symlink",
+          parity.SYMLINKED == {"dropped (symlinked)", "dropped (workspace, symlinked)"}
+          and fixtures["dropped (symlinked)"]["workspace"] == "Fixtures/dropped"
+          and fixtures["dropped (workspace, symlinked)"]["workspace"]
+          == "Fixtures/dropped-workspace", str(parity.SYMLINKED))
+    for name, wanted in (("dropped (symlinked)", "load_stats"),
+                         ("dropped (workspace, symlinked)", "workspace claim gate")):
+        named = [entry["name"] for entry in parity.COMPARISONS
+                 if name in entry.get("only", ()) and wanted in entry["name"]]
+        check(f"source_path is compared over {name}", bool(named), str(named))
+    exports = [entry["name"] for entry in parity.EXPORT_COMPARISONS
+               if "dropped (workspace, symlinked)" in entry["only"]]
+    check("the workspace discovery notice an export prints is compared through the symlink",
+          bool(exports), str(exports))
 
 
 def test_search(parity) -> None:
@@ -1116,6 +1155,7 @@ def main() -> int:
     test_modifier_rules(parity)
     test_enum_rules_and_bv_spellings(parity)
     test_workspace_discovery(parity)
+    test_symlinked_working_directory(parity)
     test_search(parity)
     test_report_exports(parity)
     test_export_hooks(parity)

@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — vbx-cli spells a symlinked working directory as bv does (vbx-9g1)
+
+Without `--path`, vbx-cli now lets the engine resolve the working directory
+with Go's `os.Getwd`, which keeps `$PWD`'s spelling of a symlinked directory,
+instead of passing `getcwd()`'s resolved path. `source_path`, `load_stats` and
+the workspace discovery notice now read `/var/…` where bv's do, not
+`/private/var/…`. The parity harness sets `PWD` per subprocess — its stale `PWD`
+is why it never saw this — and compares the dropped fixtures through a symlink.
+A bug fix, so semver:patch. Parity: 0 differing commands before and after;
+two more fixtures (15 comparisons) are compared. Details in BUGS.md.
+
 ## 2026-10-02 — vbx-cli --robot-metrics honours --label and --recipe (vbx-h48)
 
 bv 0.25.2's `--robot-metrics` envelope names the global scope and hashes it
