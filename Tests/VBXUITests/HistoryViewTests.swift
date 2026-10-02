@@ -148,7 +148,18 @@ struct HistoryViewTests {
 
         #expect(store.historyError == nil, "\(store.historyError ?? "")")
         #expect(store.unavailableReason(.orphans) == nil, "\(store.unavailable)")
-        #expect(store.orphans.stats.totalCommits == 4)
+        // Four commits, three counted: the fixture's root commit touches only
+        // `.beads/`, and bv's detector leaves beads-only commits out of its
+        // total, as `vbx-cli --robot-orphans` and bv 0.25.2 both report on this
+        // history. This asserted four, which held only in a checkout whose
+        // `Fixtures/demo` carried a stray `.bv/` index that the copy then
+        // committed into the root (vbx-n86).
+        #expect(store.orphans.stats.totalCommits == 3)
+        // The empty commit is the one the walk lists no files for, so its
+        // presence is what proves the fileless fallback answered.
+        #expect(
+            store.orphans.candidates.map(\.subject).contains("An empty commit"),
+            "\(store.orphans.candidates.map(\.subject))")
         await store.close()
     }
 

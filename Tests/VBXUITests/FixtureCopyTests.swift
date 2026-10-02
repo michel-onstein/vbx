@@ -34,6 +34,28 @@ struct FixtureCopyTests {
         #expect(entries == ["issues.jsonl"], "the copy kept \(entries)")
     }
 
+    @Test("A copy leaves bv's local state behind and keeps its configuration")
+    func copyDropsBVState() throws {
+        // vbx-n86: a semantic index left in `Fixtures/demo` went into every
+        // copy, and the history fixture committed it into its root commit,
+        // which changed what the orphan report counted.
+        let source = try Fixture.copy(prefix: "vbx-source")
+        defer { try? FileManager.default.removeItem(at: source) }
+        let bv = source.appendingPathComponent(".bv")
+        try FileManager.default.createDirectory(
+            at: bv.appendingPathComponent("semantic"), withIntermediateDirectories: true)
+        try Data("index".utf8).write(to: bv.appendingPathComponent("semantic/index-hash-384.bvvi"))
+        try Data("{}".utf8).write(to: bv.appendingPathComponent("baseline.json"))
+        try Data("recipes: {}\n".utf8).write(to: bv.appendingPathComponent("recipes.yaml"))
+
+        let copy = try Fixture.copy(from: source.path)
+        defer { try? FileManager.default.removeItem(at: copy) }
+
+        let entries = try FileManager.default.contentsOfDirectory(
+            atPath: copy.appendingPathComponent(".bv").path)
+        #expect(entries == ["recipes.yaml"], "the copy kept \(entries)")
+    }
+
     @Test("A write is the first br command a cold copy can take")
     func firstCommandIsAWrite() async throws {
         let directory = try Fixture.copy()

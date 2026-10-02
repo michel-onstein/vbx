@@ -187,7 +187,11 @@ them.
   `private typealias Bead = VBXCore.Issue`.
 - **Tests that write into a workspace use `Fixture.writableStore()`**, which
   copies the fixture to a temporary directory. Swift Testing runs tests in
-  parallel, and two writing to the shared fixture interfere.
+  parallel, and two writing to the shared fixture interfere. **A copy must be
+  what was committed, not what is on disk**: `Fixture.copy` drops `br`'s and
+  bv's gitignored local state, because a stray `.bv/semantic` index in one
+  checkout's `Fixtures/demo` once made a test pass there and fail everywhere
+  else. New local state a tool writes into a workspace belongs in that list.
 - **The version is the git tag, never a literal, and the tag carries no `v`.**
   `scripts/version.sh` is the only source: the tag `0.2.0` *is*
   `CFBundleShortVersionString`, and the commit count becomes `CFBundleVersion`.
