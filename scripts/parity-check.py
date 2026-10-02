@@ -433,6 +433,9 @@ HISTORY_RUNS = (
     ("robot-history", ["--history-since", "2026-08-06"], ["--history-since", "2026-08-06"]),
     ("robot-causality", ["--id", "hist-1"], ["hist-1"]),
     ("robot-causality", ["--id", "hist-3"], ["hist-3"]),
+    ("robot-causality", ["--id", "hist-3", "--history-limit", "5"], ["hist-3", "--history-limit", "5"]),
+    ("robot-causality", ["--id", "hist-3", "--history-since", "2026-08-06"],
+     ["hist-3", "--history-since", "2026-08-06"]),
     ("robot-related", ["--id", "hist-1"], ["hist-1"]),
     ("robot-related", ["--id", "hist-3", "--related-include-closed", "--related-min-relevance", "0.1"],
      ["hist-3", "--related-include-closed", "--related-min-relevance", "0.1"]),
@@ -510,6 +513,74 @@ HISTORY_REJECTS = tuple(
     (command, ["--id", bead, *scope], [bead, *scope])
     for command in ("robot-causality", "robot-related", "robot-impact-network")
     for bead, scope in (("no-such-bead", []), ("hist-1", ["--recipe", "actionable"]))
+)
+# bv's modifier rules (vbx-uao): each modifier vbx-cli accepts, beside a
+# command it does not modify, is refused by both before anything is loaded —
+# bv's "--x requires ..." line and exit 1. One per rule in vbx-cli's
+# ModifierRules table, which test-parity-check.py holds to this list; then
+# two misused at once, where the first in bv's order is the one named, and
+# history modifiers beside the correlation commands nearest to taking them.
+# Each is (command, vbx args, bv args); a command that names its bead or file
+# spells it differently on each side.
+MODIFIER_REJECTS = tuple(
+    (command, args, args) for command, args in (
+        ("robot-triage", ["--export-format", "json"]),
+        ("robot-triage", ["--export-include-graph"]),
+        ("robot-triage", ["--export-template", "report.md"]),
+        ("robot-diff", []),
+        ("robot-search", []),
+        ("robot-triage", ["--search-min-score", "0.3"]),
+        ("robot-triage", ["--search-mode", "text"]),
+        ("robot-triage", ["--search-preset", "default"]),
+        ("robot-plan", ["--suggest-type", "cycle"]),
+        ("robot-plan", ["--suggest-confidence", "0.5"]),
+        ("robot-triage", ["--graph-format", "dot"]),
+        ("robot-triage", ["--severity", "critical"]),
+        ("robot-triage", ["--alert-type", "stale_issue"]),
+        ("robot-triage", ["--alert-label", "engine"]),
+        ("robot-orphans", ["--history-since", "2026-08-06"]),
+        ("robot-orphans", ["--history-limit", "3"]),
+        ("robot-plan", ["--robot-not-ready-labels", "needs-design"]),
+        ("robot-priority", ["--min-confidence", "0.5"]),
+        ("robot-file-hotspots", ["--orphans-min-score", "0"]),
+        ("robot-file-hotspots", ["--file-beads-limit", "2"]),
+        ("robot-orphans", ["--hotspots-limit", "2"]),
+        ("robot-orphans", ["--relations-threshold", "0.1"]),
+        ("robot-orphans", ["--relations-limit", "2"]),
+        ("robot-orphans", ["--related-min-relevance", "10"]),
+        ("robot-orphans", ["--related-max-results", "2"]),
+        ("robot-orphans", ["--related-include-closed"]),
+        ("robot-orphans", ["--network-depth", "2"]),
+        ("robot-capacity", ["--forecast-label", "ui"]),
+        ("robot-capacity", ["--forecast-sprint", "spr-sprint-2"]),
+        ("robot-capacity", ["--forecast-agents", "2"]),
+        ("robot-triage", ["--agents", "2"]),
+        ("robot-triage", ["--robot-by-label", "engine"]),
+        ("robot-triage", ["--robot-by-assignee", "ada"]),
+        ("robot-orphans", ["--history-limit", "3", "--history-since", "2026-08-06"]),
+        ("robot-history", ["--relations-limit", "2", "--network-depth", "2"]),
+    )
+) + (
+    ("robot-forecast", ["--id", "all", "--capacity-label", "ui"], ["all", "--capacity-label", "ui"]),
+    ("robot-file-beads", ["--file", "src/parser.go", "--history-limit", "5"],
+     ["src/parser.go", "--history-limit", "5"]),
+    ("robot-related", ["--id", "hist-1", "--history-since", "2026-08-06"],
+     ["hist-1", "--history-since", "2026-08-06"]),
+    ("robot-causality", ["--id", "hist-1", "--min-confidence", "0.5"],
+     ["hist-1", "--min-confidence", "0.5"]),
+    ("robot-impact", ["--files", "src/parser.go", "--history-limit", "5"],
+     ["src/parser.go", "--history-limit", "5"]),
+)
+# And the modifiers beside a command they do modify, which both answer; the
+# history ones are among HISTORY_RUNS. Priority and suggest take bv's own
+# spellings — --robot-by-label, --robot-min-confidence, --suggest-confidence —
+# since bv's --min-confidence is the history's.
+MODIFIER_RUNS = (
+    ("robot-priority", ["--robot-by-label", "engine"],
+     {"bv_path": "recommendations", "vbx_path": "recommendations"}),
+    ("robot-priority", ["--robot-min-confidence", "0.5", "--robot-max-results", "2"],
+     {"bv_path": "recommendations", "vbx_path": "recommendations"}),
+    ("robot-suggest", ["--suggest-confidence", "0.9"], {}),
 )
 
 # What a diff comparison compares: bv's payload and envelope. vbx adds
@@ -882,6 +953,14 @@ COMPARISONS = [
     {"vbx": command, "bv": command, "name": f"{command} {' '.join(bv_args)}",
      "vbx_args": vbx_args, "bv_args": bv_args, "rejects": True, "only": {"history"}}
     for command, vbx_args, bv_args in HISTORY_ID_PATTERN_REJECTS
+] + [
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join(bv_args)}".strip(),
+     "vbx_args": vbx_args, "bv_args": bv_args, "rejects": True, "only": {"demo"}}
+    for command, vbx_args, bv_args in MODIFIER_REJECTS
+] + [
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join(args)}",
+     "vbx_args": args, "bv_args": args, "only": {"demo"}, **paths}
+    for command, args, paths in MODIFIER_RUNS
 ]
 
 

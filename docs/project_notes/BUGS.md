@@ -4,6 +4,38 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — vbx-cli answered modifiers bv refuses, such as --history-limit beside --robot-orphans
+
+**Symptom:** `vbx-cli --robot-orphans --history-limit 3` exited 0 with a report,
+where bv 0.25.2 refuses it: `Error: --history-limit requires one of
+--robot-history, --bead-history or --robot-causality`, exit 1. Every history
+modifier PR #129 added was as loose (`--network-depth` beside triage, and so
+on), and so were forecast, capacity, alert, suggest, graph and priority
+modifiers. (vbx-uao, found in vbx-znj. The bead said bv exits 2; measured, its
+modifier refusals exit 1.)
+
+**Cause:** vbx-cli checked two of bv's `modifierRules` by hand — the export
+modifiers and `--robot-not-ready-labels` — and none of the rest. The history
+requests even forwarded `--history-limit` to commands bv never lets it reach.
+The two hand checks exited 2, not bv's 1, and the not-ready one's text was not
+bv's. `--min-confidence` was also vbx-cli's spelling for priority's and
+suggest's confidence, where bv's `--min-confidence` is the history's alone.
+
+**Fix:** `ModifierRules` in VBXCore is bv's rule table for every modifier
+vbx-cli parses, in bv's order, with bv's message (`formatRequiredFlags`).
+vbx-cli checks it once after parsing, exit 1, and prints `--help`'s modifier
+lines from it. `isActive` maps bv's flag names to vbx-cli's (`--bead-history`
+is `--robot-history --id`). Priority takes bv's `--robot-min-confidence`,
+`--robot-max-results`, `--robot-by-label` and `--robot-by-assignee`, suggest
+bv's `--suggest-confidence`.
+
+**Regression tests:** `ModifierRuleTests` (each history modifier refused beside
+a command it does not modify, and accepted beside one it does; bv's message
+shape; first rule in bv's order wins). `test-parity-check.py`
+`test_modifier_rules` holds the table to bv's own `cmd/bv/main.go`, found with
+`go list -m`, and requires a refused parity comparison per rule;
+`parity-check.py` `MODIFIER_REJECTS` compares each against bv.
+
 ## 2026-10-02 — The empty-commit orphan test passed in one checkout and failed in every clean one
 
 **Symptom:** `HistoryViewTests` "A history holding an empty commit has an

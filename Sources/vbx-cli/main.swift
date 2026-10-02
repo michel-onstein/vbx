@@ -15,7 +15,9 @@ import Foundation
 //     stderr, so a caller can pipe stdout into a parser without filtering.
 //   - **Exit codes are 0, 1 and 2.** 0 succeeded, 1 failed, 2 means the
 //     arguments were wrong — except after --robot-drift prints its verdict,
-//     where 1 is critical drift and 2 a warning, as bv's --check-drift exits.
+//     where 1 is critical drift and 2 a warning, as bv's --check-drift exits,
+//     and a modifier given without the flag it modifies, which bv refuses
+//     with 1 (``ModifierRules``).
 
 // MARK: - Robot command table
 
@@ -124,12 +126,15 @@ struct RobotCommand {
     }
 }
 
-/// Raised when the arguments are wrong, which is exit code 2 rather than 1.
+/// Raised when the arguments are wrong, which is exit code 2 rather than 1 —
+/// except a modifier given without the flag it modifies, which bv exits 1
+/// for (``ModifierRules``), and so does vbx-cli.
 struct UsageError: Error {
     let message: String
+    var status: Int32 = 2
 }
 
-/// The request keys every history command shares: bv's --history-limit.
+/// bv's --history-limit, which only the history and causality commands take.
 func historyRequest(_ options: Options) -> [String: Any] {
     var request: [String: Any] = [:]
     if let value = options.historyLimit { request["history_limit"] = value }
@@ -177,9 +182,9 @@ func requireID(_ options: Options, for flag: String) throws -> String {
     return id
 }
 
-/// The commands bv lets `--robot-not-ready-labels` modify. Any other is a
-/// usage error, as it is in bv.
-let notReadyCommands: Set<String> = ["robot-triage", "robot-next"]
+/// The commands bv lets `--robot-not-ready-labels` modify, from its modifier
+/// rule: where the flag applies is where its environment variable does.
+let notReadyCommands = Set(ModifierRules.rule("robot-not-ready-labels")?.requires ?? [])
 
 /// bv's opt-in not-ready label-class for triage and --robot-next: the flag when
 /// it is set, else `BV_ROBOT_NOT_READY_LABELS`. Passed as written — the engine
@@ -215,7 +220,7 @@ let robotCommands: [RobotCommand] = [
         waitsForPhase2: true, scope: .scoped,
         request: { options in
             var request: [String: Any] = [:]
-            if let value = options.minConfidence { request["min_confidence"] = value }
+            if let value = options.robotMinConfidence { request["min_confidence"] = value }
             if let value = options.maxResults { request["max_results"] = value }
             if let value = options.byLabel { request["by_label"] = value }
             if let value = options.byAssignee { request["by_assignee"] = value }
@@ -240,7 +245,7 @@ let robotCommands: [RobotCommand] = [
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.suggestType { request["type"] = value }
-            if let value = options.minConfidence { request["min_confidence"] = value }
+            if let value = options.suggestConfidence { request["min_confidence"] = value }
             if let value = options.id { request["bead"] = value }
             return request.isEmpty ? nil : request
         }),
@@ -303,10 +308,8 @@ let robotCommands: [RobotCommand] = [
         "robot-search", method: "search", summary: "Search (text or hybrid)",
         scope: .scoped,
         request: { options in
-            guard let query = options.query, !query.isEmpty else {
-                throw UsageError(message: "--robot-search requires --search")
-            }
-            var request: [String: Any] = ["query": query]
+            // ModifierRules refuses --robot-search without a query.
+            var request: [String: Any] = ["query": options.query ?? ""]
             if let value = options.searchMode { request["mode"] = value }
             if let value = options.searchPreset { request["preset"] = value }
             if let value = options.limit { request["limit"] = value }
@@ -344,8 +347,7 @@ let robotCommands: [RobotCommand] = [
         "robot-related", method: "related", summary: "Related work",
         scope: .scoped, bvErrorText: true,
         request: { options in
-            var request = historyRequest(options)
-            request["id"] = try requireID(options, for: "robot-related")
+            var request: [String: Any] = ["id": try requireID(options, for: "robot-related")]
             if let value = options.relatedMinRelevance { request["related_min_relevance"] = value }
             if let value = options.relatedMaxResults { request["related_max_results"] = value }
             if options.relatedIncludeClosed { request["related_include_closed"] = true }
@@ -355,7 +357,7 @@ let robotCommands: [RobotCommand] = [
         "robot-impact-network", method: "impact_network", summary: "Bead impact network",
         scope: .scoped, bvErrorText: true,
         request: { options in
-            var request = historyRequest(options)
+            var request: [String: Any] = [:]
             if let value = options.id { request["id"] = value }
             if let value = options.networkDepth { request["network_depth"] = value }
             return request
@@ -364,7 +366,7 @@ let robotCommands: [RobotCommand] = [
         "robot-orphans", method: "orphans", summary: "Commits no bead accounts for",
         scope: .scoped,
         request: { options in
-            var request = historyRequest(options)
+            var request: [String: Any] = [:]
             if let value = options.orphansMinScore { request["orphans_min_score"] = value }
             return request
         }),
@@ -375,8 +377,7 @@ let robotCommands: [RobotCommand] = [
             guard let path = options.file else {
                 throw UsageError(message: "--robot-file-beads requires --file")
             }
-            var request = historyRequest(options)
-            request["path"] = path
+            var request: [String: Any] = ["path": path]
             if let value = options.fileBeadsLimit { request["file_beads_limit"] = value }
             return request
         }),
@@ -384,7 +385,7 @@ let robotCommands: [RobotCommand] = [
         "robot-file-hotspots", method: "file_hotspots", summary: "Most-touched files",
         scope: .scoped,
         request: { options in
-            var request = historyRequest(options)
+            var request: [String: Any] = [:]
             if let value = options.hotspotsLimit { request["hotspots_limit"] = value }
             return request
         }),
@@ -395,8 +396,7 @@ let robotCommands: [RobotCommand] = [
             guard let path = options.file else {
                 throw UsageError(message: "--robot-file-relations requires --file")
             }
-            var request = historyRequest(options)
-            request["path"] = path
+            var request: [String: Any] = ["path": path]
             if let value = options.relationsThreshold { request["relations_threshold"] = value }
             if let value = options.relationsLimit { request["relations_limit"] = value }
             return request
@@ -408,9 +408,7 @@ let robotCommands: [RobotCommand] = [
             guard let files = options.files, !files.isEmpty else {
                 throw UsageError(message: "--robot-impact requires --files")
             }
-            var request = historyRequest(options)
-            request["files"] = files
-            return request
+            return ["files": files]
         }),
     // bv loads and scopes issues first, then reports the feedback file alone.
     RobotCommand(
@@ -425,12 +423,8 @@ let robotCommands: [RobotCommand] = [
     RobotCommand(
         "robot-diff", method: "diff", summary: "Diff against a revision",
         scope: .scoped,
-        request: { options in
-            guard let revision = options.revision else {
-                throw UsageError(message: "--robot-diff requires --diff-since")
-            }
-            return ["revision": revision]
-        }),
+        // ModifierRules refuses --robot-diff without --diff-since.
+        request: { options in ["revision": options.revision ?? ""] }),
 
     // Sprints
     RobotCommand(
@@ -510,10 +504,6 @@ let robotCommands: [RobotCommand] = [
 /// they write a file and print progress, as bv's do — so they are a mode of
 /// their own rather than an entry in `robotCommands`.
 let exportFlags = ["export", "export-md"]
-
-/// The flags that only mean something beside `--export` or `--export-md`.
-/// bv rejects each on its own, and so does vbx-cli.
-let exportModifiers = ["export-format", "export-include-graph", "export-template"]
 
 /// bv's `parseSearchMinScore`: an empty value is no threshold; anything else
 /// must be a finite number from -1 to 1, or the invocation is wrong (exit 2)
@@ -635,7 +625,11 @@ struct Options {
     var agents = 1
     var depth: Int?
     var limit: Int?
+    /// bv's --robot-max-results and --robot-min-confidence, which priority
+    /// reads; --suggest-confidence, suggest's; --min-confidence, history's.
     var maxResults: Int?
+    var robotMinConfidence: Double?
+    var suggestConfidence: Double?
     var minConfidence: Double?
     var threshold: Double?
     /// The history commands' modifiers, under bv's names: --history-limit,
@@ -677,6 +671,34 @@ struct Options {
     var pretty = false
     var listCommands = false
     var showHelp = false
+}
+
+/// Whether a flag a modifier requires, under bv's name, is in effect — bv's
+/// `isFlagActive`: a command selected, or a value that is not blank. bv's
+/// `--bead-history ID` is `--robot-history --id ID` here, and bv's commands
+/// vbx-cli does not have are never active.
+func isActive(_ flag: String, _ options: Options) -> Bool {
+    func present(_ value: String?) -> Bool {
+        !(value ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+    }
+    switch flag {
+    case "export": return present(options.exportPath)
+    case "export-md": return present(options.exportMarkdownPath)
+    case "search": return present(options.query)
+    case "diff-since": return options.given.contains("diff-since") && present(options.revision)
+    case "bead-history": return options.command == "robot-history" && present(options.id)
+    default: return options.command == flag
+    }
+}
+
+/// How `--help` names a flag a modifier requires: vbx-cli's spelling, or nil
+/// for a bv command vbx-cli does not have.
+func helpSpelling(_ flag: String) -> String? {
+    switch flag {
+    case "export", "export-md", "search", "diff-since": return "--" + flag
+    case "bead-history": return nil  // --robot-history --id, already named
+    default: return robotCommands.contains { $0.flag == flag } ? "--" + flag : nil
+    }
 }
 
 func parseArguments() throws -> Options {
@@ -770,8 +792,8 @@ func parseArguments() throws -> Options {
         case "--agents": options.agents = Int(try next(arg)) ?? 1
         case "--depth": options.depth = Int(try next(arg))
         case "--limit": options.limit = Int(try next(arg))
-        case "--max-results": options.maxResults = Int(try next(arg))
         case "--min-confidence": options.minConfidence = Double(try next(arg))
+        case "--suggest-confidence": options.suggestConfidence = Double(try next(arg))
         case "--threshold": options.threshold = Double(try next(arg))
         case "--history-limit": options.historyLimit = try intValue(try next(arg), flag: arg)
         case "--history-since": options.historySince = try next(arg)
@@ -793,11 +815,13 @@ func parseArguments() throws -> Options {
         case "--related-include-closed": options.relatedIncludeClosed = true
         case "--orphans-min-score": options.orphansMinScore = try intValue(try next(arg), flag: arg)
         case "--id-pattern": options.idPatterns.append(try value(arg))
-        case "--by-label": options.byLabel = try next(arg)
-        case "--by-assignee": options.byAssignee = try next(arg)
-        // A modifier spelled like a command, so it is matched before the
-        // `--robot-` prefix below would take it for one.
+        // Modifiers spelled like commands, so they are matched before the
+        // `--robot-` prefix below would take them for one.
         case "--robot-not-ready-labels": options.notReadyLabels = try next(arg)
+        case "--robot-by-label": options.byLabel = try next(arg)
+        case "--robot-by-assignee": options.byAssignee = try next(arg)
+        case "--robot-max-results": options.maxResults = Int(try next(arg))
+        case "--robot-min-confidence": options.robotMinConfidence = Double(try next(arg))
         case "--pretty": options.pretty = true
         case "--list-commands": options.listCommands = true
         case "--help", "-h": options.showHelp = true
@@ -831,15 +855,16 @@ func parseArguments() throws -> Options {
         index += 1
     }
 
+    // bv checks its modifiers before anything else it validates, and exits 1.
+    if let message = ModifierRules.violation(
+        given: options.given, isActive: { isActive($0, options) })
+    {
+        throw UsageError(message: message, status: 1)
+    }
     if options.given.contains("workspace"), options.given.contains("path") {
         // --workspace names what to load and --path where to discover it
         // from; together one of them would be silently ignored.
         throw UsageError(message: "--workspace and --path cannot be used together")
-    }
-    for modifier in exportModifiers where options.given.contains(modifier) {
-        if options.exportPath == nil, options.exportMarkdownPath == nil {
-            throw UsageError(message: "--\(modifier) requires one of --export or --export-md")
-        }
     }
     if options.exportPath != nil || options.exportMarkdownPath != nil {
         if options.exportPath != nil, options.exportMarkdownPath != nil {
@@ -873,12 +898,6 @@ func parseArguments() throws -> Options {
                     message: "--\(flag) does not scope --\(name) in vbx-cli yet")
             }
         }
-    }
-    if options.notReadyLabels != nil, let command = options.command,
-        !notReadyCommands.contains(command)
-    {
-        throw UsageError(
-            message: "--robot-not-ready-labels requires one of --robot-triage or --robot-next")
     }
     // The environment applies only where the flag would, so an exported
     // variable never makes another command a usage error.
@@ -967,48 +986,70 @@ func usageText() -> String {
     lines.append(contentsOf: wrapped(
         "Refused, not yet scoped: " + scopeNames(.unported),
         indent: "                       "))
+    // Each modifier's line comes from its rule, which is what the parser
+    // enforces, so the help cannot offer a combination that is refused.
+    func modifiers(_ section: ModifierSection) -> [String] {
+        ModifierRules.helpLines(section, spelling: helpSpelling)
+    }
     lines.append(contentsOf: [
+        "",
+        "MODIFIERS: each needs a flag it modifies, or the run is refused as bv",
+        "refuses it (exit 1).",
         "",
         "REPORTS (bv's --export):",
         "  --export FILE        Write a report; a --recipe supplies export defaults",
         "  --export-md FILE     The same, always Markdown",
-        "  --export-format markdown|json|csv|mermaid",
-        "  --export-include-graph[=false]",
-        "                       Include the dependency context (default: all but csv)",
-        "  --export-template FILE",
-        "                       A Go text/template for the Markdown report;",
-        "                       --export-template= disables a recipe's",
+    ])
+    lines.append(contentsOf: modifiers(.export))
+    lines.append(contentsOf: [
         "  --no-hooks           Skip .bv/hooks.yaml; by default its pre- and",
         "                       post-export commands run around the write, as",
         "                       bv runs them (they are the repository's commands)",
         "",
         "SEARCH (--robot-search):",
         "  --search QUERY       The query; a bead id returns that bead first",
-        "  --search-mode text|hybrid / --search-preset NAME / --limit N",
-        "  --search-min-score S Minimum text similarity before hybrid ranking",
-        "                       (-1..1); exact ids also obey it",
+        "  --limit N            Results returned",
+    ])
+    lines.append(contentsOf: modifiers(.search))
+    lines.append(contentsOf: ["", "SUGGEST (--robot-suggest):"])
+    lines.append(contentsOf: modifiers(.suggest))
+    lines.append(contentsOf: ["", "GRAPH (--robot-graph):"])
+    lines.append(contentsOf: modifiers(.graph))
+    lines.append(contentsOf: [
+        "  --root ID / --depth N",
+        "                       The subgraph below a bead, to a depth",
+        "",
+        "ALERTS (--robot-alerts):",
+    ])
+    lines.append(contentsOf: modifiers(.alerts))
+    lines.append(contentsOf: [
         "",
         "HISTORY (--robot-history and the correlation commands, bv's flags):",
         "  --id ID              The bead: --robot-history --id is bv's --bead-history",
         "  --file PATH / --files A,B",
         "                       The file for --robot-file-beads and",
         "                       --robot-file-relations; the files for --robot-impact",
-        "  --history-limit N    Commits walked (default 500, 0 for all)",
-        "  --history-since S    History and causality: commits after S",
-        "  --min-confidence C   History: links at or above C (0.0-1.0)",
-        "  --hotspots-limit N / --file-beads-limit N / --relations-limit N",
-        "  --relations-threshold T / --network-depth N (1-3)",
-        "  --related-min-relevance P / --related-max-results N",
-        "  --related-include-closed / --orphans-min-score N",
         "  --id-pattern REGEX   A bead-id shape commit messages are matched for,",
         "                       e.g. 'vbx-[a-z0-9]{3,}' for br's ids (repeatable;",
         "                       capture group 1 is the id, else the whole match)",
+    ])
+    lines.append(contentsOf: modifiers(.history))
+    lines.append(contentsOf: [
         "",
         "FORECAST (--robot-forecast):",
         "  --id ID|all          One bead's ETA, or every open bead's with a summary",
-        "  --forecast-label L   Only beads carrying the label (not the --label scope)",
-        "  --forecast-sprint S  Only the sprint's beads",
-        "  --forecast-agents N  Agents working in parallel (default 1)",
+    ])
+    lines.append(contentsOf: modifiers(.forecast))
+    lines.append(contentsOf: ["", "CAPACITY (--robot-capacity):"])
+    lines.append(contentsOf: modifiers(.capacity))
+    lines.append(contentsOf: [
+        "",
+        "PRIORITY (--robot-priority):",
+        "  --robot-min-confidence C / --robot-max-results N",
+        "                       Recommendations at or above C, at most N of them",
+    ])
+    lines.append(contentsOf: modifiers(.priority))
+    lines.append(contentsOf: [
         "",
         "DRIFT (--robot-drift, bv's --check-drift --robot-drift):",
         "  Compares the scope against the saved baseline; exits 1 on critical",
@@ -1017,9 +1058,9 @@ func usageText() -> String {
         "                       (.bv/baseline.json, in bv's format)",
         "",
         "TRIAGE AND --robot-next:",
-        "  --robot-not-ready-labels A,B",
-        "                       Labels whose beads are never a claimable top pick",
-        "                       (env: BV_ROBOT_NOT_READY_LABELS)",
+    ])
+    lines.append(contentsOf: modifiers(.triage))
+    lines.append(contentsOf: [
         "",
         "TRIAGE FEEDBACK (writes .beads/feedback.json, as bv does):",
         "  --feedback-accept ID / --feedback-ignore ID",
@@ -1030,7 +1071,7 @@ func usageText() -> String {
         "",
         "EXIT CODES:",
         "  0  Success",
-        "  1  Error",
+        "  1  Error, or a modifier without the flag it modifies (as in bv)",
         "  2  Invalid arguments",
     ])
     return lines.joined(separator: "\n")
@@ -1149,7 +1190,7 @@ func run() async -> Int32 {
     } catch let error as UsageError {
         complain("Error: \(error.message)")
         complain("Run vbx-cli --help for the command list.")
-        return 2
+        return error.status
     } catch {
         complain("Error: \(error)")
         return 2
@@ -1215,7 +1256,7 @@ func run() async -> Int32 {
         request = try command.payload(options)
     } catch let error as UsageError {
         complain("Error: \(error.message)")
-        return 2
+        return error.status
     } catch {
         complain("Error: \(error)")
         return 2
