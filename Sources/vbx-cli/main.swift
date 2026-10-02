@@ -236,7 +236,7 @@ let robotCommands: [RobotCommand] = [
     RobotCommand(
         "robot-actionable", method: "actionable", summary: "Beads with nothing blocking them"),
     RobotCommand(
-        "robot-metrics", method: "metrics", summary: "Graph metrics"),
+        "robot-metrics", method: "metrics", summary: "Graph metrics", scope: .scoped),
     RobotCommand(
         "robot-impact-scores", method: "impact", summary: "Composite impact scores",
         waitsForPhase2: true),

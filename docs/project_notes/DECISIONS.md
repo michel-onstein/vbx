@@ -1276,6 +1276,16 @@ holds *and* it means what it means in bv; otherwise declare it envelope-only.
     lifts bv's envelope keys for them as for the label commands. bv's
     `--robot-metrics` reports runtime timings rather than vbx's GraphStats,
     so only its envelope is compared.
+  - Since vbx-h48 metrics honours `--label`/`--recipe` as bv's does: bv's
+    envelope names the scope and hashes it into `scope_hash`, so vbx's routes
+    through the same scoped view and reports the same two keys. bv's timings
+    payload has nothing else to scope; vbx's GraphStats are scoped too. An
+    envelope that names a scope over whole-load statistics would read as a
+    scoped answer without being one, and every other scoped command answers
+    over the scoped view. The app's metrics call sends no scope, so it is
+    unchanged. Parity compares the envelope under a label, the unknown label,
+    each recipe scope and both together. A recipe that does not resolve is
+    refused, as bv refuses it.
 - **Envelope-only**, in `parity-check.py`'s single `ENVELOPE_ONLY_KEYS`, each
   with its reason:
   - `source_authority` — bv's report of its multi-source selection: candidates

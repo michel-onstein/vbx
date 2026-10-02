@@ -484,7 +484,7 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 	case "issues":
 		return s.issuesPayload()
 	case "metrics":
-		return s.metrics()
+		return s.metrics(req)
 	case "wait_phase2":
 		s.mu.RLock()
 		st := s.stats
@@ -492,7 +492,7 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 		if st != nil {
 			st.WaitForPhase2()
 		}
-		return s.metrics()
+		return s.metrics(nil)
 	case "compute_phase2":
 		return s.computePhase2()
 	case "reload":
@@ -761,14 +761,22 @@ type metricsPayload struct {
 	BetweennessRank map[string]int `json:"betweenness_rank,omitempty"`
 }
 
-// metrics is the session's GraphStats over the whole load.
+// metrics is the session's GraphStats over the request's scope — the whole
+// load when the request names none, which is how the app asks.
 //
 // The payload carries bv's robot envelope at its top level, as every robot
 // payload does (vbx-6su). bv's --robot-metrics reports runtime timings rather
-// than graph statistics, but it carries the same envelope over the whole,
-// unscoped load, and so does this.
-func (s *Session) metrics() ([]byte, error) {
-	v := s.wholeView()
+// than graph statistics, but it honours the global --label/--recipe scope as
+// every command that loads issues does: its envelope names the scope and
+// hashes the label's core into scope_hash (vbx-h48). The envelope here is the
+// same, and the GraphStats are the scoped view's, as every other scoped
+// command's analysis is — an envelope naming a scope over statistics of the
+// whole load would look like a scoped answer and not be one.
+func (s *Session) metrics(req []byte) ([]byte, error) {
+	v, err := s.scopedView(req)
+	if err != nil {
+		return nil, err
+	}
 	st := v.stats
 	if st == nil {
 		return nil, fmt.Errorf("session has no analysis")
@@ -924,7 +932,7 @@ func (s *Session) computePhase2() ([]byte, error) {
 	s.stats = stats
 	s.mu.Unlock()
 
-	return s.metrics()
+	return s.metrics(nil)
 }
 
 // triageHistoryLimit is how far back triage looks for staleness signal.

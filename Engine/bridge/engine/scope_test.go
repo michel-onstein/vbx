@@ -148,7 +148,7 @@ func TestUnknownLabelPriorityIsAnEmptyList(t *testing.T) {
 func TestLabelScopeReachesEveryEnvelope(t *testing.T) {
 	s := openDemoFull(t)
 	unscoped := call[provenanceShape](t, s, "suggest", nil)
-	for _, method := range []string{"suggest", "priority", "next", "insights", "graph_export"} {
+	for _, method := range []string{"suggest", "priority", "next", "insights", "graph_export", "metrics"} {
 		if got := call[provenanceShape](t, s, method, nil); got.Scope != nil {
 			t.Errorf("%s unscoped: scope = %+v, want none", method, got.Scope)
 		}
@@ -194,6 +194,51 @@ func TestLabelScopedInsightsAreTheSubgraphsMetrics(t *testing.T) {
 	unknown := call[insightsShape](t, s, "insights", map[string]any{"label": "no-such-label"})
 	if string(unknown.FullStats.Articulation) != "null" {
 		t.Errorf("articulation_points = %s, want bv's null", unknown.FullStats.Articulation)
+	}
+}
+
+// Regression (vbx-h48): metrics ignored the scope, so vbx-cli's
+// --robot-metrics --label engine reported the whole load's 18 nodes with no
+// scope in its envelope, where bv's envelope names the scope. The GraphStats
+// are the scoped view's, as insights' are; the app asks unscoped and still
+// gets the whole load.
+func TestScopedMetricsAreTheSubgraphsStats(t *testing.T) {
+	s := openDemoFull(t)
+	type metricsShape struct {
+		NodeCount int                `json:"node_count"`
+		PageRank  map[string]float64 `json:"pagerank"`
+		Scope     *struct {
+			Label  string `json:"label"`
+			Recipe string `json:"recipe"`
+		} `json:"scope"`
+	}
+
+	whole := call[metricsShape](t, s, "metrics", nil)
+	if whole.NodeCount != 18 || whole.Scope != nil {
+		t.Errorf("unscoped: node_count = %d, scope = %+v, want the whole load's 18 and no scope",
+			whole.NodeCount, whole.Scope)
+	}
+
+	// The engine subgraph's 13 beads, as insights covers them.
+	got := call[metricsShape](t, s, "metrics", map[string]any{"label": "engine"})
+	if got.NodeCount != 13 || len(got.PageRank) != 13 {
+		t.Errorf("engine: node_count = %d, %d pagerank entries, want 13",
+			got.NodeCount, len(got.PageRank))
+	}
+
+	unknown := call[metricsShape](t, s, "metrics", map[string]any{"label": "no-such-label"})
+	if unknown.NodeCount != 0 {
+		t.Errorf("unknown label: node_count = %d, want 0", unknown.NodeCount)
+	}
+
+	recipe := call[metricsShape](t, s, "metrics", map[string]any{"recipe": "actionable"})
+	if recipe.Scope == nil || recipe.Scope.Recipe != "actionable" || recipe.NodeCount >= 18 {
+		t.Errorf("recipe: scope = %+v, node_count = %d, want the recipe's selection",
+			recipe.Scope, recipe.NodeCount)
+	}
+
+	if _, err := s.Call("metrics", []byte(`{"recipe":"no-such-recipe"}`)); err == nil {
+		t.Error("an unknown recipe answered, want bv's error")
 	}
 }
 

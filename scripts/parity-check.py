@@ -393,6 +393,9 @@ SCOPED_RUNS = (
     ("robot-label-health", LABEL_HEALTH_PATHS),
     ("robot-label-flow", LABEL_FLOW_PATHS),
     ("robot-label-attention", LABEL_ATTENTION_PATHS),
+    # bv's metrics payload is its runtime timings, so only the envelope —
+    # which names the scope and hashes it — is compared (vbx-h48).
+    ("robot-metrics", {"keys": ENVELOPE_KEYS}),
 )
 # The recipe scopes, over the `recipes` fixture: a built-in, the project-file
 # recipe, a path, and each beside a label, the last an unknown one.
@@ -752,7 +755,7 @@ COMPARISONS = [
      "vbx_args": ["--recipe", recipe], "bv_args": ["--recipe", recipe],
      "rejects": True, "only": {"recipes"}}
     for command in ("robot-triage", "robot-plan", "robot-capacity", "robot-label-health",
-                    "robot-correlation-stats")
+                    "robot-metrics", "robot-correlation-stats")
     for recipe in ("no-such-recipe", "missing.yaml")
 ] + [
     # bv's --alert-label is a filter on the alerts, separate from the --label
