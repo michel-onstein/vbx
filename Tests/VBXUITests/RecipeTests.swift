@@ -226,6 +226,41 @@ struct RecipeTests {
         await store.close()
     }
 
+    /// Regression (vbx-7d5): the editor saved every recipe into
+    /// `.bv/recipes.yaml`, where a recipe's own `.beads/recipes` file shadowed
+    /// the copy — the edit looked lost, and delete could not remove it.
+    @Test("Editing a .beads/recipes recipe changes its own file")
+    func editProjectFileRecipe() async throws {
+        let directory = try Fixture.copy()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recipes = directory.appendingPathComponent(".beads/recipes")
+        try FileManager.default.createDirectory(at: recipes, withIntermediateDirectories: true)
+        let file = recipes.appendingPathComponent("area.yaml")
+        try "name: area\ndescription: One area\nfilters:\n  tags: [ui]\n"
+            .write(to: file, atomically: true, encoding: .utf8)
+
+        let store = ProjectStore()
+        await store.open(path: directory.path)
+        await store.loadRecipes()
+        var recipe = try #require(
+            store.recipes.userDefined.first { $0.recipe.name == "area" }?.recipe,
+            "the project-file recipe is not listed")
+
+        recipe.filters.tags = ["engine"]
+        await store.saveRecipe(recipe)
+        let saved = store.recipes.recipes.first { $0.recipe.name == "area" }?.recipe
+        #expect(saved?.filters.tags == ["engine"], "the edit did not load: \(store.loadError ?? "none")")
+        #expect(try String(contentsOf: file, encoding: .utf8).contains("engine"))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent(".bv/recipes.yaml").path))
+
+        await store.deleteRecipe(named: "area")
+        #expect(!store.recipes.recipes.contains { $0.recipe.name == "area" })
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        await store.close()
+    }
+
     @Test("The sidebar renders its recipe section")
     func rendersSidebar() async throws {
         let store = await Fixture.loadedStore()

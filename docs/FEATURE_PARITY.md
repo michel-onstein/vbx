@@ -28,14 +28,14 @@ the robot protocol with TOON output.
 capabilities bv gained between 0.21 and 0.25 are mapped below with their real
 state. Built: the six new alert types with `suggested_action` and `labels`
 (engine, `vbx-cli` and the Alerts panel, vbx-fc7), `defer_until` in readiness
-and in the app (vbx-upz), `.beads/recipes/*.yaml` recipe files, the
-multi-repository loader, triage feedback, `--export` reports in four formats
-(vbx-im9), and `--search-min-score` with bv's guaranteed exact-ID hit
-(vbx-52c). Not yet built, each with a child bead of epic vbx-htg: the app's
-search threshold control (vbx-c1j), export hooks around `vbx-cli --export`
-(vbx-uos), `load_stats` in the robot envelope (vbx-dv5), `--recipe` as a robot
-scope and recipe file paths (vbx-7d5), and bv's `.beads`-first workspace
-discovery with `--workspace` (vbx-1y5). A row naming a bead is not built until
+and in the app (vbx-upz), `.beads/recipes/*.yaml` recipe files — edited and
+deleted in their own file (vbx-7d5) — the multi-repository loader, triage
+feedback, `--export` reports in four formats (vbx-im9), `--search-min-score`
+with bv's guaranteed exact-ID hit (vbx-52c), and `--recipe` as a robot scope,
+by name or path (vbx-7d5). Not yet built, each with a child bead of epic
+vbx-htg: the app's search threshold control (vbx-c1j), export hooks around
+`vbx-cli --export` (vbx-uos), `load_stats` in the robot envelope (vbx-dv5),
+and bv's `.beads`-first workspace discovery with `--workspace` (vbx-1y5). A row naming a bead is not built until
 that bead closes.
 
 **Verified rather than asserted.** `scripts/parity-check.py` runs `vbx-cli` and
@@ -80,6 +80,16 @@ label and is compared with `engine`, `ui` and an unknown label (vbx-jnm), and
 capacity bv's `--capacity-label`, an exact-match filter on the beads simulated,
 compared with the same three labels and once within the `ui` scope (vbx-ko1).
 No label-scoped command is left unmatched.
+
+`--recipe` is the same kind of scope, applied in the same step: the command
+answers over what the recipe selects — of the label's beads, when both are
+given — and the envelope names the recipe as given and hashes the selection
+into `scope_hash`. The harness builds a `recipes` workspace from the demo's
+beads plus two recipe files, one in `.beads/recipes` and one reached only by
+its path, and runs the same nine commands with a built-in (`actionable`,
+`high-impact`), the project-file recipe, the path, and three recipe-and-label
+pairs; an unknown name and a missing path must be refused as bv refuses them
+(vbx-7d5).
 
 The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.
@@ -224,7 +234,7 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 | Velocity comparison | Chart | Engine + Native | 4 |
 | History view (all modes) | See §4 | Engine + Native | 5 |
 | Alerts panel (`!`) | Severity-grouped list | Engine + Native | 4 |
-| Recipe picker (`'`) and recipe files | Sidebar section + form editor; `.beads/recipes/*.yaml` files listed through bv's own `recipe.Loader` | Engine + Native | 2 |
+| Recipe picker (`'`) and recipe files | Sidebar section + form editor; `.beads/recipes/*.yaml` files listed through bv's own `recipe.Loader`, and an edit or delete of one goes to its own file (vbx-7d5) | Engine + Native | 2 |
 | `defer_until` (bv 0.25 scheduler deferral) | **Built** — readiness, triage, plan and next honour it; `actionable` also names the beads a future deferral withholds, at the same pinned clock. The app shows "Deferred until" in the Inspector, a sortable *Deferred until* list column with a title-cell marker, and the count in the Ready filter's tooltip (vbx-upz) | Engine + Native | — |
 | Repo picker (`w`) | Sidebar repos section | Engine + Native | 2 |
 | Time-travel mode + diff badges + summary | Revision scrubber + row badges | Engine + Native | 7 |
@@ -275,7 +285,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-diff`, `--diff-since`, `--as-of` | ✓ | Time-travel mode | 7 |
 | `--robot-graph` (+ format, root, depth) | ✓ | Graph export menu | 6 |
 | `--robot-recipes` | ✓ | Recipe sidebar | 6 |
-| `--recipe <name or path.yaml>` as a global scope on robot commands (bv 0.25) | **Not built:** honoured only by vbx's own `--robot-recipe-apply`, and by name only (vbx-7d5) | Recipe sidebar applies by name | — |
+| `--recipe <name or path.yaml>` as a global scope on robot commands (bv 0.25) | ✓ `vbx-cli` triage, next, plan, priority, insights, suggest, alerts, graph and capacity, alone or with `--label`, with `scope.recipe` and `scope_hash`; a path wherever a name goes (also `--robot-recipe-apply` and `--export`); an unknown recipe refused with bv's message and list. Matched in `parity-check.py` (vbx-7d5). **Not built:** the label commands and bv's other post-load handlers ignore `--label` and `--recipe` in vbx-cli (vbx-shz) | Recipe sidebar applies by name | — |
 | `--robot-by-label`, `--robot-by-assignee` | ✓ | Grouping controls | 6 |
 | `--robot-capabilities`, `--robot-schema`, `--robot-docs`, `--robot-help` | ✓ | Help menu → "Robot protocol reference" | 6 |
 | `--robot-not-ready-labels` (+ `BV_ROBOT_NOT_READY_LABELS`), `--robot-max-results`, `--robot-min-confidence` | ✓ (not-ready labels on triage and `--robot-next`, as in bv) | Corresponding UI controls | 6 |

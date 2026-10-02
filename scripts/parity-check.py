@@ -108,7 +108,28 @@ FIXTURES = [
     # just the comparisons whose `only` names it run here, and every other is
     # reported skipped rather than compared over beads not made for it.
     {"name": "search", "workspace": "Fixtures/search", "only_named": True},
+    # The demo's beads in a temporary directory beside two recipe files
+    # (RECIPE_FILES): one in .beads/recipes, which bv loads by name, and one
+    # outside it, reached only by its path. Built here rather than committed,
+    # because a recipe in the demo would change what the app lists there.
+    # `only_named`: only the recipe-scope comparisons run over it (vbx-7d5).
+    {"name": "recipes", "workspace": "Fixtures/demo", "recipes": True, "only_named": True},
 ]
+
+# The recipe files of the `recipes` fixture, by path relative to the
+# workspace — which is both binaries' working directory, so the path recipe is
+# given exactly as written here. `ui-open` is a project-file recipe, filtering
+# on status and a label. `hub-first.yml` sorts on PageRank, so its metrics
+# must be the whole source's, and caps at four, so the selection is cut.
+RECIPE_FILES = {
+    ".beads/recipes/ui-open.yaml":
+        "name: ui-open\ndescription: Open UI work\n"
+        "filters:\n  status: [open]\n  tags: [ui]\nsort:\n  field: priority\n",
+    "hub-first.yml":
+        "name: hub-first\ndescription: The most central unfinished beads\n"
+        "filters:\n  status: [open, in_progress, blocked]\n"
+        "sort:\n  field: pagerank\n  direction: desc\nview:\n  max_items: 4\n",
+}
 
 # br's issues columns, in br's order. A beads.db built here has the column
 # shape a real one has — including the ones neither loader reads — so a loader
@@ -329,6 +350,43 @@ COMPARISONS = [
         ("robot-capacity", {}),
     )
     for label in ("engine", "no-such-label")
+] + [
+    # Recipe-scoped runs (vbx-7d5). bv's --recipe is a global scope like
+    # --label: the command answers over what the recipe selects, of the
+    # label's beads when both are given, and the envelope names the recipe as
+    # it was given and hashes the selection into scope_hash. A built-in, the
+    # project-file recipe, a path, and each beside a label; the same subtrees
+    # as the label runs.
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join(args)}",
+     "vbx_args": args, "bv_args": args, "only": {"recipes"}, **paths}
+    for command, paths in (
+        ("robot-graph", {}),
+        ("robot-triage", TRIAGE_PATHS),
+        ("robot-plan", {"bv_path": "plan"}),
+        ("robot-priority", {"bv_path": "recommendations", "vbx_path": "recommendations"}),
+        ("robot-next", {}),
+        ("robot-suggest", {}),
+        ("robot-insights", {"bv_path": "full_stats", "vbx_path": "full_stats"}),
+        ("robot-alerts", {"bv_path": "alerts", "vbx_path": "alerts"}),
+        ("robot-capacity", {}),
+    )
+    for args in (
+        ["--recipe", "actionable"],
+        ["--recipe", "high-impact"],
+        ["--recipe", "ui-open"],
+        ["--recipe", "hub-first.yml"],
+        ["--recipe", "actionable", "--label", "engine"],
+        ["--recipe", "hub-first.yml", "--label", "ui"],
+        ["--recipe", "ui-open", "--label", "no-such-label"],
+    )
+] + [
+    # A recipe that does not resolve fails the command before it runs, as
+    # bv's does: an unknown name, and a path that is not there.
+    {"vbx": command, "bv": command, "name": f"{command} --recipe {recipe}",
+     "vbx_args": ["--recipe", recipe], "bv_args": ["--recipe", recipe],
+     "rejects": True, "only": {"recipes"}}
+    for command in ("robot-triage", "robot-plan", "robot-capacity")
+    for recipe in ("no-such-recipe", "missing.yaml")
 ] + [
     # bv's --alert-label is a filter on the alerts, separate from the --label
     # scope: it keeps the alerts naming the label and drops workspace-wide ones,
@@ -787,6 +845,22 @@ def lift(whole, subtree, keys):
     return lifted
 
 
+def build_recipe_workspace(source: Path, destination: Path) -> Path:
+    """Copies `source`'s .beads to `destination` and writes RECIPE_FILES there.
+
+    Returns the workspace directory. The beads are the source's unchanged, so
+    a difference here is the recipe scope's and nothing else.
+    """
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(source / ".beads", destination / ".beads")
+    for relative, text in RECIPE_FILES.items():
+        path = destination / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return destination
+
+
 def build_sqlite_workspace(jsonl: Path, destination: Path) -> Path:
     """Writes `destination/.beads/beads.db` holding the beads in `jsonl`.
 
@@ -1205,6 +1279,9 @@ def main() -> int:
                 workspace = build_sqlite_workspace(
                     workspace / ".beads" / "issues.jsonl",
                     Path(scratch) / fixture["workspace"].replace("/", "-"))
+            if fixture.get("recipes"):
+                workspace = build_recipe_workspace(
+                    workspace, Path(scratch) / f"{fixture['name']}-recipes")
             d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
                                      fixture["name"], args.verbose,
                                      fixture.get("only_named", False))

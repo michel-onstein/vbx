@@ -469,6 +469,8 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 		return s.recipes()
 	case "recipe_apply":
 		return s.applyRecipe(req)
+	case "recipe_resolve":
+		return s.resolveRecipeCall(req)
 	case "recipe_save":
 		return s.saveRecipe(req)
 	case "recipe_delete":
@@ -807,13 +809,17 @@ const triageHistoryTimeout = 10 * time.Second
 //
 // A `label` in the request scopes it to the label's subgraph (scope.go): the
 // ranking is computed over the subgraph and recommends only the labelled
-// beads, as bv's --robot-triage --label does.
+// beads, as bv's --robot-triage --label does. A `recipe` ranks only what the
+// recipe selects, as --recipe does.
 func (s *Session) triage(req []byte) ([]byte, error) {
 	r, err := parseTriageRequest(req)
 	if err != nil {
 		return nil, err
 	}
-	v := s.view(r.Label)
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
 	issues := v.issues
 
 	opts := analysis.TriageOptions{
@@ -982,13 +988,18 @@ func (s *Session) triageHistory() (*correlation.HistoryReport, string) {
 }
 
 // plan is the execution plan; a `label` in the request plans the label's
-// subgraph, offering only its labelled beads as work (scope.go).
+// subgraph, offering only its labelled beads as work, and a `recipe` plans
+// what the recipe selects (scope.go).
 func (s *Session) plan(req []byte) ([]byte, error) {
-	label, err := labelRequest(req)
+	sc, err := parseScopeRequest(req)
 	if err != nil {
 		return nil, err
 	}
-	an := s.view(label).analyzer
+	v, err := s.view(sc)
+	if err != nil {
+		return nil, err
+	}
+	an := v.analyzer
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}

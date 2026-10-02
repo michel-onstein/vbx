@@ -5,6 +5,28 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — `--recipe` is a robot scope, by name or path (vbx-7d5)
+
+bv 0.25's `--recipe` scopes every robot command the way `--label` does, and
+now vbx's does too. `Session.view` (`scope.go`) takes a `scopeRequest` — label
+and recipe — and, after the label subgraph, runs bv's `recipe.Apply` over the
+label's beads (every bead without one), metrics from the whole source; the
+envelope reports `scope.recipe` as given and hashes the selection into
+`scope_hash`. Triage, next, plan, priority, insights, suggest, alerts, graph
+and capacity all read it; vbx-cli forwards `--recipe` with `--label` (the
+`scoped` flag on `RobotCommand`). One `resolveRecipe` — bv's
+`Loader.Resolve` — serves the scope, `recipe_apply` and `export_report`, so a
+`.yaml`/`.yml` path works wherever a name does; the new `recipe_resolve` lets
+vbx-cli refuse an unresolvable recipe before the command runs, with bv's
+message, warnings and recipe list. A session skipping Phase 2 now analyses
+afresh for a recipe sorting on PageRank or betweenness rather than sorting on
+nothing. Also fixed: an edited `.beads/recipes` recipe was saved where its own
+file shadowed it (see BUGS.md). Parity: a `recipes` workspace (the demo plus a
+project-file recipe and a path-only one) compares the nine commands under seven
+recipe and recipe-and-label scopes, and six refusals — 69 new matches, 0
+differences. Tests: `recipe_scope_test.go`, three in `recipes_test.go`, and
+`editProjectFileRecipe` in `RecipeTests`.
+
 ## 2026-10-02 — Alerts panel shows bv's suggested action and labels (vbx-fc7)
 
 `HealthAlert` now decodes bv 0.25's `suggested_action`, `labels` and

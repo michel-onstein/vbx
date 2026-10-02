@@ -70,11 +70,8 @@ func (s *Session) exportReport(req []byte) ([]byte, error) {
 
 	var active *recipe.Recipe
 	if r.Recipe != "" {
-		loader, err := s.recipeLoader()
-		if err != nil {
-			return nil, err
-		}
-		active, err = loader.Resolve(r.Recipe)
+		var err error
+		active, err = s.resolveRecipe(r.Recipe)
 		if err != nil {
 			return nil, err
 		}

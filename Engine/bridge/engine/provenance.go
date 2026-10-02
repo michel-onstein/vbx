@@ -29,8 +29,12 @@ import (
 // scope_hash. The zero value is the whole project.
 type provenanceScope struct {
 	label string
+	// recipe is the --recipe argument as given — a name or a path — which is
+	// what bv reports and hashes.
+	recipe string
 	// candidates are the beads the payload selects from, when that is not
-	// every visible bead — a label scope's core beads. Nil means all.
+	// every visible bead — a label scope's core beads, narrowed to what a
+	// recipe selected. Nil means all.
 	candidates []string
 }
 
@@ -47,13 +51,13 @@ func sourceKindForEnvelope(kind string) string {
 // scopeHash is bv's robotScopeHash: the scope's flags, the unscoped data hash
 // and the sorted candidate ids, marshalled in that struct shape and hashed.
 // The field names and order are part of the hash, so the struct is bv's
-// verbatim. vbx has no recipe or repo scope on a robot payload, so those are
-// always empty.
-func scopeHash(label, dataHash string, ids []string) string {
+// verbatim. vbx has no repo scope on a robot payload, so that is always
+// empty.
+func scopeHash(label, recipeArg, dataHash string, ids []string) string {
 	raw, err := json.Marshal(struct {
 		Label, Recipe, Repo, DataHash string
 		IDs                           []string
-	}{label, "", "", dataHash, ids})
+	}{label, recipeArg, "", dataHash, ids})
 	if err != nil {
 		return ""
 	}
@@ -92,7 +96,7 @@ func (s *Session) provenance(dataHash string, scope provenanceScope) map[string]
 
 	envelope := map[string]any{
 		"output_format": "json",
-		"scope_hash":    scopeHash(scope.label, dataHash, scopeIDs(issues, scope)),
+		"scope_hash":    scopeHash(scope.label, scope.recipe, dataHash, scopeIDs(issues, scope)),
 	}
 	if source != "" {
 		envelope["source_path"] = source
@@ -100,8 +104,16 @@ func (s *Session) provenance(dataHash string, scope provenanceScope) map[string]
 	if kind != "" {
 		envelope["source_kind"] = sourceKindForEnvelope(kind)
 	}
-	if scope.label != "" {
-		envelope["scope"] = map[string]any{"label": scope.label}
+	// bv's RobotScope: each flag only when it was given.
+	if scope.label != "" || scope.recipe != "" {
+		named := map[string]any{}
+		if scope.label != "" {
+			named["label"] = scope.label
+		}
+		if scope.recipe != "" {
+			named["recipe"] = scope.recipe
+		}
+		envelope["scope"] = named
 	}
 	return envelope
 }

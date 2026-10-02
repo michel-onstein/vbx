@@ -202,7 +202,9 @@ view snapshots for inspection.
   saved baseline, drift configuration and project recipes. The first two are
   gitignored (a rebuildable cache and a local reference point); `recipes.yaml`
   is deliberately not, because it is shared configuration that `bv --recipe`
-  reads too.
+  reads too. A recipe defined by its own `.beads/recipes/<name>.yaml` — bv's
+  `project-file` source, which outranks `.bv/recipes.yaml` — is saved and
+  deleted in that file instead (vbx-7d5).
 - **No signing identifier is in this repository, and none may be.** It is
   public. Configuration lives in the gitignored `scripts/signing.env` or the
   environment; the App Store entitlements are a template expanded into

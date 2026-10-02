@@ -42,7 +42,7 @@ func (s *Session) suggest(req []byte) ([]byte, error) {
 		Type          string  `json:"type"`
 		MinConfidence float64 `json:"min_confidence"`
 		Bead          string  `json:"bead"`
-		Label         string  `json:"label"`
+		scopeRequest
 	}
 	if len(req) > 0 {
 		if err := json.Unmarshal(req, &r); err != nil {
@@ -72,9 +72,12 @@ func (s *Session) suggest(req []byte) ([]byte, error) {
 			"invalid suggest type %q (use: duplicate, dependency, label, cycle)", r.Type)
 	}
 
-	// Suggestions are drawn from the label's subgraph under a label, and
+	// Suggestions are drawn from the scoped set under a label or recipe, and
 	// stamped with the unscoped data hash, as bv's are.
-	v := s.view(r.Label)
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
 	_, hash := s.robotEnvelope()
 	return s.withProvenance(
 		analysis.GenerateRobotSuggestOutput(v.issues, config, hash), hash, v.scope)
@@ -87,9 +90,10 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 		MaxResults    int     `json:"max_results"`
 		ByLabel       string  `json:"by_label"`
 		ByAssignee    string  `json:"by_assignee"`
-		// Label is bv's global --label scope (scope.go), not ByLabel's filter:
-		// it changes the graph the recommendations are computed over.
-		Label string `json:"label"`
+		// The scope is bv's global --label and --recipe (scope.go), not
+		// ByLabel's filter: it changes the graph the recommendations are
+		// computed over.
+		scopeRequest
 	}
 	if len(req) > 0 {
 		if err := json.Unmarshal(req, &r); err != nil {
@@ -97,7 +101,10 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 		}
 	}
 
-	v := s.view(r.Label)
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
 	issues, analyzer, stats := v.issues, v.analyzer, v.stats
 	if analyzer == nil {
 		return nil, fmt.Errorf("session has no analyzer")
@@ -276,7 +283,10 @@ func (s *Session) next(req []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := s.view(r.Label)
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
 	issues, stats := v.issues, v.stats
 	if stats != nil {
 		stats.WaitForPhase2()
@@ -444,8 +454,8 @@ func claimabilityReasons(
 // insights reports the deep graph metrics.
 func (s *Session) insights(req []byte) ([]byte, error) {
 	var r struct {
-		Limit int    `json:"limit"`
-		Label string `json:"label"`
+		Limit int `json:"limit"`
+		scopeRequest
 	}
 	if len(req) > 0 {
 		_ = json.Unmarshal(req, &r)
@@ -455,8 +465,11 @@ func (s *Session) insights(req []byte) ([]byte, error) {
 		limit = 200
 	}
 
-	// Under a label the metrics are the label subgraph's, analysed afresh.
-	v := s.view(r.Label)
+	// Under a scope the metrics are the scoped set's, analysed afresh.
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
 	analyzer, stats := v.analyzer, v.stats
 	if analyzer == nil || stats == nil {
 		return nil, fmt.Errorf("session has no analysis")
@@ -553,9 +566,9 @@ func limitSlice(values []string, limit int) []string {
 func (s *Session) graphExport(req []byte) ([]byte, error) {
 	var r struct {
 		Format string `json:"format"`
-		Label  string `json:"label"`
 		Root   string `json:"root"`
 		Depth  int    `json:"depth"`
+		scopeRequest
 	}
 	if len(req) > 0 {
 		if err := json.Unmarshal(req, &r); err != nil {
@@ -566,7 +579,12 @@ func (s *Session) graphExport(req []byte) ([]byte, error) {
 	// The label is a scope (scope.go), never passed to the exporter: the view
 	// already selected the label subgraph, and ExportGraph's own label filter
 	// keeps only the labelled beads, which erases their dependency context.
-	v := s.view(r.Label)
+	// A recipe is a scope too, and bv names only the label in
+	// filters_applied.
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
 	if v.analyzer == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}

@@ -128,9 +128,10 @@ type alertsRequest struct {
 	Type     string `json:"type"`
 	// AlertLabel is bv's --alert-label: a filter on the alerts computed.
 	AlertLabel string `json:"alert_label"`
-	// Label is bv's global --label scope (scope.go): it changes the issue set
-	// the alerts are computed over. bv applies both when both are given.
-	Label string `json:"label"`
+	// The scope is bv's global --label and --recipe (scope.go): it changes
+	// the issue set the alerts are computed over. bv applies the scope and
+	// --alert-label both when both are given.
+	scopeRequest
 }
 
 // alerts compares the workspace against its saved baseline, if any.
@@ -142,7 +143,11 @@ func (s *Session) alerts(req []byte) ([]byte, error) {
 		}
 	}
 
-	result, hasBaseline, baselineInfo, err := s.computeDrift(s.view(r.Label))
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
+	result, hasBaseline, baselineInfo, err := s.computeDrift(v)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +289,7 @@ func countSeverities(alerts []drift.Alert) (critical, warning, info int) {
 
 // driftPayload is the drift check on its own, with bv's exit code echoed.
 func (s *Session) driftPayload() ([]byte, error) {
-	result, hasBaseline, info, err := s.computeDrift(s.view(""))
+	result, hasBaseline, info, err := s.computeDrift(s.wholeView())
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +328,7 @@ func (s *Session) saveBaseline(req []byte) ([]byte, error) {
 		return nil, fmt.Errorf("session has no source")
 	}
 
-	whole := s.view("")
+	whole := s.wholeView()
 	stats, cycles, err := s.currentBaselineStats(whole)
 	if err != nil {
 		return nil, err

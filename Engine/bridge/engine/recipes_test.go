@@ -138,6 +138,141 @@ func TestUserRecipeRoundTrip(t *testing.T) {
 	}
 }
 
+// A recipe defined by its own `.beads/recipes/<name>.yaml` — bv's
+// project-file source, the highest precedence — is saved and deleted in that
+// file. Regression (vbx-7d5): recipe_save wrote every recipe into
+// .bv/recipes.yaml, where the project file shadowed the copy, so an edit made
+// in the app changed nothing that loaded; and recipe_delete, which only read
+// .bv/recipes.yaml, refused to delete it at all.
+func TestProjectFileRecipeIsEditedInItsOwnFile(t *testing.T) {
+	dir := newFixtureWorkspace(t)
+	recipesDir := filepath.Join(dir, ".beads", "recipes")
+	if err := os.MkdirAll(recipesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(recipesDir, "area.yaml")
+	if err := os.WriteFile(file, []byte(
+		"name: area\ndescription: One area\nfilters:\n  tags: [infra]\nsort:\n  field: id\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(OpenConfig{Path: dir})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(s.Close)
+
+	before := call[recipeApplyShape](t, s, "recipe_apply", map[string]any{"name": "area"})
+	if strings.Join(before.IssueIDs, ",") != "c,e" {
+		t.Fatalf("the project-file recipe selected %v, want c,e", before.IssueIDs)
+	}
+
+	saved := call[struct {
+		Path     string `json:"path"`
+		Replaced bool   `json:"replaced"`
+	}](t, s, "recipe_save", map[string]any{
+		"recipe": map[string]any{
+			"name":        "area",
+			"description": "Another area",
+			"filters":     map[string]any{"tags": []string{"core"}},
+			"sort":        map[string]any{"field": "id", "direction": "asc"},
+		},
+	})
+	if saved.Path != file || !saved.Replaced {
+		t.Errorf("saved to %s (replaced %v), want the recipe's own %s", saved.Path, saved.Replaced, file)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".bv", "recipes.yaml")); !os.IsNotExist(err) {
+		t.Errorf(".bv/recipes.yaml was written; the project file would shadow it (stat: %v)", err)
+	}
+
+	// The edit is what loads now, in vbx and — since it is the same file —
+	// in bv.
+	after := call[recipeApplyShape](t, s, "recipe_apply", map[string]any{"name": "area"})
+	if strings.Join(after.IssueIDs, ",") != "a,b" {
+		t.Errorf("after the edit the recipe selected %v, want a,b", after.IssueIDs)
+	}
+	reread, err := recipe.LoadFile(file)
+	if err != nil {
+		t.Fatalf("bv cannot load the rewritten file: %v", err)
+	}
+	if reread.Name != "area" || reread.Description != "Another area" {
+		t.Errorf("rewritten file holds %q / %q", reread.Name, reread.Description)
+	}
+
+	call[struct{}](t, s, "recipe_delete", map[string]any{"name": "area"})
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Errorf("the recipe's file survived its deletion (stat: %v)", err)
+	}
+	if _, err := s.Call("recipe_apply", []byte(`{"name":"area"}`)); err == nil {
+		t.Error("the deleted project-file recipe is still applicable")
+	}
+}
+
+// A project-file recipe whose name differs from its file's stem is still
+// found by name and written back to that file, not to one named after it.
+func TestProjectFileRecipeIsFoundByNameNotFilename(t *testing.T) {
+	dir := newFixtureWorkspace(t)
+	recipesDir := filepath.Join(dir, ".beads", "recipes")
+	if err := os.MkdirAll(recipesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(recipesDir, "sprint.yml")
+	if err := os.WriteFile(file, []byte("name: sprint-review\nfilters:\n  tags: [docs]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(OpenConfig{Path: dir})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(s.Close)
+
+	saved := call[struct {
+		Path string `json:"path"`
+	}](t, s, "recipe_save", map[string]any{
+		"recipe": map[string]any{"name": "sprint-review", "filters": map[string]any{"tags": []string{"infra"}}},
+	})
+	if saved.Path != file {
+		t.Errorf("saved to %s, want %s", saved.Path, file)
+	}
+	entries, _ := os.ReadDir(recipesDir)
+	if len(entries) != 1 {
+		t.Errorf("recipes directory holds %d files, want the one", len(entries))
+	}
+}
+
+// Deleting a project-file recipe that .bv/recipes.yaml also defines clears
+// both: removing the file alone would uncover the shadowed copy, and the
+// recipe the user deleted would still be there.
+func TestDeletingAProjectFileRecipeClearsItsShadowedCopy(t *testing.T) {
+	dir := newFixtureWorkspace(t)
+	recipesDir := filepath.Join(dir, ".beads", "recipes")
+	if err := os.MkdirAll(recipesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(recipesDir, "area.yaml"),
+		[]byte("name: area\nfilters:\n  tags: [infra]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".bv"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".bv", "recipes.yaml"),
+		[]byte("recipes:\n  area:\n    name: area\n    filters:\n      tags: [core]\n  keep:\n    name: keep\n"),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(OpenConfig{Path: dir})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(s.Close)
+
+	call[struct{}](t, s, "recipe_delete", map[string]any{"name": "area"})
+	if _, err := s.Call("recipe_apply", []byte(`{"name":"area"}`)); err == nil {
+		t.Error("deleting the project file uncovered the .bv/recipes.yaml copy")
+	}
+	call[recipeApplyShape](t, s, "recipe_apply", map[string]any{"name": "keep"})
+}
+
 func TestRecipeNamesCannotEscapeTheDirectory(t *testing.T) {
 	s := openFixture(t)
 	// A silently sanitised name is a recipe the user cannot find again, so a
