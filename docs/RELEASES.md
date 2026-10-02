@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.26.1 — 2026-10-02
+
+### Fixes
+
+- A saved drift baseline records the workspace's commit, and saving one no longer runs git ([#128](https://github.com/michel-onstein/vbx/pull/128))
+
 ## 0.26.0 — 2026-10-02
 
 ### Features
