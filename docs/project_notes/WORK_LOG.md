@@ -5,6 +5,26 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — `--label` and `--recipe` scope every robot command bv scopes (vbx-shz)
+
+bv 0.25.2 applies its scope before every post-load handler, and vbx-cli now
+says per command what the flags do (`ScopeRule` in `Sources/vbx-cli/main.swift`,
+each read from `cmd/bv`). Newly scoped through `Session.view`: label health,
+label flow, label attention, blocker chain, search, sprint list, sprint show
+and burndown, each with `scope` and `scope_hash` in its envelope (ADR-023,
+through the new `withEnvelope`). `--robot-correlation-stats` resolves the
+recipe as bv does and reads neither flag. The rest of bv's scoped commands —
+history and its correlation family, diff, drift, forecast — refuse either flag
+with exit 2 until vbx-9gl ports them; the help lists both sets from the table.
+Also fixed: burndown's empty ideal line is `null`, and an unknown blocker-chain
+bead is bv's `Issue not found` (see BUGS.md). The harness's own tests had two
+stale checks from vbx-7d5 (the `recipes` fixture, triage rejections), fixed
+here. Parity: 259 → 319 matches, 0 differences; on the `beads.db` fixture the
+label commands now declare ADR-024's lossy `data_hash` and `scope_hash`, as
+the other enveloped commands do. `test-parity-check.py` now fails a
+command vbx-cli scopes without a label, unknown-label, recipe and
+recipe-and-label run. Tests: `post_load_scope_test.go`.
+
 ## 2026-10-02 — `--recipe` is a robot scope, by name or path (vbx-7d5)
 
 bv 0.25's `--recipe` scopes every robot command the way `--label` does, and

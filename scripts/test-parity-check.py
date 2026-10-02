@@ -87,9 +87,9 @@ def test_default_run_covers_every_fixture(parity) -> None:
     print("\nFixtures")
     names = [fixture["name"] for fixture in parity.FIXTURES]
     check("the demo, the readiness fixture, its beads.db form, the sprints, both feedback"
-          " fixtures and the search fixture are all compared",
+          " fixtures, the search fixture and the recipes workspace are all compared",
           names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
-                    "feedback-few", "search"], str(names))
+                    "feedback-few", "search", "recipes"], str(names))
     for fixture in parity.FIXTURES:
         path = ROOT / fixture["workspace"] / ".beads" / "issues.jsonl"
         check(f"{fixture['workspace']} exists", path.exists(), str(path))
@@ -214,9 +214,16 @@ def test_label_scoped_runs(parity) -> None:
     }
     check("the graph is compared under a known and an unknown label",
           {"engine", "no-such-label"} <= compared, str(compared))
+    # The arguments may be spelled differently — an id as --id or as the
+    # flag's value — but the scope must be the same on both sides.
     for entry in scoped:
-        check(f"--{entry['vbx']} passes the same label to bv",
-              entry.get("bv_args") == entry["vbx_args"], str(entry))
+        vbx_args, bv_args = entry["vbx_args"], entry.get("bv_args", [])
+        same = all(
+            (flag in vbx_args) == (flag in bv_args)
+            and (flag not in vbx_args
+                 or vbx_args[vbx_args.index(flag) + 1] == bv_args[bv_args.index(flag) + 1])
+            for flag in ("--label", "--recipe"))
+        check(f"--{entry.get('name', entry['vbx'])} passes the same scope to bv", same, str(entry))
 
     gaps = [entry for entry in parity.COMPARISONS
             if entry.get("compare") is False and "--label" in entry.get("name", "")]
@@ -224,6 +231,54 @@ def test_label_scoped_runs(parity) -> None:
     check("a label-scoped command that does not match yet is a skip naming its bead",
           all("(vbx-" in entry.get("note", "") for entry in gaps),
           str([entry.get("note") for entry in gaps]))
+
+
+def cli_scope_rules() -> dict[str, str]:
+    """Each vbx-cli command's ScopeRule, read from its command table."""
+    import re
+    source = (ROOT / "Sources" / "vbx-cli" / "main.swift").read_text()
+    table = source.split("let robotCommands: [RobotCommand] = [", 1)[1].split("\n]\n", 1)[0]
+    rules = {}
+    for block in re.split(r"RobotCommand\(", table)[1:]:
+        flag = re.match(r'\s*"([^"]+)"', block)
+        rule = re.search(r"scope: \.(\w+)", block)
+        if flag:
+            rules[flag.group(1)] = rule.group(1) if rule else "ignored"
+    return rules
+
+
+def test_every_scoped_command_is_compared_under_scope(parity) -> None:
+    print("\nEvery command vbx-cli scopes is compared under a scope (vbx-shz)")
+    rules = cli_scope_rules()
+    scoped = sorted(flag for flag, rule in rules.items() if rule == "scoped")
+    check("the CLI table was read", len(rules) > 40 and "robot-label-health" in scoped,
+          str(rules))
+
+    def runs(command: str):
+        for entry in parity.COMPARISONS:
+            if entry["vbx"] == command and entry.get("compare") is not False:
+                yield entry.get("vbx_args", [])
+
+    def value(args: list[str], flag: str):
+        return args[args.index(flag) + 1] if flag in args else None
+
+    for command in scoped:
+        labels = {value(args, "--label") for args in runs(command) if "--recipe" not in args}
+        recipes = [args for args in runs(command) if "--recipe" in args]
+        check(f"--{command} runs under a label and an unknown label",
+              "no-such-label" in labels and len(labels - {None, "no-such-label"}) > 0,
+              str(labels))
+        check(f"--{command} runs under a recipe, alone and beside a label",
+              any("--label" not in args for args in recipes)
+              and any("--label" in args for args in recipes), str(recipes))
+
+    # A command the CLI refuses a scope for is not compared under one: bv
+    # would answer, vbx-cli exits 2, and the run could only ever differ.
+    unported = {flag for flag, rule in rules.items() if rule == "unported"}
+    compared = {entry["vbx"] for entry in parity.COMPARISONS
+                if {"--label", "--recipe"} & set(entry.get("vbx_args", []))}
+    check("no refused command is compared under a scope", not (unported & compared),
+          str(unported & compared))
 
 
 def test_bv_version_gate(parity) -> None:
@@ -305,8 +360,11 @@ def test_triage_feedback_and_not_ready(parity) -> None:
     check("a block bv omits stays omitted, so one vbx adds still differs",
           parity.lift(bare, bare["triage"], ("feedback",)) == {"recommendations": []})
 
+    # A rejection compares exit status and stderr, so it has no payload to
+    # lift into.
     triage = [entry for entry in parity.COMPARISONS
-              if entry["vbx"] == "robot-triage" and entry.get("compare") is not False]
+              if entry["vbx"] == "robot-triage" and entry.get("compare") is not False
+              and not entry.get("rejects")]
     check("every triage run compares bv's feedback block",
           all("feedback" in entry.get("bv_lift", ()) for entry in triage),
           str([entry.get("name", entry["vbx"]) for entry in triage]))
@@ -430,12 +488,25 @@ def test_search(parity) -> None:
     names = [entry["name"] for entry in searches]
     check("each search run has its own name", len(names) == len(set(names)), str(names))
     compared = [entry for entry in searches if not entry.get("rejects")]
+    # A scoped search compares the scope it names too (vbx-shz), and only
+    # that much of the envelope.
+    scoped = [entry for entry in compared
+              if {"--label", "--recipe"} & set(entry["vbx_args"])]
     check("search compares the ranking and its echo, not the envelope",
-          all(entry.get("keys") == parity.SEARCH_KEYS for entry in compared)
+          all(entry.get("keys") == parity.SEARCH_KEYS
+              for entry in compared if entry not in scoped)
           and "results" in parity.SEARCH_KEYS and "min_score" in parity.SEARCH_KEYS)
+    check("a scoped search compares its scope and hashes as well",
+          scoped != [] and all(
+              entry.get("keys") == (*parity.SEARCH_KEYS, "scope", "scope_hash", "data_hash")
+              for entry in scoped), str([entry["name"] for entry in scoped]))
+    check("an exact id outside the label is compared",
+          any(entry["vbx_args"][:2] == ["--search", "tax-7"]
+              and "finance" in entry["vbx_args"] for entry in scoped))
 
     def runs(fixture: str) -> list[list[str]]:
-        return [entry["bv_args"] for entry in compared if entry["only"] == {fixture}]
+        return [entry["bv_args"] for entry in compared
+                if entry["only"] == {fixture} and entry not in scoped]
 
     buried = runs("search")
     check("an exact id the text ranking buries is compared, with its control",
@@ -480,6 +551,7 @@ def main() -> int:
     test_triage_feedback_and_not_ready(parity)
     test_bv_version_gate(parity)
     test_label_scoped_runs(parity)
+    test_every_scoped_command_is_compared_under_scope(parity)
     test_envelope_only_keys_are_one_list(parity)
     test_declared_differences_are_narrow(parity)
     test_sqlite_workspace_keeps_every_record(parity)

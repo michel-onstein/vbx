@@ -40,20 +40,29 @@ func (s *Session) loadSprints() ([]model.Sprint, error) {
 	return sprints, nil
 }
 
-func (s *Session) sprintList() ([]byte, error) {
+// sprintList lists every sprint. The sprints come from their own file, so
+// a --label or --recipe scope changes none of them; it changes the envelope,
+// whose data_hash bv takes over the scoped issues, as for every sprint
+// command.
+func (s *Session) sprintList(req []byte) ([]byte, error) {
+	v, err := s.scopedView(req)
+	if err != nil {
+		return nil, err
+	}
 	sprints, err := s.loadSprints()
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(map[string]any{
+	return s.withEnvelope(map[string]any{
 		"sprints":      sprints,
 		"sprint_count": len(sprints),
-	})
+	}, analysis.ComputeDataHash(v.issues), v.scope)
 }
 
 type sprintRequest struct {
 	// ID names a sprint, or "current" for the active one.
 	ID string `json:"id"`
+	scopeRequest
 }
 
 func decodeSprintRequest(req []byte) (sprintRequest, error) {
@@ -97,31 +106,42 @@ func (s *Session) sprintShow(req []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
+
 	// The beads themselves travel with it, so the UI does not have to
-	// re-resolve ids that may no longer exist.
+	// re-resolve ids that may no longer exist. Under a scope only the
+	// sprint's beads inside it are listed; `missing` still means a bead the
+	// workspace no longer has, never one the scope left out.
 	issues, _, _ := s.snapshot()
-	byID := make(map[string]model.Issue, len(issues))
+	exists := make(map[string]bool, len(issues))
 	for _, issue := range issues {
-		byID[issue.ID] = issue
+		exists[issue.ID] = true
+	}
+	inScope := make(map[string]model.Issue, len(v.issues))
+	for _, issue := range v.issues {
+		inScope[issue.ID] = issue
 	}
 	members := make([]model.Issue, 0, len(found.BeadIDs))
 	missing := []string{}
 	for _, id := range found.BeadIDs {
-		if issue, ok := byID[id]; ok {
+		if issue, ok := inScope[id]; ok {
 			members = append(members, issue)
-		} else {
+		} else if !exists[id] {
 			// A sprint outliving one of its beads is worth reporting rather
 			// than quietly shrinking the sprint.
 			missing = append(missing, id)
 		}
 	}
 
-	return json.Marshal(map[string]any{
+	return s.withEnvelope(map[string]any{
 		"sprint":  found,
 		"issues":  members,
 		"missing": missing,
 		"active":  found.IsActive(),
-	})
+	}, analysis.ComputeDataHash(v.issues), v.scope)
 }
 
 // burndown computes one sprint's burndown, ideal line, projection, scope
@@ -140,7 +160,12 @@ func (s *Session) burndown(req []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	issues, _, _ := s.snapshot()
+	// Under a scope the burndown counts only the sprint's beads inside it.
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
+	issues := v.issues
 	now := robotNow()
 	payload, total := burndownPayload(sprint, issues, now)
 
@@ -156,11 +181,10 @@ func (s *Session) burndown(req []byte) ([]byte, error) {
 		payload["ideal_line"] = idealLineScoped(sprint, total, changes)
 	}
 
-	// bv inlines the burndown under its robot envelope, so vbx does too.
-	generated, hash := s.robotEnvelope()
-	payload["generated_at"] = generated
-	payload["data_hash"] = hash
-	return s.withProvenance(payload, hash, provenanceScope{})
+	// bv inlines the burndown under its robot envelope, so vbx does too. Its
+	// data_hash is taken over the issues the burndown read — the scoped set
+	// under a scope, and the same as the session's otherwise.
+	return s.withEnvelope(payload, analysis.ComputeDataHash(issues), v.scope)
 }
 
 // burndownPayload is bv's calculateBurndownAt: everything except the scope
@@ -302,11 +326,14 @@ func dailyBurndown(
 }
 
 // idealLine is the straight run from the full backlog down to zero.
+//
+// No line is nil, which encodes as null, as bv's generateIdealLine returns
+// it: an empty sprint — or a scope that leaves none of its beads — has no
+// line to draw, and a flat zero would look like a sprint that finished
+// before it began. The app decodes null as no points.
 func idealLine(sprint *model.Sprint, total int) []model.BurndownPoint {
 	if total == 0 {
-		// An empty sprint has no line to draw, and a flat zero would look
-		// like a sprint that finished before it began.
-		return []model.BurndownPoint{}
+		return nil
 	}
 	return idealLineScoped(sprint, total, nil)
 }
@@ -318,14 +345,15 @@ func idealLine(sprint *model.Sprint, total int) []model.BurndownPoint {
 // as a change of slope rather than as a misleading "behind schedule" gap.
 // Without events it is the plain straight line, exactly as bv draws it.
 func idealLineScoped(sprint *model.Sprint, total int, events []scopeChange) []model.BurndownPoint {
-	points := []model.BurndownPoint{}
+	// An undated sprint has no line either: nil, as bv's is.
 	if sprint.StartDate.IsZero() || sprint.EndDate.IsZero() {
-		return points
+		return nil
 	}
 	totalDays := sprintDays(sprint)
 	if totalDays <= 0 {
-		return points
+		return nil
 	}
+	points := []model.BurndownPoint{}
 	dayOf := func(t time.Time) int {
 		return int(t.Sub(sprint.StartDate).Hours() / 24)
 	}

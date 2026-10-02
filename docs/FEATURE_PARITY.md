@@ -60,7 +60,8 @@ ranked subset where vbx returns the full result.
 
 Three known differences are declared too, on the `beads.db` form of the
 readiness fixture only (ADR-024): `data_hash` (and `scope_hash`, which hashes
-it) on `--robot-next`, `--robot-suggest` and `--robot-graph`, and the
+it) on `--robot-next`, `--robot-suggest`, `--robot-graph`, `--robot-capacity`
+and the three label commands, and the
 closed-time velocity in `--robot-label-health` and `--robot-triage`. bv 0.25.2
 reads a `br` database through a lossy fallback that drops `closed_at`, notes
 and design, and vbx deliberately does not copy it. Each is scoped to that
@@ -74,7 +75,14 @@ over the demo. The engine applies that scope in one place (`Session.view`,
 `scope.go`), and graph, triage, plan, priority, next, suggest, insights,
 alerts and capacity all read it, so each is compared with a known label
 (`engine`) and an unknown one (vbx-4cz, vbx-jnm, vbx-ko1); insights compares
-its `full_stats`, since bv shapes its top level differently. Alerts also take
+its `full_stats`, since bv shapes its top level differently. So do the label
+commands, the blocker chain, search and the sprint commands (vbx-shz): the
+label commands and the blocker chain lift bv's envelope keys into the subtree
+they compare, so `scope` and `scope_hash` are checked beside the data, and the
+sprint commands are compared over the sprints fixture with `at-risk`, an
+unknown label, `actionable`, and `actionable` within `burndown`.
+`test-parity-check.py` reads vbx-cli's command table and fails when a command
+it scopes lacks a label, an unknown-label, a recipe or a recipe-and-label run. Alerts also take
 bv's separate `--alert-label` filter, which keeps only the alerts naming the
 label and is compared with `engine`, `ui` and an unknown label (vbx-jnm), and
 capacity bv's `--capacity-label`, an exact-match filter on the beads simulated,
@@ -86,10 +94,18 @@ answers over what the recipe selects — of the label's beads, when both are
 given — and the envelope names the recipe as given and hashes the selection
 into `scope_hash`. The harness builds a `recipes` workspace from the demo's
 beads plus two recipe files, one in `.beads/recipes` and one reached only by
-its path, and runs the same nine commands with a built-in (`actionable`,
+its path, and runs the same commands with a built-in (`actionable`,
 `high-impact`), the project-file recipe, the path, and three recipe-and-label
 pairs; an unknown name and a missing path must be refused as bv refuses them
-(vbx-7d5).
+(vbx-7d5) — `--robot-correlation-stats` too, whose output reads neither flag
+but whose recipe bv still resolves.
+
+bv scopes a few more post-load commands that vbx does not yet: the
+git-history family (history, related, impact-network, causality, orphans,
+file-beads, file-hotspots, file-relations, impact), diff, drift and forecast.
+`vbx-cli` refuses `--label` and `--recipe` with those (exit 2) rather than
+answer over every bead as if scoped (vbx-9gl). Commands bv answers before it
+loads issues — the recipe list, triage feedback — ignore both, as bv does.
 
 The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.
@@ -279,13 +295,13 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-suggest` (+ type, bead, confidence) | ✓ | Inspector suggestions | 6 |
 | `--robot-forecast`, `--robot-capacity` (+ agents, capacity-label, label scope) | ✓ | Inspector forecast, sprint scenarios | 6 |
 | `--robot-burndown`, `--robot-sprint-list`, `--robot-sprint-show` | ✓ | Sprint dashboard | 6 |
-| `--robot-label-health`, `--robot-label-flow`, `--robot-label-attention` | ✓ | Label dashboard, Flow matrix, Attention | 6 |
+| `--robot-label-health`, `--robot-label-flow`, `--robot-label-attention` (+ label and recipe scope) | ✓ | Label dashboard, Flow matrix, Attention | 6 |
 | `--robot-alerts` (+ severity, alert-type, alert-label, label scope) | ✓ | Alerts panel | 6 |
 | `--robot-drift`, `--check-drift`, baseline save/show | ✓ | Alerts + baseline menu | 6 |
 | `--robot-diff`, `--diff-since`, `--as-of` | ✓ | Time-travel mode | 7 |
 | `--robot-graph` (+ format, root, depth) | ✓ | Graph export menu | 6 |
 | `--robot-recipes` | ✓ | Recipe sidebar | 6 |
-| `--recipe <name or path.yaml>` as a global scope on robot commands (bv 0.25) | ✓ `vbx-cli` triage, next, plan, priority, insights, suggest, alerts, graph and capacity, alone or with `--label`, with `scope.recipe` and `scope_hash`; a path wherever a name goes (also `--robot-recipe-apply` and `--export`); an unknown recipe refused with bv's message and list. Matched in `parity-check.py` (vbx-7d5). **Not built:** the label commands and bv's other post-load handlers ignore `--label` and `--recipe` in vbx-cli (vbx-shz) | Recipe sidebar applies by name | — |
+| `--recipe <name or path.yaml>` as a global scope on robot commands (bv 0.25) | ✓ `vbx-cli` triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show and burndown, alone or with `--label`, with `scope.recipe` and `scope_hash`; a path wherever a name goes (also `--robot-recipe-apply` and `--export`); an unknown recipe refused with bv's message and list. Matched in `parity-check.py` (vbx-7d5, vbx-shz). **Not built:** history, related, impact-network, causality, orphans, the file commands, impact, diff, drift and forecast, which refuse either flag (vbx-9gl) | Recipe sidebar applies by name | — |
 | `--robot-by-label`, `--robot-by-assignee` | ✓ | Grouping controls | 6 |
 | `--robot-capabilities`, `--robot-schema`, `--robot-docs`, `--robot-help` | ✓ | Help menu → "Robot protocol reference" | 6 |
 | `--robot-not-ready-labels` (+ `BV_ROBOT_NOT_READY_LABELS`), `--robot-max-results`, `--robot-min-confidence` | ✓ (not-ready labels on triage and `--robot-next`, as in bv) | Corresponding UI controls | 6 |

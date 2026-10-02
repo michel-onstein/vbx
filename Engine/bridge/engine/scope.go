@@ -147,6 +147,16 @@ func (v robotView) seedHash() string {
 	return v.dataHash
 }
 
+// scopedView is view for a request whose scope is its only use of the
+// request's label and recipe keys; any other key is the method's own.
+func (s *Session) scopedView(req []byte) (robotView, error) {
+	sc, err := parseScopeRequest(req)
+	if err != nil {
+		return robotView{}, err
+	}
+	return s.view(sc)
+}
+
 // parseScopeRequest decodes the scope of a method that takes nothing else. A
 // request that is absent or names no scope is the unscoped view.
 func parseScopeRequest(req []byte) (scopeRequest, error) {

@@ -283,7 +283,8 @@ fields at the top level, and <code>--robot-label-attention</code>, because bv pr
 ranked subset where vbx returns the full result.</p>
 <p>Three known differences are declared too, on the <code>beads.db</code> form of the
 readiness fixture only (ADR-024): <code>data_hash</code> (and <code>scope_hash</code>, which hashes
-it) on <code>--robot-next</code>, <code>--robot-suggest</code> and <code>--robot-graph</code>, and the
+it) on <code>--robot-next</code>, <code>--robot-suggest</code>, <code>--robot-graph</code>, <code>--robot-capacity</code>
+and the three label commands, and the
 closed-time velocity in <code>--robot-label-health</code> and <code>--robot-triage</code>. bv 0.25.2
 reads a <code>br</code> database through a lossy fallback that drops <code>closed_at</code>, notes
 and design, and vbx deliberately does not copy it. Each is scoped to that
@@ -296,7 +297,14 @@ over the demo. The engine applies that scope in one place (<code>Session.view</c
 <code>scope.go</code>), and graph, triage, plan, priority, next, suggest, insights,
 alerts and capacity all read it, so each is compared with a known label
 (<code>engine</code>) and an unknown one (vbx-4cz, vbx-jnm, vbx-ko1); insights compares
-its <code>full_stats</code>, since bv shapes its top level differently. Alerts also take
+its <code>full_stats</code>, since bv shapes its top level differently. So do the label
+commands, the blocker chain, search and the sprint commands (vbx-shz): the
+label commands and the blocker chain lift bv's envelope keys into the subtree
+they compare, so <code>scope</code> and <code>scope_hash</code> are checked beside the data, and the
+sprint commands are compared over the sprints fixture with <code>at-risk</code>, an
+unknown label, <code>actionable</code>, and <code>actionable</code> within <code>burndown</code>.
+<code>test-parity-check.py</code> reads vbx-cli's command table and fails when a command
+it scopes lacks a label, an unknown-label, a recipe or a recipe-and-label run. Alerts also take
 bv's separate <code>--alert-label</code> filter, which keeps only the alerts naming the
 label and is compared with <code>engine</code>, <code>ui</code> and an unknown label (vbx-jnm), and
 capacity bv's <code>--capacity-label</code>, an exact-match filter on the beads simulated,
@@ -307,10 +315,17 @@ answers over what the recipe selects — of the label's beads, when both are
 given — and the envelope names the recipe as given and hashes the selection
 into <code>scope_hash</code>. The harness builds a <code>recipes</code> workspace from the demo's
 beads plus two recipe files, one in <code>.beads/recipes</code> and one reached only by
-its path, and runs the same nine commands with a built-in (<code>actionable</code>,
+its path, and runs the same commands with a built-in (<code>actionable</code>,
 <code>high-impact</code>), the project-file recipe, the path, and three recipe-and-label
 pairs; an unknown name and a missing path must be refused as bv refuses them
-(vbx-7d5).</p>
+(vbx-7d5) — <code>--robot-correlation-stats</code> too, whose output reads neither flag
+but whose recipe bv still resolves.</p>
+<p>bv scopes a few more post-load commands that vbx does not yet: the
+git-history family (history, related, impact-network, causality, orphans,
+file-beads, file-hotspots, file-relations, impact), diff, drift and forecast.
+<code>vbx-cli</code> refuses <code>--label</code> and <code>--recipe</code> with those (exit 2) rather than
+answer over every bead as if scoped (vbx-9gl). Commands bv answers before it
+loads issues — the recipe list, triage feedback — ignore both, as bv does.</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
 <p><strong>Mechanism legend</strong></p>
@@ -1206,7 +1221,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-label-health</code>, <code>--robot-label-flow</code>, <code>--robot-label-attention</code></td>
+<td><code>--robot-label-health</code>, <code>--robot-label-flow</code>, <code>--robot-label-attention</code> (+ label and recipe scope)</td>
 <td>✓</td>
 <td>Label dashboard, Flow matrix, Attention</td>
 <td>6</td>
@@ -1243,7 +1258,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--recipe &lt;name or path.yaml&gt;</code> as a global scope on robot commands (bv 0.25)</td>
-<td>✓ <code>vbx-cli</code> triage, next, plan, priority, insights, suggest, alerts, graph and capacity, alone or with <code>--label</code>, with <code>scope.recipe</code> and <code>scope_hash</code>; a path wherever a name goes (also <code>--robot-recipe-apply</code> and <code>--export</code>); an unknown recipe refused with bv's message and list. Matched in <code>parity-check.py</code> (vbx-7d5). <strong>Not built:</strong> the label commands and bv's other post-load handlers ignore <code>--label</code> and <code>--recipe</code> in vbx-cli (vbx-shz)</td>
+<td>✓ <code>vbx-cli</code> triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show and burndown, alone or with <code>--label</code>, with <code>scope.recipe</code> and <code>scope_hash</code>; a path wherever a name goes (also <code>--robot-recipe-apply</code> and <code>--export</code>); an unknown recipe refused with bv's message and list. Matched in <code>parity-check.py</code> (vbx-7d5, vbx-shz). <strong>Not built:</strong> history, related, impact-network, causality, orphans, the file commands, impact, diff, drift and forecast, which refuse either flag (vbx-9gl)</td>
 <td>Recipe sidebar applies by name</td>
 <td>—</td>
 </tr>

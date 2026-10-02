@@ -400,11 +400,11 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 	case "unblocks":
 		return s.unblocks(req)
 	case "label_health":
-		return s.labelHealth()
+		return s.labelHealth(req)
 	case "label_flow":
-		return s.labelFlow()
+		return s.labelFlow(req)
 	case "label_attention":
-		return s.labelAttention()
+		return s.labelAttention(req)
 	case "eta":
 		return s.eta(req)
 	case "graph":
@@ -458,7 +458,7 @@ func (s *Session) Call(method string, req []byte) ([]byte, error) {
 	case "search_presets":
 		return s.searchPresets()
 	case "sprint_list":
-		return s.sprintList()
+		return s.sprintList(req)
 	case "sprint_show":
 		return s.sprintShow(req)
 	case "burndown":
@@ -1081,12 +1081,28 @@ func (s *Session) blockerChain(req []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, an, _ := s.snapshot()
-	if an == nil {
-		return nil, fmt.Errorf("session has no analyzer")
+	// The chain is traced through the scoped set, so a blocker outside a
+	// label's subgraph or a recipe's selection is not in it — bv's
+	// --robot-blocker-chain reads ctx.Issues.
+	v, err := s.scopedView(req)
+	if err != nil {
+		return nil, err
 	}
-	defer s.pinClock(an)()
-	return json.Marshal(an.GetBlockerChain(r.ID))
+	// bv traces it with a bare analyzer over those issues — no readiness
+	// scope, no candidates. A scoped view's analyzer carries both, and under
+	// --label graph that marked a blocker a root where bv does not, so this
+	// one is built the way bv's is.
+	an := analysis.NewAnalyzer(v.issues)
+	an.SetNow(robotNow())
+	chain := an.GetBlockerChain(r.ID)
+	if chain == nil {
+		// bv's words; it exits 1 rather than printing a null chain.
+		return nil, fmt.Errorf("Issue not found: %s", r.ID)
+	}
+	// bv hashes the issues the chain was traced through, so the hash follows
+	// the scope, and nests the chain under `result`. vbx keeps the chain at
+	// the top level beside the envelope.
+	return s.withEnvelope(chain, analysis.ComputeDataHash(v.issues), v.scope)
 }
 
 func (s *Session) unblocks(req []byte) ([]byte, error) {
@@ -1107,16 +1123,29 @@ func (s *Session) unblocks(req []byte) ([]byte, error) {
 	return json.Marshal(map[string]any{"id": r.ID, "unblocks": ids})
 }
 
-func (s *Session) labelHealth() ([]byte, error) {
-	issues, _, st := s.snapshot()
+// The label commands answer over the request's scope, as bv's do: under
+// --label or --recipe they describe the labels of the scoped set, and the
+// envelope names the scope and carries the unscoped data hash
+// (ctx.Envelope() in bv). Each payload is the analysis result itself, which
+// the app decodes, with the envelope keys beside its own fields.
+
+func (s *Session) labelHealth(req []byte) ([]byte, error) {
+	v, err := s.scopedView(req)
+	if err != nil {
+		return nil, err
+	}
 	cfg := analysis.DefaultLabelHealthConfig()
-	return json.Marshal(analysis.ComputeAllLabelHealth(issues, cfg, robotNow(), st))
+	return s.withEnvelope(
+		analysis.ComputeAllLabelHealth(v.issues, cfg, robotNow(), v.stats), v.dataHash, v.scope)
 }
 
-func (s *Session) labelFlow() ([]byte, error) {
-	issues, _, _ := s.snapshot()
+func (s *Session) labelFlow(req []byte) ([]byte, error) {
+	v, err := s.scopedView(req)
+	if err != nil {
+		return nil, err
+	}
 	cfg := analysis.DefaultLabelHealthConfig()
-	return json.Marshal(analysis.ComputeCrossLabelFlow(issues, cfg))
+	return s.withEnvelope(analysis.ComputeCrossLabelFlow(v.issues, cfg), v.dataHash, v.scope)
 }
 
 // labelAttention ranks labels by how much attention they need.
@@ -1125,10 +1154,14 @@ func (s *Session) labelFlow() ([]byte, error) {
 // by velocity, and bv returns each factor alongside the total. All four are
 // passed through: a ranking without its decomposition says a label is in
 // trouble without saying why, which is the part that tells you what to do.
-func (s *Session) labelAttention() ([]byte, error) {
-	issues, _, _ := s.snapshot()
+func (s *Session) labelAttention(req []byte) ([]byte, error) {
+	v, err := s.scopedView(req)
+	if err != nil {
+		return nil, err
+	}
 	cfg := analysis.DefaultLabelHealthConfig()
-	return json.Marshal(analysis.ComputeLabelAttentionScores(issues, cfg, robotNow()))
+	return s.withEnvelope(
+		analysis.ComputeLabelAttentionScores(v.issues, cfg, robotNow()), v.dataHash, v.scope)
 }
 
 func (s *Session) eta(req []byte) ([]byte, error) {
