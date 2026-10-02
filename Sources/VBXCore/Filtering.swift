@@ -57,6 +57,8 @@ public enum SortColumn: String, CaseIterable, Sendable, Identifiable {
     case labels
     case created
     case updated
+    /// When a bead's `defer_until` lifts.
+    case deferUntil
 
     public var id: String { rawValue }
 
@@ -80,7 +82,9 @@ public enum SortColumn: String, CaseIterable, Sendable, Identifiable {
     /// smallest-first.
     public var defaultAscending: Bool {
         switch self {
-        case .blocks, .blockedBy, .pageRank, .commits, .created, .updated: false
+        // Latest deferral first, so a first click puts the deferred beads at
+        // the top rather than under every bead that has none.
+        case .blocks, .blockedBy, .pageRank, .commits, .created, .updated, .deferUntil: false
         case .id, .title, .status, .priority, .labels: true
         }
     }
@@ -118,6 +122,8 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
     /// Most recently updated first — bv's named "recently updated" ordering.
     case updated
     case updatedAscending
+    case deferUntilAscending
+    case deferUntilDescending
     /// Order by computed impact, largest first. Requires Phase 2.
     case impact
     case impactAscending
@@ -156,6 +162,8 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
         case .createdDescending: "Created ↓"
         case .updated: "Recently Updated"
         case .updatedAscending: "Least Recently Updated"
+        case .deferUntilAscending: "Deferred until ↑"
+        case .deferUntilDescending: "Deferred until ↓"
         case .impact: "Impact"
         case .impactAscending: "Impact ↑"
         }
@@ -177,6 +185,7 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
         case .labelsAscending, .labelsDescending: .labels
         case .createdAscending, .createdDescending: .created
         case .updated, .updatedAscending: .updated
+        case .deferUntilAscending, .deferUntilDescending: .deferUntil
         }
     }
 
@@ -192,11 +201,11 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .default, .idAscending, .titleAscending, .statusAscending, .priority,
             .blocksAscending, .blockedByAscending, .commitsAscending, .labelsAscending,
-            .createdAscending, .updatedAscending, .impactAscending:
+            .createdAscending, .updatedAscending, .impactAscending, .deferUntilAscending:
             true
         case .idDescending, .titleDescending, .statusDescending, .priorityDescending,
             .blocksDescending, .blockedByDescending, .commitsDescending, .labelsDescending,
-            .createdDescending, .updated, .impact:
+            .createdDescending, .updated, .impact, .deferUntilDescending:
             false
         }
     }
@@ -215,6 +224,7 @@ public enum SortMode: String, CaseIterable, Sendable, Identifiable {
         case .labels: ascending ? .labelsAscending : .labelsDescending
         case .created: ascending ? .createdAscending : .createdDescending
         case .updated: ascending ? .updatedAscending : .updated
+        case .deferUntil: ascending ? .deferUntilAscending : .deferUntilDescending
         }
     }
 
@@ -343,6 +353,10 @@ public struct IssueQuery: Sendable {
             return order(issues, ascending) { $0.createdAt ?? .distantPast }
         case .updated:
             return order(issues, ascending) { $0.updatedAt ?? .distantPast }
+        case .deferUntil:
+            // The date, not whether it has passed: ordering by a field needs
+            // no clock, and the engine's verdict is drawn on the row.
+            return order(issues, ascending) { $0.deferUntil ?? .distantPast }
         }
     }
 

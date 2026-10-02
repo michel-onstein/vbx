@@ -132,6 +132,14 @@ struct IssueListView: View {
         BeadColumnSpec(
             id: SortColumn.updated.rawValue, title: "Updated", sort: .updated,
             width: 100, minWidth: 80, maxWidth: 140),
+        // Shown by default, last. A deferral that has to be switched on to be
+        // seen is the gap this column exists to close: a bead that left Ready
+        // because of `defer_until` otherwise has no visible reason. Last, so
+        // a workspace that never defers anything loses only a quiet column of
+        // dashes at the far edge, which the header menu hides.
+        BeadColumnSpec(
+            id: SortColumn.deferUntil.rawValue, title: "Deferred until", sort: .deferUntil,
+            width: 110, minWidth: 90, maxWidth: 160),
     ]
 
     /// bv's range. Beyond P4 is backlog, and `br` rejects it.
@@ -153,7 +161,9 @@ struct IssueListView: View {
     private var rows: [IssueRow] {
         let metrics = store.metrics
         return store.visibleIssues.map {
-            IssueRow(issue: $0, metrics: metrics, commitCount: store.commitCount(for: $0.id))
+            IssueRow(
+                issue: $0, metrics: metrics, commitCount: store.commitCount(for: $0.id),
+                isDeferred: store.deferred.contains($0.id))
         }
     }
 
@@ -334,6 +344,9 @@ struct IssueListView: View {
             )
             .foregroundStyle(.secondary)
 
+        case SortColumn.deferUntil.rawValue:
+            DeferUntilCell(date: row.issue.deferUntil, isDeferred: row.isDeferred)
+
         default:
             EmptyView()
         }
@@ -352,6 +365,13 @@ struct IssueListView: View {
                 RepoBadge(repo: repo, isCrossRepo: store.isCrossRepo(row.id))
             }
             Text(row.issue.title).lineLimit(1)
+            if row.isDeferred {
+                // The engine's verdict, so it agrees with Ready by definition.
+                Image(systemName: DeferUntilCell.symbol)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .help(DeferUntilCell.reason(row.issue.deferUntil))
+            }
             if store.actionable.contains(row.id) {
                 Image(systemName: "bolt.fill")
                     .font(.caption2)
@@ -592,6 +612,10 @@ struct IssueRow: Identifiable {
     /// Commits the engine attributed to this bead, or nil when the correlation
     /// report has not been read — which is not the same as none.
     let commitCount: Int?
+    /// The engine reports this bead withheld from Ready by a `defer_until`
+    /// still in the future. Not derived from the date here: the engine's
+    /// clock is the one Ready was computed at.
+    let isDeferred: Bool
 
     var id: Issue.ID { issue.id }
     var priority: Int { issue.priority }
@@ -604,6 +628,7 @@ struct IssueRow: Identifiable {
     var labelsKey: String { issue.labels.joined(separator: ",").lowercased() }
     var createdKey: Date { issue.createdAt ?? .distantPast }
     var updatedKey: Date { issue.updatedAt ?? .distantPast }
+    var deferUntilKey: Date { issue.deferUntil ?? .distantPast }
     /// Absent PageRank sorts as zero *for the comparator only*; the binding
     /// refuses the sort outright until Phase 2 lands, so this is never the
     /// ordering the user actually sees.
@@ -612,8 +637,11 @@ struct IssueRow: Identifiable {
     /// refuses the ordering until the walk has landed.
     var commitsKey: Int { commitCount ?? 0 }
 
-    init(issue: Issue, metrics: GraphMetrics, commitCount: Int? = nil) {
+    init(
+        issue: Issue, metrics: GraphMetrics, commitCount: Int? = nil, isDeferred: Bool = false
+    ) {
         self.issue = issue
+        self.isDeferred = isDeferred
         self.blocks = metrics.blocks(issue.id)
         self.blockedBy = metrics.blockedBy(issue.id)
         self.pageRank = metrics.pageRank?[issue.id]
@@ -637,6 +665,7 @@ struct IssueRow: Identifiable {
         case .labels: return KeyPathComparator(\IssueRow.labelsKey, order: order)
         case .created: return KeyPathComparator(\IssueRow.createdKey, order: order)
         case .updated: return KeyPathComparator(\IssueRow.updatedKey, order: order)
+        case .deferUntil: return KeyPathComparator(\IssueRow.deferUntilKey, order: order)
         }
     }
 
@@ -657,6 +686,7 @@ struct IssueRow: Identifiable {
         case \IssueRow.labelsKey: .labels
         case \IssueRow.createdKey: .created
         case \IssueRow.updatedKey: .updated
+        case \IssueRow.deferUntilKey: .deferUntil
         default: nil
         }
     }
@@ -834,5 +864,49 @@ struct StatusChip: View {
         case .tombstone: .secondary
         case .unknown: .secondary
         }
+    }
+}
+
+/// A bead's `defer_until`, as the list draws it.
+///
+/// The date is the record's; whether it still withholds the bead is the
+/// engine's (`isDeferred`), so a deferral that has passed reads as history —
+/// dimmed — and one still in force is marked, without this view consulting a
+/// clock. Absent draws a dash, never a date.
+struct DeferUntilCell: View {
+    let date: Date?
+    let isDeferred: Bool
+
+    static let symbol = "moon.zzz.fill"
+
+    var body: some View {
+        if let date {
+            HStack(spacing: 3) {
+                if isDeferred {
+                    Image(systemName: Self.symbol).font(.caption2)
+                }
+                Text(Self.label(date)).monospacedDigit()
+            }
+            .foregroundStyle(isDeferred ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
+            .help(isDeferred ? Self.reason(date) : "Deferral passed \(Self.full(date))")
+        } else {
+            Text("—").foregroundStyle(.tertiary)
+        }
+    }
+
+    /// The short form the column shows.
+    static func label(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    /// The full instant, for tooltips: a deferral is an instant, not a day.
+    static func full(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    /// Why a deferred bead is not in Ready, in the words the Inspector uses.
+    static func reason(_ date: Date?) -> String {
+        guard let date else { return "Deferred — withheld from Ready" }
+        return "Deferred until \(full(date)) — withheld from Ready until then"
     }
 }

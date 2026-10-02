@@ -89,7 +89,9 @@ them.
   in-progress edit on every keystroke elsewhere. The uncommitted mark is drawn
   from git rather than from the bead, and a commit changes no bead: `HEAD`
   moves, every mark clears, and a fingerprint of the record alone is identical
-  either side of it. Same trap for any later overlay. See BUGS.md, 2026-08-23.
+  either side of it. Same trap for any later overlay — the engine's deferral
+  verdict (`IssueRow.isDeferred`) is one: the clock passing a `defer_until`
+  changes no field either. See BUGS.md, 2026-08-23.
 - **Hosted cell content is aligned by `HostedCell`, not by each column.** The
   hosting view is pinned to both edges, so content handed the full column width
   centres itself — which is what put every hosted column in the middle of its

@@ -145,6 +145,21 @@ func TestReadinessFixtureActionableMatchesBv(t *testing.T) {
 	}
 }
 
+// TestReadinessFixtureDeferredIsTheFutureDeferral: the actionable payload
+// names the beads a defer_until still withholds — rdy-5 (2099), not rdy-6
+// (passed) and not rdy-4, which is withheld by its `deferred` status and
+// carries no date. This list is what the app draws a deferral from, so it
+// is the engine's answer and never a date comparison in Swift.
+func TestReadinessFixtureDeferredIsTheFutureDeferral(t *testing.T) {
+	s := openReadiness(t, readinessFixturePath(t))
+	got := call[struct {
+		Deferred []string `json:"deferred"`
+	}](t, s, "actionable", nil)
+	if want := []string{"rdy-5"}; !slices.Equal(sortedIDs(got.Deferred), want) {
+		t.Errorf("deferred = %v, want %v", got.Deferred, want)
+	}
+}
+
 // TestReadinessFixtureTombstoneIsResolvedButNotAnalysed is bv 0.25.2's split:
 // the tombstone rdy-10 is out of the analysis set (bv's triage counts 20
 // beads, not 21) but still resolves rdy-11's blocking edge, and the record

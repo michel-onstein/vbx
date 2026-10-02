@@ -97,11 +97,13 @@ func TestActionableReadsTheClockPerCall(t *testing.T) {
 	s := openClockFixture(t)
 
 	type payload struct {
-		IDs []string `json:"ids"`
+		IDs      []string `json:"ids"`
+		Deferred []string `json:"deferred"`
 	}
-	early := call[payload](t, s, "actionable", nil).IDs
+	earlyPayload := call[payload](t, s, "actionable", nil)
 	setClock(t, clockLate)
-	late := call[payload](t, s, "actionable", nil).IDs
+	latePayload := call[payload](t, s, "actionable", nil)
+	early, late := earlyPayload.IDs, latePayload.IDs
 
 	if slices.Contains(early, "d") {
 		t.Errorf("d is deferred until 2026-01-20 but actionable on 2026-01-05: %v", early)
@@ -109,6 +111,13 @@ func TestActionableReadsTheClockPerCall(t *testing.T) {
 	if !slices.Contains(late, "d") {
 		t.Errorf("d's deferral passed on 2026-01-20 but it is not actionable on "+
 			"2026-02-15 — the analyzer kept the clock it was loaded with: %v", late)
+	}
+	// The deferred list reads the same pinned instant, so it moves with it.
+	if !slices.Contains(earlyPayload.Deferred, "d") {
+		t.Errorf("d is deferred on 2026-01-05 but not listed: %v", earlyPayload.Deferred)
+	}
+	if slices.Contains(latePayload.Deferred, "d") {
+		t.Errorf("d's deferral passed but it is still listed on 2026-02-15: %v", latePayload.Deferred)
 	}
 }
 

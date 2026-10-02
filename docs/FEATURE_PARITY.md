@@ -27,13 +27,13 @@ the robot protocol with TOON output.
 **Except the bv 0.21–0.25 additions.** The engine runs on bv v0.25.2, and the
 capabilities bv gained between 0.21 and 0.25 are mapped below with their real
 state. Built: the six new alert types with `suggested_action` (engine and
-`vbx-cli`), `defer_until` in readiness, `.beads/recipes/*.yaml` recipe files,
-the multi-repository loader, triage feedback, `--export` reports in four
-formats (vbx-im9), and `--search-min-score` with bv's guaranteed exact-ID hit
-(vbx-52c). Not yet built, each with a child bead of epic vbx-htg: the app's
-search threshold control (vbx-c1j),
-export hooks around `vbx-cli --export` (vbx-uos), `defer_until` in
-the app (vbx-upz), `load_stats` in the robot envelope (vbx-dv5), suggested
+`vbx-cli`), `defer_until` in readiness and in the app (vbx-upz),
+`.beads/recipes/*.yaml` recipe files, the multi-repository loader, triage
+feedback, `--export` reports in four formats (vbx-im9), and
+`--search-min-score` with bv's guaranteed exact-ID hit (vbx-52c). Not yet
+built, each with a child bead of epic vbx-htg: the app's search threshold
+control (vbx-c1j), export hooks around `vbx-cli --export` (vbx-uos),
+`load_stats` in the robot envelope (vbx-dv5), suggested
 actions in the Alerts panel (vbx-fc7), `--recipe` as a robot scope and recipe
 file paths (vbx-7d5), and bv's `.beads`-first workspace discovery with
 `--workspace` (vbx-1y5). A row naming a bead is not built until that bead
@@ -226,7 +226,7 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 | History view (all modes) | See §4 | Engine + Native | 5 |
 | Alerts panel (`!`) | Severity-grouped list | Engine + Native | 4 |
 | Recipe picker (`'`) and recipe files | Sidebar section + form editor; `.beads/recipes/*.yaml` files listed through bv's own `recipe.Loader` | Engine + Native | 2 |
-| `defer_until` (bv 0.25 scheduler deferral) | **Engine: built** — readiness, triage, plan and next honour it, and `issues` carries the field. **Not built:** the app never shows the date (vbx-upz) | Engine + Native | — |
+| `defer_until` (bv 0.25 scheduler deferral) | **Built** — readiness, triage, plan and next honour it; `actionable` also names the beads a future deferral withholds, at the same pinned clock. The app shows "Deferred until" in the Inspector, a sortable *Deferred until* list column with a title-cell marker, and the count in the Ready filter's tooltip (vbx-upz) | Engine + Native | — |
 | Repo picker (`w`) | Sidebar repos section | Engine + Native | 2 |
 | Time-travel mode + diff badges + summary | Revision scrubber + row badges | Engine + Native | 7 |
 | Shortcuts sidebar (`;`) | Menu bar, `⌘/` shortcuts sheet, `⌘K` palette | Native | 2 |
