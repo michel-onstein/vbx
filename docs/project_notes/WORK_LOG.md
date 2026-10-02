@@ -5,6 +5,24 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — `vbx-cli` prints the loader's warnings where bv does (vbx-1l6)
+
+bv 0.25.2 prints the loader's warnings to stderr whenever it loads issues
+outside robot mode. That means `--export`, `--export-md`, `--feedback-accept`
+and `--feedback-ignore`. `--feedback-show` and `--feedback-reset` answer
+before loading, and robot mode keeps stderr clean. `vbx-cli` now prints the
+same lines from one place, `printLoadWarnings`, and the engine reports them as
+`info.load_stderr` (`loadstderr.go`). A single repository prints its
+discovery and JSONL parse warnings, uncapped; a `beads.db` prints nothing. A
+workspace prints the discovery notice, each member's warnings, and the
+failed-members summary. Parity no longer skips the feedback runs over the
+`dropped` fixtures; it adds a feedback verdict that lands there, plus
+`--export`, `--export-md` and an unmatched `--label` export over all three
+`dropped` fixtures. Result: 0 differing commands before and after, and 17
+more matches (dropped 18 → 25, `beads.db` 10 → 17, workspace 4 → 7). See
+BUGS.md. Tests: `loadstderr_test.go`, `loadStderrCrossesTheBridge`,
+`test-parity-check.py`.
+
 ## 2026-10-02 — Workspace discovery follows bv's `.beads`-first precedence, and `vbx-cli` gains `--workspace` (vbx-1y5)
 
 The engine's `discoverWorkspaceConfig` ports bv 0.25.2's rule: a reachable

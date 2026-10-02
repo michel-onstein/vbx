@@ -261,7 +261,8 @@ with bv's guaranteed exact-ID hit (vbx-52c), <code>--recipe</code> as a robot sc
 by name or path (vbx-7d5), <code>.bv/hooks.yaml</code> export hooks with <code>--no-hooks</code>
 in <code>vbx-cli</code> (vbx-uos), and <code>load_stats</code> in the robot envelope, counted in the
 app's warnings badge (vbx-dv5), and bv's <code>.beads</code>-first workspace discovery
-with <code>--workspace</code> (vbx-1y5). Not yet built, with a child bead of epic
+with <code>--workspace</code> (vbx-1y5), and the loader's warnings on <code>vbx-cli</code>'s
+stderr where bv prints them (vbx-1l6). Not yet built, with a child bead of epic
 vbx-htg: the app's search threshold control (vbx-c1j). A row naming a bead is
 not built until that bead closes.</p>
 <p><strong>Verified rather than asserted.</strong> <code>scripts/parity-check.py</code> runs <code>vbx-cli</code> and
@@ -407,6 +408,12 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 <tr>
 <td><code>load_stats</code> (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records</td>
 <td><code>vbx-cli</code>: in every envelope vbx carries, JSONL, <code>beads.db</code> and workspace alike, compared against bv over <code>Fixtures/dropped</code> (vbx-dv5, ADR-023); triage, plan, alerts and metrics carry no envelope yet (vbx-6su). App: the warnings badge states how many records were dropped</td>
+<td>Engine + Native</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Loader warnings on stderr outside robot mode (<code>Warning: skipping …</code>, a discovered workspace's notice, <code>N repos failed to load</code>)</td>
+<td><code>vbx-cli --export</code>, <code>--export-md</code>, <code>--feedback-accept</code> and <code>--feedback-ignore</code> print them before their own output, as bv does; robot commands, <code>--feedback-show</code>, <code>--feedback-reset</code> and <code>BV_ROBOT=1</code> stay quiet. The engine's <code>info.load_stderr</code> holds the lines. Compared against bv over <code>Fixtures/dropped</code> as JSONL, <code>beads.db</code> and workspace (vbx-1l6)</td>
 <td>Engine + Native</td>
 <td>—</td>
 </tr>

@@ -180,11 +180,15 @@ func robotLoadStats(sources []sourceLoad) *loadStats {
 // bead set did not change, and reports whether anything the app is shown of
 // it did: load_stats, the warnings or the verdict. A member added with no
 // beads changes the source list but none of those, and stays unchanged.
-func (s *Session) refreshAccounting(loads []sourceLoad, warnings []string, complete bool) bool {
+//
+// The load's stderr is kept current too, but is not shown in the app, so it
+// changes nothing reported.
+func (s *Session) refreshAccounting(loads []sourceLoad, warnings, stderr []string, complete bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	changed := !reflect.DeepEqual(robotLoadStats(s.sourceLoads), robotLoadStats(loads)) ||
 		!slices.Equal(s.warnings, warnings) || s.complete != complete
 	s.sourceLoads, s.warnings, s.complete = loads, warnings, complete
+	s.loadStderr = stderr
 	return changed
 }

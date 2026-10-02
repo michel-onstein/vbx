@@ -4,6 +4,39 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — `vbx-cli` printed none of the loader's warnings where bv prints them
+
+**Symptom:** over a workspace whose load dropped records, bv 0.25.2 prints
+each loader warning to stderr — `Warning: skipping malformed JSON on line 5:
+…` — before the output of `--feedback-accept`, `--feedback-ignore`,
+`--export` and `--export-md`. `vbx-cli` printed none of them. Over a workspace
+it also left out bv's `No .beads directory found; using workspace …` notice
+and its `N repos failed to load` summary. (vbx-1l6)
+
+**Cause:** bv's loader prints these warnings whenever it loads outside robot
+mode (`loadRecorder.finish`, `loadSmart`'s discovery handler, the workspace
+loader, and `cmd/bv`'s workspace branch). The engine collected the same
+messages for the app's warnings badge and `load_stats`, but never as bv's
+stderr lines, and `vbx-cli` printed nothing. Those messages were not the
+right source anyway. They hold vbx's own notes, such as "issues.jsonl is
+empty; falling back to SQLite", and a `beads.db`'s dropped rows, which bv
+never prints. A workspace member keeps only ten of them.
+
+**Fix:** the engine records the lines bv would print as it loads:
+`info.load_stderr`, built in `loadstderr.go`, and uncapped like bv's replay.
+`vbx-cli` prints them from one function, `printLoadWarnings`. It is called
+for every command bv answers outside robot mode after loading: `--export`,
+`--export-md`, and each table entry marked `printsLoadWarnings`
+(`feedback-accept`, `feedback-ignore`). The call comes after `--recipe`
+resolves, because bv resolves a recipe before it loads. `BV_ROBOT` set to a
+true value silences them, as it does in bv.
+
+**Regression test:** `loadstderr_test.go`, which captures bv's own workspace
+loader's stderr to compare against, and `loadStderrCrossesTheBridge`. Also
+`test_load_warnings_follow_bv` in `test-parity-check.py`. Parity: the
+`dropped` fixtures no longer skip the feedback runs, and gain a verdict that
+lands plus three export runs.
+
 ## 2026-10-02 — A repository with its own `.beads` opened as the workspace around it
 
 **Symptom:** a directory holding a `.beads`, under or beside a

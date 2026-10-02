@@ -35,7 +35,8 @@ with bv's guaranteed exact-ID hit (vbx-52c), `--recipe` as a robot scope,
 by name or path (vbx-7d5), `.bv/hooks.yaml` export hooks with `--no-hooks`
 in `vbx-cli` (vbx-uos), and `load_stats` in the robot envelope, counted in the
 app's warnings badge (vbx-dv5), and bv's `.beads`-first workspace discovery
-with `--workspace` (vbx-1y5). Not yet built, with a child bead of epic
+with `--workspace` (vbx-1y5), and the loader's warnings on `vbx-cli`'s
+stderr where bv prints them (vbx-1l6). Not yet built, with a child bead of epic
 vbx-htg: the app's search threshold control (vbx-c1j). A row naming a bead is
 not built until that bead closes.
 
@@ -138,6 +139,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.
 | `BEADS_DIR` override | Settings + env | Engine | 0 |
 | BOM stripping, 10 MB line cap, malformed-line skip with warnings | Warnings banner in the window, expandable to a list | Engine + Native | 0 |
 | `load_stats` (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records | `vbx-cli`: in every envelope vbx carries, JSONL, `beads.db` and workspace alike, compared against bv over `Fixtures/dropped` (vbx-dv5, ADR-023); triage, plan, alerts and metrics carry no envelope yet (vbx-6su). App: the warnings badge states how many records were dropped | Engine + Native | — |
+| Loader warnings on stderr outside robot mode (`Warning: skipping …`, a discovered workspace's notice, `N repos failed to load`) | `vbx-cli --export`, `--export-md`, `--feedback-accept` and `--feedback-ignore` print them before their own output, as bv does; robot commands, `--feedback-show`, `--feedback-reset` and `BV_ROBOT=1` stay quiet. The engine's `info.load_stderr` holds the lines. Compared against bv over `Fixtures/dropped` as JSONL, `beads.db` and workspace (vbx-1l6) | Engine + Native | — |
 | `source_authority` / `authority_hash` (bv 0.25 multi-source ranking) | Deliberately not ported — vbx resolves one source and ranks none; declared envelope-only in the parity harness (ADR-023, ADR-024) | — | — |
 | Legacy field aliases (`depends_on`, `target_id`) | Transparent | Engine | 0 |
 | Comment ID as UUIDv7 or legacy integer | Transparent | Engine | 0 |

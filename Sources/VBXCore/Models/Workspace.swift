@@ -56,6 +56,10 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     public var warnings: [String]
     /// The records the load dropped, when it dropped any.
     public var loadStats: LoadStats?
+    /// What bv prints to stderr while loading the same source outside robot
+    /// mode, line for line: the loader's warnings, uncapped. vbx-cli prints
+    /// it for the commands bv answers that way; the app has ``warnings``.
+    public var loadStderr: [String]
     public var loadedAt: Date?
     /// Set by `reload`: false means the data hash was unchanged and nothing was
     /// re-analysed, so the UI can skip republishing.
@@ -81,6 +85,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
         case dataHash = "data_hash"
         case loadedAt = "loaded_at"
         case loadStats = "load_stats"
+        case loadStderr = "load_stderr"
         case watchPaths = "watch_paths"
         case gitWatchPaths = "git_watch_paths"
     }
@@ -93,6 +98,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
         dataHash = try c.decodeIfPresent(String.self, forKey: .dataHash) ?? ""
         warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
         loadStats = try c.decodeIfPresent(LoadStats.self, forKey: .loadStats)
+        loadStderr = try c.decodeIfPresent([String].self, forKey: .loadStderr) ?? []
         // Absent on a plain open; only reload reports it.
         changed = try c.decodeIfPresent(Bool.self, forKey: .changed) ?? true
         watchPaths = try c.decodeIfPresent([String].self, forKey: .watchPaths) ?? []
@@ -105,10 +111,12 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     public init(
         source: String, kind: SourceKind, issueCount: Int,
         dataHash: String, warnings: [String] = [], loadStats: LoadStats? = nil,
+        loadStderr: [String] = [],
         loadedAt: Date? = nil, changed: Bool = true, watchPaths: [String] = [],
         gitWatchPaths: [String] = []
     ) {
         self.loadStats = loadStats
+        self.loadStderr = loadStderr
         self.gitWatchPaths = gitWatchPaths
         self.source = source
         self.kind = kind

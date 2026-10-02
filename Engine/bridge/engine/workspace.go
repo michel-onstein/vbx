@@ -136,15 +136,19 @@ func isWorkspaceConfigFile(path string) bool {
 // still counts as resolved, exactly as bv's own workspace mode treats it. The
 // loader is vbx's port of bv's, because bv's spawns trackers — see
 // workspace_loader.go. sources is each member's parse accounting, for the
-// robot envelope's load_stats.
+// robot envelope's load_stats. stderr is what bv prints while loading the same
+// workspace outside robot mode: each member's warnings, in member order, then
+// the count of members that failed and their names (loadstderr.go).
 func loadWorkspace(configPath string, reader workspaceReader) (
 	issues []model.Issue, loads []repoLoad, warnings []string, tombstoneIDs []string,
-	watchDirs []string, sources []sourceLoad, err error,
+	watchDirs []string, sources []sourceLoad, stderr []string, err error,
 ) {
+	reader.warn = func(message string) { stderr = append(stderr, stderrWarning(message)) }
 	issues, results, err := loadAllFromConfig(configPath, reader)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
 	}
+	stderr = append(stderr, workspaceFailureStderr(workspace.Summarize(results))...)
 
 	loads = make([]repoLoad, 0, len(results))
 	for _, result := range results {
@@ -171,7 +175,7 @@ func loadWorkspace(configPath string, reader workspaceReader) (
 
 	sort.SliceStable(loads, func(i, j int) bool { return loads[i].Name < loads[j].Name })
 	return issues, loads, warnings, tombstoneIDs, workspaceWatchDirs(configPath, results),
-		workspaceSourceLoads(results), nil
+		workspaceSourceLoads(results), stderr, nil
 }
 
 // workspaceWatchDirs lists every directory whose contents feed a workspace
@@ -241,10 +245,11 @@ func workspaceWatchDirs(configPath string, results []workspace.LoadResult) []str
 // loadWorkspaceSession loads every repository the configuration names and
 // analyses them as one graph.
 func (s *Session) loadWorkspaceSession(configPath string) error {
-	records, loads, warnings, tombstoneIDs, watchDirs, sources, err := loadWorkspace(configPath, s.workspaceReader())
+	records, loads, warnings, tombstoneIDs, watchDirs, sources, stderr, err := loadWorkspace(configPath, s.workspaceReader())
 	if err != nil {
 		return err
 	}
+	stderr = s.workspaceStderr(configPath, stderr)
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
 	analyzer, stats := s.analyse(issues, readiness, nil)
@@ -254,7 +259,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 	defer s.mu.Unlock()
 	// The configuration file stands in for the source: it is what was read,
 	// and it is what the watcher should follow.
-	s.source, s.kind, s.warnings = configPath, "workspace", warnings
+	s.source, s.kind, s.warnings, s.loadStderr = configPath, "workspace", warnings, stderr
 	s.sourceLoads = sources
 	s.workspacePath, s.repoLoads, s.watchDirs = configPath, loads, watchDirs
 	s.issues, s.records, s.readiness = issues, records, readiness
@@ -268,10 +273,11 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 // reloadWorkspace re-aggregates every repository, gated on the content hash
 // exactly as the single-repository path is.
 func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
-	records, loads, warnings, tombstoneIDs, watchDirs, sources, err := loadWorkspace(configPath, s.workspaceReader())
+	records, loads, warnings, tombstoneIDs, watchDirs, sources, stderr, err := loadWorkspace(configPath, s.workspaceReader())
 	if err != nil {
 		return nil, err
 	}
+	stderr = s.workspaceStderr(configPath, stderr)
 
 	newHash := analysis.ComputeDataHash(readinessInput(records, tombstoneIDs))
 	s.mu.RLock()
@@ -292,7 +298,7 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 		s.mu.Unlock()
 		// And the load's accounting, which a dropped record changes without
 		// changing the bead set — as in the single-repository reload.
-		accountingChanged := s.refreshAccounting(sources, warnings, workspaceClaimSafe(sources))
+		accountingChanged := s.refreshAccounting(sources, warnings, stderr, workspaceClaimSafe(sources))
 		payload, err := s.info()
 		if err != nil {
 			return nil, err
@@ -304,7 +310,7 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 	analyzer, stats := s.analyse(issues, readiness, nil)
 
 	s.mu.Lock()
-	s.source, s.kind, s.warnings = configPath, "workspace", warnings
+	s.source, s.kind, s.warnings, s.loadStderr = configPath, "workspace", warnings, stderr
 	s.sourceLoads = sources
 	s.workspacePath, s.repoLoads, s.watchDirs = configPath, loads, watchDirs
 	s.issues, s.records, s.readiness = issues, records, readiness

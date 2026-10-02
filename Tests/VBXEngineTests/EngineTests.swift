@@ -54,6 +54,29 @@ func loadStatsCrossTheBridge() async throws {
     await clean.close()
 }
 
+@Test("A load's stderr crosses the bridge as bv prints it, and a clean load has none")
+func loadStderrCrossesTheBridge() async throws {
+    let dropped = URL(fileURLWithPath: fixturePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("dropped")
+        .path
+    let engine = BeadsEngine()
+    let info = try await engine.open(path: dropped, skipPhase2: true)
+    // bv 0.25.2 outside robot mode over Fixtures/dropped: both loader
+    // warnings, which vbx-cli prints before a feedback verdict or an export
+    // (vbx-1l6).
+    #expect(info.loadStderr.count == 2)
+    #expect(info.loadStderr.allSatisfy { $0.hasPrefix("Warning: skipping ") })
+    #expect(info.loadStderr.first?.contains("line 5") == true)
+    #expect(info.loadStderr.last?.contains("line 6") == true)
+    await engine.close()
+
+    let clean = BeadsEngine()
+    let demo = try await clean.open(path: fixturePath, skipPhase2: true)
+    #expect(demo.loadStderr.isEmpty)
+    await clean.close()
+}
+
 /// A copy of `Fixtures/dropped-workspace` outside any checkout, so discovery
 /// from its root reaches no `.beads` — inside this repository it would reach
 /// the repository's own.
