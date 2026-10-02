@@ -122,7 +122,7 @@ func (s *Session) workspaceHeadSnapshot(r revisionRequest) ([]byte, error) {
 // carry the same id and the same `source_repo`; tombstones are dropped for
 // the same reason the loader drops them from the working set.
 func memberIssuesAtHead(load repoLoad, known map[string]bool) ([]model.Issue, string, time.Time, error) {
-	extractor, err := openObjectStore(load.sourcePath, nil)
+	extractor, err := openObjectStore(load.sourcePath)
 	if err != nil {
 		return nil, "", time.Time{}, err
 	}

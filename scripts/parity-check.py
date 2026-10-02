@@ -209,6 +209,7 @@ VOLATILE_KEYS = {
     "compute_time_ms",  # timing
     "ms",  # timing
     "elapsed_ms",  # timing
+    "duration_ms",  # timing: each history strategy's run time
     "source",  # absolute path
     "path",  # absolute path
     "config_path",  # absolute path
@@ -416,6 +417,66 @@ HISTORY_SCOPES = (
     ["--recipe", "high-impact"],
     ["--recipe", "actionable", "--label", "parser"],
 )
+# The history-correlation commands over the history fixture (vbx-k7j): bv's
+# own correlator on both sides, vbx's answering its git calls from the object
+# store (ADR-027). bv takes the bead, path or files as the flag's value;
+# vbx-cli takes --id, --file and --files. Each is (command, vbx args, bv
+# args). bv's --bead-history is not compared: on a beads file under 64 KB bv
+# filters with `git log -G'"id":\s*"<id>"'`, and the macOS regex git uses
+# reads `\s` as a literal s, so a record written `"id": "x"` — as this
+# fixture's Python writer writes it — is never found and the history is
+# empty; vbx always takes the snapshot extraction bv uses above 64 KB.
+HISTORY_RUNS = (
+    ("robot-history", [], []),
+    ("robot-history", ["--min-confidence", "0.8"], ["--min-confidence", "0.8"]),
+    ("robot-history", ["--history-limit", "5"], ["--history-limit", "5"]),
+    ("robot-history", ["--history-since", "2026-08-06"], ["--history-since", "2026-08-06"]),
+    ("robot-causality", ["--id", "hist-1"], ["hist-1"]),
+    ("robot-causality", ["--id", "hist-3"], ["hist-3"]),
+    ("robot-related", ["--id", "hist-1"], ["hist-1"]),
+    ("robot-related", ["--id", "hist-3", "--related-include-closed", "--related-min-relevance", "0.1"],
+     ["hist-3", "--related-include-closed", "--related-min-relevance", "0.1"]),
+    ("robot-impact-network", ["--id", "all"], ["all"]),
+    ("robot-impact-network", ["--id", "hist-1", "--network-depth", "3"],
+     ["hist-1", "--network-depth", "3"]),
+    ("robot-orphans", [], []),
+    ("robot-orphans", ["--orphans-min-score", "0"], ["--orphans-min-score", "0"]),
+    ("robot-file-beads", ["--file", "src/parser.go"], ["src/parser.go"]),
+    ("robot-file-beads", ["--file", "src/parser.go", "--file-beads-limit", "0"],
+     ["src/parser.go", "--file-beads-limit", "0"]),
+    ("robot-file-hotspots", [], []),
+    ("robot-file-hotspots", ["--hotspots-limit", "2"], ["--hotspots-limit", "2"]),
+    ("robot-file-relations", ["--file", "src/parser.go"], ["src/parser.go"]),
+    ("robot-file-relations", ["--file", "src/parser.go", "--relations-threshold", "0.1",
+                              "--relations-limit", "2"],
+     ["src/parser.go", "--relations-threshold", "0.1", "--relations-limit", "2"]),
+    ("robot-impact", ["--files", "src/parser.go,ui/view.swift"], ["src/parser.go,ui/view.swift"]),
+)
+# One run of each under every HISTORY_SCOPES scope. hist-5, labelled engine
+# and parser and in progress, is inside every scope but the unknown label,
+# where the bead commands are bv's "not found" errors.
+HISTORY_SCOPED_RUNS = (
+    ("robot-history", [], []),
+    ("robot-causality", ["--id", "hist-5"], ["hist-5"]),
+    ("robot-related", ["--id", "hist-5"], ["hist-5"]),
+    ("robot-impact-network", ["--id", "hist-5"], ["hist-5"]),
+    ("robot-impact-network", ["--id", "all"], ["all"]),
+    ("robot-orphans", ["--orphans-min-score", "0"], ["--orphans-min-score", "0"]),
+    ("robot-file-beads", ["--file", "src/parser.go"], ["src/parser.go"]),
+    ("robot-file-hotspots", [], []),
+    ("robot-file-relations", ["--file", "src/parser.go", "--relations-threshold", "0.1"],
+     ["src/parser.go", "--relations-threshold", "0.1"]),
+    ("robot-impact", ["--files", "src/parser.go,src/cache.go"], ["src/parser.go,src/cache.go"]),
+)
+HISTORY_BEAD_COMMANDS = {"robot-causality", "robot-related"}
+# bv's errors for a bead the history does not hold: one that never existed,
+# and hist-1, closed, which an actionable recipe leaves out.
+HISTORY_REJECTS = tuple(
+    (command, ["--id", bead, *scope], [bead, *scope])
+    for command in ("robot-causality", "robot-related", "robot-impact-network")
+    for bead, scope in (("no-such-bead", []), ("hist-1", ["--recipe", "actionable"]))
+)
+
 # What a diff comparison compares: bv's payload and envelope. vbx adds
 # requested_revision, short_revision and badges for the time-travel view.
 DIFF_KEYS = ("resolved_revision", "from_data_hash", "to_data_hash", "diff", *ENVELOPE_KEYS)
@@ -760,6 +821,23 @@ COMPARISONS = [
         ("demo", ["no-such-bead"]),
         ("sprints", ["all", "--forecast-sprint", "no-such-sprint"]),
     )
+] + [
+    # The history-correlation commands, unscoped with bv's modifiers (vbx-k7j).
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join(bv_args)}".strip(),
+     "vbx_args": vbx_args, "bv_args": bv_args, "only": {"history"}}
+    for command, vbx_args, bv_args in HISTORY_RUNS
+] + [
+    # And under every scope: the report is built from the scope's beads.
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join([*bv_args, *scope])}".strip(),
+     "vbx_args": [*vbx_args, *scope], "bv_args": [*bv_args, *scope], "only": {"history"},
+     **({"rejects": True} if command in HISTORY_BEAD_COMMANDS | {"robot-impact-network"}
+        and "--id" in vbx_args and vbx_args[1] != "all" and "no-such-label" in scope else {})}
+    for command, vbx_args, bv_args in HISTORY_SCOPED_RUNS
+    for scope in HISTORY_SCOPES if scope
+] + [
+    {"vbx": command, "bv": command, "name": f"{command} {' '.join(bv_args)}",
+     "vbx_args": vbx_args, "bv_args": bv_args, "rejects": True, "only": {"history"}}
+    for command, vbx_args, bv_args in HISTORY_REJECTS
 ]
 
 

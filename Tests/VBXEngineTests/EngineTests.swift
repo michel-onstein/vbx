@@ -552,10 +552,13 @@ func historyReachable() async throws {
 
     // The fixture lives inside this repository, so the object-store walk has
     // real history to read. If this throws, the message says why — a checkout
-    // with no .git is the one legitimate reason.
+    // with no .git is the one legitimate reason. bv's correlator describes
+    // the walk by its limit, and the fixture's beads file has a history of
+    // its own, so its beads carry events.
     let report = try await engine.history(limit: 50)
-    #expect(report.stats.totalCommits > 0, "walked no commits; range=\(report.gitRange)")
-    #expect(!report.gitRange.isEmpty)
+    #expect(report.gitRange == "limit 50 commits")
+    let events = report.histories.values.reduce(0) { $0 + $1.events.count }
+    #expect(events > 0, "no bead events; range=\(report.gitRange)")
 }
 
 // Regression (vbx-850): the Swift copy of bv's IsBlocking drifted from the

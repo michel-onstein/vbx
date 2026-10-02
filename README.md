@@ -225,7 +225,7 @@ with `library 'vbxgo' not found`.
 | bv's single-key bindings alongside native menu shortcuts | ✅ |
 | Offscreen view snapshot tests (no screen-recording permission needed) | ✅ |
 | `vbx-cli` with JSON output for agents | ✅ Full robot-protocol coverage, checked against `bv` by `scripts/parity-check.py` |
-| Git correlation and the history view | ✅ Reads the object store directly, so it works sandboxed (ADR-006) |
+| Git correlation and the history view | ✅ bv's own correlator, its git calls answered from the object store, so it works sandboxed (ADR-006, ADR-027) |
 | Report export — Markdown, JSON, CSV, Mermaid, custom templates (bv-identical) | ✅ |
 | Time travel, recipes, sprint dashboard, static-site export | ✅ |
 | Live reload via FSEvents, debounced and hash-gated | ✅ |

@@ -343,12 +343,26 @@ unscoped and under a label, an unknown label, recipes, and both. A second copy,
 so bv's drift check reads vbx's file as vbx's reads bv's; and <code>--save-baseline</code>
 itself is compared inside the repository — the summary and the whole file, the
 commit, subject and branch included (vbx-6s8).</p>
-<p>bv scopes nine more post-load commands that vbx does not yet: the history
-correlation family (history, related, impact-network, causality, orphans,
-file-beads, file-hotspots, file-relations, impact). Their unscoped output does
-not match bv 0.25.2's correlator either, so <code>vbx-cli</code> refuses <code>--label</code> and
-<code>--recipe</code> with them (exit 2) rather than answer over every bead as if scoped
-(vbx-k7j). Commands bv answers before it loads issues — the recipe list,
+<p>The history correlation family is scoped too, and is bv's correlator itself
+(vbx-k7j, ADR-027): history, related, impact-network, causality, orphans,
+file-beads, file-hotspots, file-relations and impact. The engine carries bv's
+<code>pkg/correlation</code> unchanged but for its git calls, which it answers from the
+object store with the bytes git prints. Each report is built from the scope's
+beads, as bv builds it. The harness compares 75 runs on the <code>history</code>
+workspace: each command unscoped with bv's modifiers (<code>--history-limit</code>,
+<code>--history-since</code>, <code>--min-confidence</code>, <code>--network-depth</code>,
+<code>--related-min-relevance</code>, <code>--related-max-results</code>, <code>--related-include-closed</code>,
+<code>--orphans-min-score</code>, <code>--file-beads-limit</code>, <code>--hotspots-limit</code>,
+<code>--relations-threshold</code>, <code>--relations-limit</code>), each under every history scope,
+and bv's "not found" errors. bv's <code>--bead-history</code> is not compared. On a beads
+file under 64 KB it filters with a <code>\s</code> regex that macOS's regex engine reads
+as a literal <code>s</code>, so a record written <code>"id": "x"</code> is never found. vbx always
+takes the extraction bv itself uses above 64 KB, so <code>vbx-cli --robot-history
+--id X</code> finds the record.</p>
+<p><code>--save-baseline</code> is the one post-load command still unscoped: bv saves the
+scoped issues and vbx the whole workspace, so <code>vbx-cli</code> refuses <code>--label</code> and
+<code>--recipe</code> with it (exit 2) rather than answer over every bead as if scoped.
+Commands bv answers before it loads issues — the recipe list,
 triage feedback — ignore both, as bv does.</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
@@ -783,8 +797,8 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </thead>
 <tbody>
 <tr>
-<td>Bead ↔ commit correlation (explicit, co-commit, file, temporal)</td>
-<td>History view</td>
+<td>Bead ↔ commit correlation (co-commit, explicit id, temporal author)</td>
+<td>History view — bv 0.25.2's own correlator, its git calls answered from the object store (ADR-027)</td>
 <td>Engine + Native</td>
 <td>5</td>
 </tr>
@@ -856,7 +870,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td>Incremental per-commit disk caches</td>
-<td>Transparent, under <code>~/Library/Caches/vbx</code></td>
+<td>Not used: the git extraction is cached in memory per session, keyed by HEAD (ADR-027); bv's disk caches stay off so a second binary never shares bv's files</td>
 <td>Engine</td>
 <td>5</td>
 </tr>
@@ -868,7 +882,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td>Git subprocess usage</td>
-<td>Replaced by direct object-store reads inside the sandbox; the CLI keeps the subprocess path</td>
+<td>Replaced, in the app and <code>vbx-cli</code> alike, by <code>objgit</code>: each git command line bv's correlator runs is answered from the object store with git's own bytes (ADR-027)</td>
 <td>Engine</td>
 <td>5</td>
 </tr>
@@ -1173,8 +1187,8 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-impact</code>, <code>--robot-impact-network</code></td>
-<td>✓</td>
+<td><code>--robot-impact</code>, <code>--robot-impact-network</code> (+ <code>--network-depth</code>, label and recipe scope)</td>
+<td>✓ bv's correlator (vbx-k7j)</td>
 <td>Graph impact-network mode</td>
 <td>6</td>
 </tr>
@@ -1185,32 +1199,32 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-related</code></td>
-<td>✓</td>
+<td><code>--robot-related</code> (+ <code>--related-*</code>, label and recipe scope)</td>
+<td>✓ bv's correlator (vbx-k7j)</td>
 <td>Inspector related work</td>
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-causality</code></td>
-<td>✓</td>
+<td><code>--robot-causality</code> (+ <code>--history-since</code>, label and recipe scope)</td>
+<td>✓ bv's correlator (vbx-k7j)</td>
 <td>Inspector causal chain</td>
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-history</code> (+ <code>--robot-history-timeout-ms</code>)</td>
-<td>✓</td>
+<td><code>--robot-history</code> (+ <code>--history-limit</code>, <code>--history-since</code>, <code>--min-confidence</code>, label and recipe scope)</td>
+<td>✓ bv's correlator (vbx-k7j); bv's <code>--bead-history ID</code> is <code>vbx-cli --robot-history --id ID</code>. <strong>Not built:</strong> <code>--robot-history-timeout-ms</code></td>
 <td>History view</td>
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-file-beads</code>, <code>--robot-file-hotspots</code>, <code>--robot-file-relations</code></td>
-<td>✓</td>
+<td><code>--robot-file-beads</code>, <code>--robot-file-hotspots</code>, <code>--robot-file-relations</code> (+ their limits and threshold, label and recipe scope)</td>
+<td>✓ bv's correlator (vbx-k7j)</td>
 <td>History file drill-down</td>
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-orphans</code></td>
-<td>✓</td>
+<td><code>--robot-orphans</code> (+ <code>--orphans-min-score</code>, label and recipe scope)</td>
+<td>✓ bv's detector (vbx-k7j)</td>
 <td>History orphans tab</td>
 <td>6</td>
 </tr>
@@ -1288,7 +1302,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--recipe &lt;name or path.yaml&gt;</code> as a global scope on robot commands (bv 0.25)</td>
-<td>✓ <code>vbx-cli</code> triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show, burndown, diff, drift and forecast, alone or with <code>--label</code>, with <code>scope.recipe</code> and <code>scope_hash</code>; a path wherever a name goes (also <code>--robot-recipe-apply</code> and <code>--export</code>); an unknown recipe refused with bv's message and list. Matched in <code>parity-check.py</code> (vbx-7d5, vbx-shz). <strong>Not built:</strong> history, related, impact-network, causality, orphans, the file commands, impact, diff, drift and forecast, which refuse either flag (vbx-9gl)</td>
+<td>✓ <code>vbx-cli</code> triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show, burndown, diff, drift and forecast, diff, drift, forecast and the nine history commands, alone or with <code>--label</code>, with <code>scope.recipe</code> and <code>scope_hash</code>; a path wherever a name goes (also <code>--robot-recipe-apply</code> and <code>--export</code>); an unknown recipe refused with bv's message and list. Matched in <code>parity-check.py</code> (vbx-7d5, vbx-shz, vbx-9gl, vbx-k7j). <strong>Not built:</strong> <code>--save-baseline</code>, which refuses either flag</td>
 <td>Recipe sidebar applies by name</td>
 <td>—</td>
 </tr>
@@ -1538,8 +1552,8 @@ decision, not an omission.</p>
 <td>macOS users expect menu-driven <code>⌘</code> shortcuts; both are provided (<a href="VBX_DESIGN.html#103-keyboard-model">design doc §10.3</a>)</td>
 </tr>
 <tr>
-<td>Correlation reads the git object store directly in the sandboxed app</td>
-<td>The App Sandbox cannot spawn <code>git</code>; the CLI keeps the subprocess path</td>
+<td>Correlation reads the git object store directly, in the app and <code>vbx-cli</code></td>
+<td>The App Sandbox cannot spawn <code>git</code>. bv's own correlator runs unchanged; only its git calls are answered in-process, byte for byte (ADR-027)</td>
 </tr>
 <tr>
 <td>Optional Core ML embedder for semantic search</td>

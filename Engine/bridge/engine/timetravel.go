@@ -42,12 +42,12 @@ func (s *Session) decodeRevision(req []byte) (revisionRequest, error) {
 // extractor opens the object store for the current source.
 func (s *Session) extractor() (*objectStoreExtractor, error) {
 	s.mu.RLock()
-	source, issues := s.source, s.records
+	source := s.source
 	s.mu.RUnlock()
 	if source == "" {
 		return nil, fmt.Errorf("session has no source")
 	}
-	return openObjectStore(source, issues)
+	return openObjectStore(source)
 }
 
 // revisions lists the points the time-travel scrubber can jump to.

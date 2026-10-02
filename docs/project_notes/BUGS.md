@@ -4,6 +4,29 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — Triage's staleness ignored a commit naming the bead, where bv 0.25.2 counts it
+
+**Symptom:** in a repository whose beads were long untouched, a recent code
+commit naming `proj-1` ("Closes proj-1: …") left proj-1 stale in vbx's triage.
+vbx reported `stale_count` 2; bv 0.25.2 reports 1, proj-2 alone. Staleness is
+10 % of the triage score, so the ranking moved too. Only outside a pinned clock,
+which is why the parity harness (which pins it) never saw it. (Found in
+vbx-k7j.)
+
+**Cause:** `historyForTriage` narrowed triage's copy of the history to the
+commits that also produced a bead event, the co-committed links. That was
+written against bv 0.20, whose triage never constructed an explicit-id
+matcher. bv 0.25.2's triage runs the full correlator, explicit-id and temporal
+strategies included, so the narrowing removed activity bv counts.
+
+**Fix:** the narrowing is gone. Triage's history is bv's correlator's report
+over the triage's own issues (`triageReport`), converted to bv's type for its
+scorer.
+
+**Regression test:** `TestTriageStalenessCountsACommitNamingTheBead` in
+`triage_staleness_test.go` (the repository bv 0.25.2 was run on, asserting
+`stale_count` 1 and proj-2 the stalest). It fails with the narrowing restored.
+
 ## 2026-10-02 — A saved baseline recorded the wrong repository's commit, by spawning `git`
 
 **Symptom:** a drift baseline saved by the engine recorded the commit, subject

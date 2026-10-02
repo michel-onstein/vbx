@@ -1,31 +1,77 @@
 package engine
 
+// The nine history commands — history, causality, related, impact network,
+// orphans, file beads, file hotspots, file relations and file impact — are
+// bv 0.25.2's own handlers, ported from cmd/bv/robot_registry.go, over bv's
+// own correlator. The correlator is vbx's copy of bv's pkg/correlation
+// (Engine/bridge/correlation, ADR-027), identical but for how it reaches git:
+// every git command line it runs is answered in-process from the object store
+// (package objgit), because the App Sandbox cannot spawn git (ADR-006).
+//
+// Each report is built from the request's scope, as bv builds it from its
+// scoped ctx.Issues: the histories are those of the scope's beads, the data
+// hash is theirs, and the envelope names the scope (ADR-023). Only the git
+// extraction — the expensive part, and independent of the bead set — is
+// cached, per session, keyed by HEAD and the walk's options; the cheap
+// assembly runs per request, so feedback and scope changes apply at once.
+
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/Dicklesworthstone/beads_viewer/pkg/correlation"
+	bvcorrelation "github.com/Dicklesworthstone/beads_viewer/pkg/correlation"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/loader"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/recipe"
+	"github.com/qjam/vbx/engine/correlation"
+	"github.com/qjam/vbx/engine/objgit"
 )
 
-// historyRequest is the shared shape of the correlation methods' arguments.
+// defaultHistoryLimit is bv's --history-limit default: the commits walked.
+const defaultHistoryLimit = 500
+
+// historyRequest is the shared request of the history methods. Each key is
+// named after the bv flag it carries.
 type historyRequest struct {
-	// ID names a bead, for the methods scoped to one.
+	scopeRequest
+	// ID names a bead: --bead-history, --robot-causality, --robot-related,
+	// and --robot-impact-network's bead ("all" or empty for the whole
+	// network).
 	ID string `json:"id"`
-	// Path names a file, for the file-centric methods.
+	// Path names a file: --robot-file-beads, --robot-file-relations.
 	Path string `json:"path"`
-	// Limit caps commits walked, or rows returned, depending on the method.
-	Limit int `json:"limit"`
-	// Depth bounds the impact network's expansion around a bead.
-	Depth int `json:"depth"`
-	// Threshold is the minimum co-change correlation for file relations.
-	Threshold float64 `json:"threshold"`
-	// Refresh discards the cached report and walks the history again.
+	// Files are --robot-impact's paths.
+	Files []string `json:"files"`
+	// HistoryLimit is --history-limit: commits walked, 0 for all. Absent
+	// means bv's default of 500.
+	HistoryLimit *int `json:"history_limit"`
+	// HistorySince is --history-since, which history and causality honour.
+	HistorySince string `json:"history_since"`
+	// MinConfidence is --min-confidence, which history honours.
+	MinConfidence float64 `json:"min_confidence"`
+	// HotspotsLimit is --hotspots-limit (default 10).
+	HotspotsLimit *int `json:"hotspots_limit"`
+	// RelationsThreshold and RelationsLimit are --relations-threshold
+	// (default 0.5) and --relations-limit (default 10).
+	RelationsThreshold *float64 `json:"relations_threshold"`
+	RelationsLimit     *int     `json:"relations_limit"`
+	// FileBeadsLimit is --file-beads-limit: closed beads listed (default 20).
+	FileBeadsLimit *int `json:"file_beads_limit"`
+	// NetworkDepth is --network-depth (default 2, clamped to 1..3).
+	NetworkDepth *int `json:"network_depth"`
+	// RelatedMinRelevance is --related-min-relevance as a percent (default
+	// 20), RelatedMaxResults --related-max-results (default 10) and
+	// RelatedIncludeClosed --related-include-closed.
+	RelatedMinRelevance  *int `json:"related_min_relevance"`
+	RelatedMaxResults    *int `json:"related_max_results"`
+	RelatedIncludeClosed bool `json:"related_include_closed"`
+	// OrphansMinScore is --orphans-min-score (default 30).
+	OrphansMinScore *int `json:"orphans_min_score"`
+	// Refresh discards the session's cached extraction and walks again.
 	Refresh bool `json:"refresh"`
 }
 
@@ -40,110 +86,520 @@ func decodeHistoryRequest(req []byte) (historyRequest, error) {
 	return r, nil
 }
 
-// correlationHistory returns the session's history report, walking the object
-// store on first use and caching the result.
-//
-// The walk decodes blob content, so it is far too expensive to repeat per
-// request. It is invalidated when the workspace reloads, since a changed bead
-// set changes every attribution.
-func (s *Session) correlationHistory(limit int, refresh bool) (*historyResult, error) {
-	s.historyMu.Lock()
-	defer s.historyMu.Unlock()
-
-	if s.history != nil && !refresh && limit == s.historyLimit {
-		return s.history, nil
+func intOr(v *int, fallback int) int {
+	if v == nil {
+		return fallback
 	}
-
-	s.mu.RLock()
-	source, issues := s.source, s.records
-	s.mu.RUnlock()
-	if source == "" {
-		return nil, fmt.Errorf("session has no source")
-	}
-
-	extractor, err := openObjectStore(source, issues)
-	if err != nil {
-		return nil, err
-	}
-	result, err := extractor.extract(
-		context.Background(), correlation.CorrelatorOptions{Limit: limit})
-	if err != nil {
-		return nil, err
-	}
-
-	// Feedback is applied after extraction rather than during it, so that a
-	// confirm or reject can be re-applied without re-walking the history.
-	if store, err := s.feedbackStore(); err == nil {
-		applyFeedback(result.report, store)
-	}
-
-	s.history, s.historyLimit = result, limit
-	return result, nil
+	return *v
 }
 
-// feedbackStore opens the workspace's correlation feedback sidecar.
-func (s *Session) feedbackStore() (*correlation.FeedbackStore, error) {
+func floatOr(v *float64, fallback float64) float64 {
+	if v == nil {
+		return fallback
+	}
+	return *v
+}
+
+// historyLimit is the walk's commit limit.
+func (r historyRequest) historyLimit() int { return intOr(r.HistoryLimit, defaultHistoryLimit) }
+
+// since parses --history-since against vbx's clock, as bv parses it against
+// robotNow: a relative phrase ("30 days ago") or a date.
+func (r historyRequest) since() (*time.Time, error) {
+	if strings.TrimSpace(r.HistorySince) == "" {
+		return nil, nil
+	}
+	since, err := recipe.ParseRelativeTime(r.HistorySince, robotNow())
+	if err != nil {
+		return nil, fmt.Errorf("parsing --history-since: %w", err)
+	}
+	if since.IsZero() {
+		return nil, nil
+	}
+	return &since, nil
+}
+
+// historyPlace is where a session's history lives: the directory bv runs
+// git in, and the beads JSONL it follows.
+type historyPlace struct {
+	workDir   string
+	beadsDir  string
+	beadsPath string
+}
+
+// historyPlace resolves the workspace's directory and beads JSONL as bv's
+// handlers do: the directory holding `.beads`, and loader.FindJSONLPath in
+// the beads directory — the JSONL even where the session loaded a beads.db.
+//
+// Unlike bv, the directory need not hold `.git` itself: objgit finds the
+// repository that contains it, so a workspace nested in a repository has a
+// history in vbx where bv reports "not a git repository".
+func (s *Session) historyPlace() (historyPlace, error) {
 	s.mu.RLock()
 	source := s.source
 	s.mu.RUnlock()
 	if source == "" {
-		return nil, fmt.Errorf("session has no source")
+		return historyPlace{}, fmt.Errorf("session has no source")
 	}
-	store := correlation.NewFeedbackStore(filepath.Dir(source))
+	beadsDir := filepath.Dir(source)
+	beadsPath, err := loader.FindJSONLPath(beadsDir)
+	if err != nil {
+		return historyPlace{}, fmt.Errorf("finding beads file: %w", err)
+	}
+	return historyPlace{workDir: filepath.Dir(beadsDir), beadsDir: beadsDir, beadsPath: beadsPath}, nil
+}
+
+// historyArtifact returns the extraction for the options, from the
+// session's cache when HEAD has not moved since it was taken. The lock is
+// held through an extraction, so two requests arriving together walk once.
+func (s *Session) historyArtifact(place historyPlace, opts correlation.CorrelatorOptions, refresh bool) (*correlation.HistoryArtifact, error) {
+	head := "unborn"
+	var out strings.Builder
+	if err := objgit.Run(context.Background(), place.workDir, []string{"rev-parse", "HEAD"}, nil, &out); err == nil {
+		head = strings.TrimSpace(out.String())
+	}
+	key := func(o correlation.CorrelatorOptions) string {
+		since := ""
+		if o.Since != nil {
+			since = o.Since.UTC().Format(time.RFC3339)
+		}
+		return fmt.Sprintf("%s|%s|%s|%d|%s|%s|%s", place.workDir, place.beadsPath, head, o.Limit,
+			since, o.BeadID, o.CausalityBeadID)
+	}
+
+	s.historyMu.Lock()
+	defer s.historyMu.Unlock()
+	if refresh || s.historyArtifacts == nil {
+		s.historyArtifacts = map[string]*correlation.HistoryArtifact{}
+	}
+	c := correlation.NewCorrelator(place.workDir, place.beadsPath)
+
+	// The walk is shared by every report over the same options; causality
+	// adds its target's full record to it rather than walking again.
+	plain := opts
+	plain.CausalityBeadID = ""
+	base, ok := s.historyArtifacts[key(plain)]
+	if !ok {
+		var err error
+		if base, err = c.ExtractArtifact(plain); err != nil {
+			return nil, fmt.Errorf("generating history report: %w", err)
+		}
+		s.historyArtifacts[key(plain)] = base
+	}
+	if opts.CausalityBeadID == "" {
+		return base, nil
+	}
+	if art, ok := s.historyArtifacts[key(opts)]; ok {
+		return art, nil
+	}
+	causal, err := c.ExtractCausalHistory(opts.CausalityBeadID, opts)
+	if err != nil {
+		return nil, fmt.Errorf("generating history report: extracting causal history: %w", err)
+	}
+	art := base.WithCausalHistory(causal)
+	s.historyArtifacts[key(opts)] = art
+	return art, nil
+}
+
+// invalidateHistory drops the cached extractions. Called whenever the
+// workspace reloads; HEAD moving is caught by the cache key as well.
+func (s *Session) invalidateHistory() {
+	s.historyMu.Lock()
+	s.historyArtifacts = nil
+	s.historyMu.Unlock()
+}
+
+// beadInfos is bv's buildCorrelationBeadInfos.
+func beadInfos(issues []model.Issue) []correlation.BeadInfo {
+	out := make([]correlation.BeadInfo, len(issues))
+	for i, issue := range issues {
+		out[i] = correlation.BeadInfo{ID: issue.ID, Title: issue.Title, Status: string(issue.Status)}
+	}
+	return out
+}
+
+// historyReport is bv's generateCorrelationReport over the scope's issues:
+// the report for those beads, with stored confirm/reject feedback applied
+// unless raw is set (bv's generateRawCorrelationReport, for the verdicts
+// themselves).
+func (s *Session) historyReport(issues []model.Issue, opts correlation.CorrelatorOptions, refresh, raw bool) (*correlation.HistoryReport, historyPlace, error) {
+	place, err := s.historyPlace()
+	if err != nil {
+		return nil, place, err
+	}
+	art, err := s.historyArtifact(place, opts, refresh)
+	if err != nil {
+		return nil, place, err
+	}
+	c := correlation.NewCorrelator(place.workDir, place.beadsPath)
+	if !raw {
+		store := correlation.NewFeedbackStore(place.beadsDir)
+		if err := store.Load(); err != nil {
+			return nil, place, fmt.Errorf("loading feedback: %w", err)
+		}
+		c = c.WithFeedbackStore(store)
+	}
+	report := c.AssembleReport(beadInfos(issues), opts, art)
+	report.GeneratedAt = robotNow()
+	return report, place, nil
+}
+
+// historyView decodes a history request and resolves its scope.
+func (s *Session) historyView(req []byte) (historyRequest, robotView, error) {
+	r, err := decodeHistoryRequest(req)
+	if err != nil {
+		return r, robotView{}, err
+	}
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return r, robotView{}, err
+	}
+	return r, v, nil
+}
+
+// overlayEnvelope is bv's withEnvelope: the payload with the robot envelope
+// laid over its top level. Where the two share a key — a correlation
+// result's own generated_at and data_hash — the envelope's value wins.
+func (s *Session) overlayEnvelope(payload any, dataHash string, scope provenanceScope) ([]byte, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, fmt.Errorf("payload is not a JSON object: %w", err)
+	}
+	delete(object, "generated_at")
+	delete(object, "data_hash")
+	return s.withEnvelope(object, dataHash, scope)
+}
+
+// historyPayload is --robot-history (and --bead-history, with an id).
+func (s *Session) historyPayload(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	since, err := r.since()
+	if err != nil {
+		return nil, err
+	}
+	opts := correlation.CorrelatorOptions{BeadID: r.ID, Limit: r.historyLimit(), Since: since}
+	report, _, err := s.historyReport(v.issues, opts, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	if r.MinConfidence > 0 {
+		scorer := correlation.NewScorer()
+		report.Histories = scorer.FilterHistoriesByConfidence(report.Histories, r.MinConfidence)
+		report.CommitIndex = correlation.BuildCommitIndex(report.Histories)
+		report.Stats.BeadsWithCommits = 0
+		for _, history := range report.Histories {
+			if len(history.Commits) > 0 {
+				report.Stats.BeadsWithCommits++
+			}
+		}
+	}
+	return s.withEnvelope(struct {
+		GitRange        string                             `json:"git_range"`
+		LatestCommitSHA string                             `json:"latest_commit_sha,omitempty"`
+		Window          *correlation.HistoryWindow         `json:"window,omitempty"`
+		Stats           correlation.HistoryStats           `json:"stats"`
+		Histories       map[string]correlation.BeadHistory `json:"histories"`
+		CommitIndex     correlation.CommitIndex            `json:"commit_index"`
+	}{report.GitRange, report.LatestCommitSHA, report.Window, report.Stats, report.Histories,
+		report.CommitIndex}, report.DataHash, v.scope)
+}
+
+// causality is --robot-causality: one bead's causal chain, over its full
+// committed record.
+func (s *Session) causality(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	if r.ID == "" {
+		return nil, fmt.Errorf("causality requires an \"id\"")
+	}
+	since, err := r.since()
+	if err != nil {
+		return nil, err
+	}
+	opts := correlation.CorrelatorOptions{Limit: r.historyLimit(), CausalityBeadID: r.ID, Since: since}
+	report, _, err := s.historyReport(v.issues, opts, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	result := report.BuildCausalityChainAt(r.ID, correlation.CausalityOptions{
+		IncludeCommits: true,
+		BlockerTitles:  titlesByID(v.issues),
+	}, robotNow())
+	if result == nil {
+		return nil, fmt.Errorf("Bead not found: %s", r.ID)
+	}
+	return s.overlayEnvelope(result, report.DataHash, v.scope)
+}
+
+// relatedWork is --robot-related: beads sharing files, commits, dependencies
+// or a working window with one bead.
+func (s *Session) relatedWork(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	if r.ID == "" {
+		return nil, fmt.Errorf("related requires an \"id\"")
+	}
+	report, _, err := s.historyReport(v.issues, correlation.CorrelatorOptions{Limit: r.historyLimit()}, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	options := correlation.RelatedWorkOptions{
+		ConcurrencyWindow: 7 * 24 * time.Hour,
+		DependencyGraph:   dependencyGraph(v.issues),
+		MinRelevance:      intOr(r.RelatedMinRelevance, 20),
+		MaxResults:        intOr(r.RelatedMaxResults, 10),
+		IncludeClosed:     r.RelatedIncludeClosed,
+	}
+	result := report.FindRelatedWorkAt(r.ID, options, robotNow())
+	if result == nil {
+		return nil, fmt.Errorf("Bead not found in history: %s", r.ID)
+	}
+	return s.overlayEnvelope(result, report.DataHash, v.scope)
+}
+
+// impactNetwork is --robot-impact-network: the bead network built from shared
+// commits, shared files and dependencies, whole ("all" or no id) or around one
+// bead.
+func (s *Session) impactNetwork(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	report, _, err := s.historyReport(v.issues, correlation.CorrelatorOptions{Limit: r.historyLimit()}, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	network := correlation.NewNetworkBuilderWithIssues(report, v.issues).BuildAt(robotNow())
+	beadID := r.ID
+	if beadID == "all" {
+		beadID = ""
+	}
+	if beadID != "" {
+		if _, ok := network.Nodes[beadID]; !ok {
+			return nil, fmt.Errorf("Bead not found in network: %s", beadID)
+		}
+	}
+	depth := intOr(r.NetworkDepth, 2)
+	if depth < 1 {
+		depth = 1
+	}
+	if depth > 3 {
+		depth = 3
+	}
+	return s.overlayEnvelope(network.ToResult(beadID, depth), report.DataHash, v.scope)
+}
+
+// orphans is --robot-orphans: commits in the walked window no bead accounts
+// for, scored by bv's detector, which reads the window through objgit.
+func (s *Session) orphans(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	limit := r.historyLimit()
+	report, place, err := s.historyReport(v.issues, correlation.CorrelatorOptions{Limit: limit}, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	orphanReport, err := correlation.NewOrphanDetectorAt(report, place.workDir, robotNow()).
+		DetectOrphans(correlation.ExtractOptions{Limit: limit})
+	if err != nil {
+		return nil, fmt.Errorf("detecting orphans: %w", err)
+	}
+	filterOrphanReportByMinScore(orphanReport, intOr(r.OrphansMinScore, 30))
+	return s.withEnvelope(struct {
+		GitRange   string                        `json:"git_range"`
+		Window     correlation.OrphanWindow      `json:"window"`
+		Stats      correlation.OrphanReportStats `json:"stats"`
+		Candidates []correlation.OrphanCandidate `json:"candidates"`
+		ByBead     map[string][]string           `json:"by_bead,omitempty"`
+		UsageHints []string                      `json:"usage_hints"`
+	}{orphanReport.GitRange, orphanReport.Window, orphanReport.Stats, orphanReport.Candidates,
+		orphanReport.ByBead, orphanReport.UsageHints}, orphanReport.DataHash, v.scope)
+}
+
+// filterOrphanReportByMinScore is bv's: candidates under the score are
+// dropped, and the per-bead index and the averages follow.
+func filterOrphanReportByMinScore(orphanReport *correlation.OrphanReport, minScore int) {
+	filtered := make([]correlation.OrphanCandidate, 0, len(orphanReport.Candidates))
+	byBead := make(map[string][]string)
+	totalSuspicion := 0
+	for _, candidate := range orphanReport.Candidates {
+		if candidate.SuspicionScore < minScore {
+			continue
+		}
+		filtered = append(filtered, candidate)
+		totalSuspicion += candidate.SuspicionScore
+		for _, bead := range candidate.ProbableBeads {
+			byBead[bead.BeadID] = append(byBead[bead.BeadID], candidate.ShortSHA)
+		}
+	}
+	orphanReport.Candidates = filtered
+	orphanReport.ByBead = byBead
+	orphanReport.Stats.CandidateCount = len(filtered)
+	orphanReport.Stats.AvgSuspicion = 0
+	if len(filtered) > 0 {
+		orphanReport.Stats.AvgSuspicion = float64(totalSuspicion) / float64(len(filtered))
+	}
+}
+
+// fileBeads is --robot-file-beads: the beads that touched a file. A path
+// holding a glob character (`*`, `?`, `[`) is matched as a glob — vbx's
+// extension, which the History view's file search uses; bv looks such a path
+// up literally, so its answer for one is empty.
+func (s *Session) fileBeads(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	if r.Path == "" {
+		return nil, fmt.Errorf("file_beads requires a \"path\"")
+	}
+	report, _, err := s.historyReport(v.issues, correlation.CorrelatorOptions{Limit: r.historyLimit()}, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	lookup := correlation.NewFileLookup(report)
+	var result *correlation.FileBeadLookupResult
+	if strings.ContainsAny(r.Path, "*?[") {
+		result = lookup.LookupByFileGlob(r.Path)
+	} else {
+		result = lookup.LookupByFile(r.Path)
+	}
+	closedLimit := intOr(r.FileBeadsLimit, 20)
+	if closedLimit < 0 {
+		closedLimit = 0
+	}
+	if len(result.ClosedBeads) > closedLimit {
+		result.ClosedBeads = result.ClosedBeads[:closedLimit]
+	}
+	return s.withEnvelope(struct {
+		FilePath    string                      `json:"file_path"`
+		TotalBeads  int                         `json:"total_beads"`
+		OpenBeads   []correlation.BeadReference `json:"open_beads"`
+		ClosedBeads []correlation.BeadReference `json:"closed_beads"`
+	}{r.Path, result.TotalBeads, result.OpenBeads, result.ClosedBeads}, report.DataHash, v.scope)
+}
+
+// fileHotspots is --robot-file-hotspots: files ranked by the beads that
+// touched them.
+func (s *Session) fileHotspots(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	report, _, err := s.historyReport(v.issues, correlation.CorrelatorOptions{Limit: r.historyLimit()}, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	lookup := correlation.NewFileLookup(report)
+	return s.withEnvelope(struct {
+		Hotspots []correlation.FileHotspot  `json:"hotspots"`
+		Stats    correlation.FileIndexStats `json:"stats"`
+	}{lookup.GetHotspots(intOr(r.HotspotsLimit, 10)), lookup.GetStats()}, report.DataHash, v.scope)
+}
+
+// fileRelations is --robot-file-relations: files that change alongside one.
+func (s *Session) fileRelations(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	if r.Path == "" {
+		return nil, fmt.Errorf("file_relations requires a \"path\"")
+	}
+	report, _, err := s.historyReport(v.issues, correlation.CorrelatorOptions{Limit: r.historyLimit()}, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	result := correlation.NewFileLookup(report).GetRelatedFiles(
+		r.Path, floatOr(r.RelationsThreshold, 0.5), intOr(r.RelationsLimit, 10))
+	return s.withEnvelope(struct {
+		FilePath     string                      `json:"file_path"`
+		TotalCommits int                         `json:"total_commits"`
+		Threshold    float64                     `json:"threshold"`
+		RelatedFiles []correlation.CoChangeEntry `json:"related_files"`
+	}{result.FilePath, result.TotalCommits, result.Threshold, result.RelatedFiles}, report.DataHash, v.scope)
+}
+
+// fileImpact is --robot-impact: the risk of changing a set of files, from the
+// beads that touched them.
+func (s *Session) fileImpact(req []byte) ([]byte, error) {
+	r, v, err := s.historyView(req)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, f := range r.Files {
+		files = append(files, strings.TrimSpace(f))
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("file_impact requires a non-empty \"files\"")
+	}
+	report, _, err := s.historyReport(v.issues, correlation.CorrelatorOptions{Limit: r.historyLimit()}, r.Refresh, false)
+	if err != nil {
+		return nil, err
+	}
+	impact := correlation.NewFileLookup(report).ImpactAnalysisAt(files, robotNow())
+	return s.withEnvelope(struct {
+		Files         []string                   `json:"files"`
+		RiskLevel     string                     `json:"risk_level"`
+		RiskScore     float64                    `json:"risk_score"`
+		Summary       string                     `json:"summary"`
+		Warnings      []string                   `json:"warnings"`
+		AffectedBeads []correlation.AffectedBead `json:"affected_beads"`
+	}{impact.Files, impact.RiskLevel, impact.RiskScore, impact.Summary, impact.Warnings,
+		impact.AffectedBeads}, report.DataHash, v.scope)
+}
+
+// triageReport is the history triage scores staleness with: bv's bounded
+// report over the triage's issues, in bv's own type, which is what its
+// scorer takes. The copy and the original share every JSON field name, so a
+// round trip through JSON converts one to the other.
+func (s *Session) triageReport(issues []model.Issue) (*bvcorrelation.HistoryReport, error) {
+	report, _, err := s.historyReport(issues, correlation.CorrelatorOptions{Limit: triageHistoryLimit}, false, false)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		return nil, err
+	}
+	var converted bvcorrelation.HistoryReport
+	if err := json.Unmarshal(raw, &converted); err != nil {
+		return nil, err
+	}
+	return &converted, nil
+}
+
+// feedbackStore opens the workspace's correlation feedback sidecar.
+func (s *Session) feedbackStore() (*correlation.FeedbackStore, error) {
+	place, err := s.historyPlace()
+	if err != nil {
+		s.mu.RLock()
+		source := s.source
+		s.mu.RUnlock()
+		if source == "" {
+			return nil, err
+		}
+		place.beadsDir = filepath.Dir(source)
+	}
+	store := correlation.NewFeedbackStore(place.beadsDir)
 	if err := store.Load(); err != nil {
 		return nil, err
 	}
 	return store, nil
-}
-
-// applyFeedback folds a human verdict into the report's confidences.
-//
-// A rejected link is removed outright rather than merely downweighted: the
-// point of rejecting it is that it is wrong, and leaving it at low confidence
-// would keep it in every count and every file index. A confirmed link is
-// raised to the top of bv's band for its method — not past it, because the
-// band is what the method's confidence means.
-func applyFeedback(report *correlation.HistoryReport, store *correlation.FeedbackStore) {
-	for id, history := range report.Histories {
-		kept := history.Commits[:0]
-		for _, commit := range history.Commits {
-			verdict, found := store.Get(commit.SHA, id)
-			if !found {
-				kept = append(kept, commit)
-				continue
-			}
-			switch verdict.Type {
-			case correlation.FeedbackReject:
-				continue
-			case correlation.FeedbackConfirm:
-				if band, ok := correlation.MethodRanges[commit.Method]; ok {
-					commit.Confidence = band.Max
-				} else {
-					commit.Confidence = 1
-				}
-				commit.Reason = "confirmed: " + verdict.Reason
-			}
-			kept = append(kept, commit)
-		}
-		history.Commits = kept
-		report.Histories[id] = history
-	}
-
-	// The commit index is derived, so it has to be rebuilt rather than
-	// patched — a rejected link that stays in the index would keep the commit
-	// out of the orphan list while belonging to no bead.
-	rebuilt := correlation.CommitIndex{}
-	withCommits := 0
-	for id, history := range report.Histories {
-		if len(history.Commits) > 0 {
-			withCommits++
-		}
-		for _, commit := range history.Commits {
-			rebuilt[commit.SHA] = appendUnique(rebuilt[commit.SHA], id)
-		}
-	}
-	report.CommitIndex = rebuilt
-	report.Stats.BeadsWithCommits = withCommits
 }
 
 // feedbackRequest is a verdict on one commit-to-bead link.
@@ -170,7 +626,10 @@ func (s *Session) correlationFeedback() ([]byte, error) {
 	})
 }
 
-// recordFeedback confirms or rejects one link.
+// recordFeedback confirms or rejects one link. The confidence recorded
+// beside the verdict is the strategy's own, read from the report without
+// feedback applied — bv's generateRawCorrelationReport — so a second verdict
+// on the same link does not record the first one's pinned 1.0.
 func (s *Session) recordFeedback(req []byte, verdict correlation.FeedbackType) ([]byte, error) {
 	var r feedbackRequest
 	if len(req) == 0 {
@@ -190,10 +649,15 @@ func (s *Session) recordFeedback(req []byte, verdict correlation.FeedbackType) (
 	if err != nil {
 		return nil, err
 	}
-
-	// The original confidence is recorded alongside the verdict, so the
-	// accuracy stats can say what the engine believed at the time.
-	original := s.confidenceOf(r.SHA, r.BeadID)
+	original := 0.0
+	if report, _, err := s.historyReport(s.wholeView().issues,
+		correlation.CorrelatorOptions{Limit: defaultHistoryLimit}, false, true); err == nil {
+		for _, commit := range report.Histories[r.BeadID].Commits {
+			if commit.SHA == r.SHA {
+				original = commit.Confidence
+			}
+		}
+	}
 
 	switch verdict {
 	case correlation.FeedbackReject:
@@ -204,15 +668,6 @@ func (s *Session) recordFeedback(req []byte, verdict correlation.FeedbackType) (
 	if err != nil {
 		return nil, err
 	}
-
-	// Re-apply against the cached report so the change is visible without
-	// paying for another walk.
-	s.historyMu.Lock()
-	if s.history != nil {
-		applyFeedback(s.history.report, store)
-	}
-	s.historyMu.Unlock()
-
 	return json.Marshal(map[string]any{
 		"sha":           r.SHA,
 		"bead_id":       r.BeadID,
@@ -222,226 +677,6 @@ func (s *Session) recordFeedback(req []byte, verdict correlation.FeedbackType) (
 		"original_conf": original,
 		"stats":         store.GetStats(),
 	})
-}
-
-// confidenceOf finds what the engine currently believes about one link.
-func (s *Session) confidenceOf(sha, beadID string) float64 {
-	s.historyMu.Lock()
-	defer s.historyMu.Unlock()
-	if s.history == nil {
-		return 0
-	}
-	for _, commit := range s.history.report.Histories[beadID].Commits {
-		if commit.SHA == sha {
-			return commit.Confidence
-		}
-	}
-	return 0
-}
-
-// invalidateHistory drops the cached report. Called whenever the bead set
-// changes, because every attribution is computed against it.
-func (s *Session) invalidateHistory() {
-	s.historyMu.Lock()
-	s.history, s.historyLimit = nil, 0
-	s.historyMu.Unlock()
-}
-
-func (s *Session) historyPayload(req []byte) ([]byte, error) {
-	r, err := decodeHistoryRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	result, err := s.correlationHistory(r.Limit, r.Refresh)
-	if err != nil {
-		return nil, err
-	}
-
-	if r.ID == "" {
-		return json.Marshal(result.report)
-	}
-	history, ok := result.report.Histories[r.ID]
-	if !ok {
-		return nil, fmt.Errorf("no history for %q", r.ID)
-	}
-	return json.Marshal(map[string]any{
-		"generated_at": result.report.GeneratedAt,
-		"data_hash":    result.report.DataHash,
-		"git_range":    result.report.GitRange,
-		"history":      history,
-	})
-}
-
-// causality returns one bead's causal chain and the insights drawn from it.
-func (s *Session) causality(req []byte) ([]byte, error) {
-	r, err := decodeHistoryRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	if r.ID == "" {
-		return nil, fmt.Errorf("causality requires an \"id\"")
-	}
-	result, err := s.correlationHistory(r.Limit, r.Refresh)
-	if err != nil {
-		return nil, err
-	}
-
-	issues := s.recordSet() // the history covers every record
-	opts := correlation.DefaultCausalityOptions()
-	// Blocker titles turn "waiting on vbx-8ou" into a sentence naming the
-	// bead, which is the difference between a chain you can read and a list
-	// of identifiers.
-	opts.BlockerTitles = titlesByID(issues)
-
-	chain := result.report.BuildCausalityChain(r.ID, opts)
-	if chain == nil {
-		return nil, fmt.Errorf("no history for %q", r.ID)
-	}
-	return json.Marshal(chain)
-}
-
-// relatedWork finds beads that touched the same files, commits or window.
-func (s *Session) relatedWork(req []byte) ([]byte, error) {
-	r, err := decodeHistoryRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	if r.ID == "" {
-		return nil, fmt.Errorf("related requires an \"id\"")
-	}
-	result, err := s.correlationHistory(r.Limit, r.Refresh)
-	if err != nil {
-		return nil, err
-	}
-
-	issues := s.recordSet() // the history covers every record
-	opts := correlation.DefaultRelatedWorkOptions()
-	opts.DependencyGraph = dependencyGraph(issues)
-	if r.Limit > 0 {
-		opts.MaxResults = r.Limit
-	}
-
-	related := result.report.FindRelatedWork(r.ID, opts)
-	if related == nil {
-		return nil, fmt.Errorf("no history for %q", r.ID)
-	}
-	return json.Marshal(related)
-}
-
-// impactNetwork returns the bead network built from shared commits, shared
-// files and declared dependencies.
-func (s *Session) impactNetwork(req []byte) ([]byte, error) {
-	r, err := decodeHistoryRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	result, err := s.correlationHistory(r.Limit, r.Refresh)
-	if err != nil {
-		return nil, err
-	}
-
-	issues := s.recordSet() // the history covers every record
-	network := correlation.NewNetworkBuilderWithIssues(result.report, issues).Build()
-
-	depth := r.Depth
-	if depth <= 0 {
-		depth = 1
-	}
-	return json.Marshal(network.ToResult(r.ID, depth))
-}
-
-// fileBeads answers "which beads touched this file".
-func (s *Session) fileBeads(req []byte) ([]byte, error) {
-	r, err := decodeHistoryRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	if r.Path == "" {
-		return nil, fmt.Errorf("file_beads requires a \"path\"")
-	}
-	result, err := s.correlationHistory(r.Limit, r.Refresh)
-	if err != nil {
-		return nil, err
-	}
-
-	lookup := correlation.NewFileLookup(result.report)
-	// A path containing a glob metacharacter is a pattern; anything else is
-	// an exact path. Guessing wrong either way returns nothing at all.
-	if strings.ContainsAny(r.Path, "*?[") {
-		return json.Marshal(lookup.LookupByFileGlob(r.Path))
-	}
-	return json.Marshal(lookup.LookupByFile(r.Path))
-}
-
-// fileHotspots ranks files by how many beads have touched them.
-func (s *Session) fileHotspots(req []byte) ([]byte, error) {
-	r, err := decodeHistoryRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	result, err := s.correlationHistory(r.Limit, r.Refresh)
-	if err != nil {
-		return nil, err
-	}
-
-	limit := r.Limit
-	if limit <= 0 {
-		limit = 25
-	}
-	lookup := correlation.NewFileLookup(result.report)
-	hotspots := lookup.GetHotspots(limit)
-	if hotspots == nil {
-		hotspots = []correlation.FileHotspot{}
-	}
-	return json.Marshal(map[string]any{
-		"hotspots": hotspots,
-		"stats":    lookup.GetStats(),
-	})
-}
-
-// fileRelations reports which files change alongside a given file.
-func (s *Session) fileRelations(req []byte) ([]byte, error) {
-	r, err := decodeHistoryRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	if r.Path == "" {
-		return nil, fmt.Errorf("file_relations requires a \"path\"")
-	}
-	result, err := s.correlationHistory(r.Limit, r.Refresh)
-	if err != nil {
-		return nil, err
-	}
-
-	threshold := r.Threshold
-	if threshold <= 0 {
-		threshold = 0.3
-	}
-	limit := r.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	lookup := correlation.NewFileLookup(result.report)
-	return json.Marshal(lookup.GetRelatedFiles(r.Path, threshold, limit))
-}
-
-// orphans reports commits no bead accounts for.
-//
-// bv's own OrphanDetector re-queries git regardless of the report handed to
-// it, so it cannot run under the sandbox. This walks the same report and the
-// commit list beside it, and scores each unattributed commit with the same
-// four signals bv weighs: timing, files, message and author.
-func (s *Session) orphans(req []byte) ([]byte, error) {
-	r, err := decodeHistoryRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	result, err := s.correlationHistory(r.Limit, r.Refresh)
-	if err != nil {
-		return nil, err
-	}
-	issues := s.recordSet() // the history covers every record
-	return json.Marshal(detectOrphans(result, issues, r.Limit))
 }
 
 // commitPatch renders one commit's diff, optionally narrowed to one file.
@@ -461,10 +696,10 @@ func (s *Session) commitPatch(req []byte) ([]byte, error) {
 	}
 
 	s.mu.RLock()
-	source, issues := s.source, s.records
+	source := s.source
 	s.mu.RUnlock()
 
-	extractor, err := openObjectStore(source, issues)
+	extractor, err := openObjectStore(source)
 	if err != nil {
 		return nil, err
 	}
@@ -489,291 +724,17 @@ func titlesByID(issues []model.Issue) map[string]string {
 	return out
 }
 
-// dependencyGraph maps each bead to the beads it depends on.
+// dependencyGraph maps each bead to the beads it depends on, every type
+// included, as bv's --robot-related builds it.
 func dependencyGraph(issues []model.Issue) map[string][]string {
 	out := make(map[string][]string, len(issues))
 	for _, issue := range issues {
-		var deps []string
 		for _, dep := range issue.Dependencies {
 			if dep == nil {
 				continue
 			}
-			deps = append(deps, dep.DependsOnID)
-		}
-		if len(deps) > 0 {
-			out[issue.ID] = deps
+			out[issue.ID] = append(out[issue.ID], dep.DependsOnID)
 		}
 	}
 	return out
-}
-
-// detectOrphans scores commits that no bead accounts for.
-func detectOrphans(
-	result *historyResult, issues []model.Issue, limit int,
-) correlation.OrphanReport {
-	report := result.report
-	byID := make(map[string]model.Issue, len(issues))
-	for _, issue := range issues {
-		byID[issue.ID] = issue
-	}
-
-	// Files each bead has touched, for the file-overlap signal.
-	beadFiles := map[string]map[string]struct{}{}
-	beadAuthors := map[string]string{}
-	for id, history := range report.Histories {
-		files := map[string]struct{}{}
-		for _, commit := range history.Commits {
-			for _, file := range commit.Files {
-				files[file.Path] = struct{}{}
-			}
-		}
-		beadFiles[id] = files
-		beadAuthors[id] = history.LastAuthor
-	}
-
-	candidates := []correlation.OrphanCandidate{}
-	correlated := 0
-
-	for _, rec := range result.commits {
-		if len(report.CommitIndex[rec.sha]) > 0 {
-			correlated++
-			continue
-		}
-		// A commit that changed no code is bookkeeping, not lost work.
-		if len(rec.codeFiles) == 0 {
-			continue
-		}
-
-		candidate := scoreOrphan(rec, report, byID, beadFiles, beadAuthors)
-		candidates = append(candidates, candidate)
-	}
-
-	// Most suspicious first — the point of the list is what to look at.
-	sort.SliceStable(candidates, func(a, b int) bool {
-		return candidates[a].SuspicionScore > candidates[b].SuspicionScore
-	})
-	if limit > 0 && len(candidates) > limit {
-		candidates = candidates[:limit]
-	}
-
-	total := len(result.commits)
-	ratio := 0.0
-	suspicionSum := 0
-	for _, c := range candidates {
-		suspicionSum += c.SuspicionScore
-	}
-	avg := 0.0
-	if len(candidates) > 0 {
-		avg = float64(suspicionSum) / float64(len(candidates))
-	}
-	if total > 0 {
-		ratio = float64(len(candidates)) / float64(total)
-	}
-
-	byBead := map[string][]string{}
-	for _, candidate := range candidates {
-		for _, probable := range candidate.ProbableBeads {
-			byBead[probable.BeadID] = append(byBead[probable.BeadID], candidate.SHA)
-		}
-	}
-
-	return correlation.OrphanReport{
-		GeneratedAt: robotNow(),
-		GitRange:    report.GitRange,
-		DataHash:    report.DataHash,
-		Stats: correlation.OrphanReportStats{
-			TotalCommits:    total,
-			CorrelatedCount: correlated,
-			OrphanCount:     len(candidates),
-			CandidateCount:  len(candidates),
-			OrphanRatio:     ratio,
-			AvgSuspicion:    avg,
-		},
-		Candidates: candidates,
-		ByBead:     byBead,
-	}
-}
-
-// Signal weights. They sum to 100 so a candidate hitting everything scores
-// 100, and each one's contribution is legible in the UI beside the total.
-const (
-	weightOrphanFiles   = 40
-	weightOrphanTiming  = 25
-	weightOrphanMessage = 20
-	weightOrphanAuthor  = 15
-)
-
-// scoreOrphan rates one unattributed commit and names the beads it most
-// plausibly belongs to.
-func scoreOrphan(
-	rec commitRecord,
-	report *correlation.HistoryReport,
-	byID map[string]model.Issue,
-	beadFiles map[string]map[string]struct{},
-	beadAuthors map[string]string,
-) correlation.OrphanCandidate {
-	paths := make([]string, 0, len(rec.codeFiles))
-	commitFiles := map[string]struct{}{}
-	for _, file := range rec.codeFiles {
-		paths = append(paths, file.Path)
-		commitFiles[file.Path] = struct{}{}
-	}
-
-	type scored struct {
-		id      string
-		score   int
-		reasons []string
-	}
-	var ranked []scored
-	signals := map[correlation.OrphanSignal]correlation.OrphanSignalHit{}
-
-	for id, history := range report.Histories {
-		score := 0
-		var reasons []string
-
-		overlap := 0
-		for path := range beadFiles[id] {
-			if _, hit := commitFiles[path]; hit {
-				overlap++
-			}
-		}
-		if overlap > 0 {
-			score += weightOrphanFiles
-			reasons = append(reasons, fmt.Sprintf("%d file(s) also touched by this bead", overlap))
-			signals[correlation.SignalOrphanFiles] = correlation.OrphanSignalHit{
-				Signal:  correlation.SignalOrphanFiles,
-				Details: fmt.Sprintf("%d shared file(s)", overlap),
-				Weight:  weightOrphanFiles,
-			}
-		}
-
-		if withinActiveWindow(rec.when, history) {
-			score += weightOrphanTiming
-			reasons = append(reasons, "committed while the bead was in progress")
-			signals[correlation.SignalOrphanTiming] = correlation.OrphanSignalHit{
-				Signal:  correlation.SignalOrphanTiming,
-				Details: "inside the bead's active window",
-				Weight:  weightOrphanTiming,
-			}
-		}
-
-		if issue, ok := byID[id]; ok && titleEchoesMessage(issue.Title, rec.message) {
-			score += weightOrphanMessage
-			reasons = append(reasons, "message echoes the bead's title")
-			signals[correlation.SignalOrphanMessage] = correlation.OrphanSignalHit{
-				Signal:  correlation.SignalOrphanMessage,
-				Details: "shared wording with the bead title",
-				Weight:  weightOrphanMessage,
-			}
-		}
-
-		if author := beadAuthors[id]; author != "" && author == rec.author {
-			score += weightOrphanAuthor
-			reasons = append(reasons, "same author as the bead's last activity")
-			signals[correlation.SignalOrphanAuthor] = correlation.OrphanSignalHit{
-				Signal:  correlation.SignalOrphanAuthor,
-				Details: rec.author,
-				Weight:  weightOrphanAuthor,
-			}
-		}
-
-		if score > 0 {
-			ranked = append(ranked, scored{id: id, score: score, reasons: reasons})
-		}
-	}
-
-	sort.SliceStable(ranked, func(a, b int) bool {
-		if ranked[a].score != ranked[b].score {
-			return ranked[a].score > ranked[b].score
-		}
-		return ranked[a].id < ranked[b].id
-	})
-	if len(ranked) > 5 {
-		ranked = ranked[:5]
-	}
-
-	probable := make([]correlation.ProbableBead, 0, len(ranked))
-	for _, entry := range ranked {
-		issue := byID[entry.id]
-		probable = append(probable, correlation.ProbableBead{
-			BeadID:     entry.id,
-			BeadTitle:  issue.Title,
-			BeadStatus: string(issue.Status),
-			Confidence: entry.score,
-			Reasons:    entry.reasons,
-		})
-	}
-
-	// The commit's own suspicion is its best candidate's score: a commit with
-	// one strong explanation is more worth reviewing than one with several
-	// weak ones.
-	suspicion := 0
-	if len(probable) > 0 {
-		suspicion = probable[0].Confidence
-	}
-
-	hits := make([]correlation.OrphanSignalHit, 0, len(signals))
-	for _, hit := range signals {
-		hits = append(hits, hit)
-	}
-	sort.SliceStable(hits, func(a, b int) bool { return hits[a].Weight > hits[b].Weight })
-
-	return correlation.OrphanCandidate{
-		SHA:            rec.sha,
-		ShortSHA:       rec.shortSHA,
-		Message:        rec.message,
-		Author:         rec.author,
-		AuthorEmail:    rec.email,
-		Timestamp:      rec.when,
-		Files:          paths,
-		SuspicionScore: suspicion,
-		ProbableBeads:  probable,
-		Signals:        hits,
-	}
-}
-
-// withinActiveWindow reports whether a commit landed while the bead was open.
-func withinActiveWindow(when time.Time, history correlation.BeadHistory) bool {
-	start := history.Milestones.Claimed
-	if start == nil {
-		start = history.Milestones.Created
-	}
-	if start == nil {
-		return false
-	}
-	if when.Before(start.Timestamp) {
-		return false
-	}
-	if closed := history.Milestones.Closed; closed != nil {
-		return !when.After(closed.Timestamp)
-	}
-	// Still open, so anything after it started is inside the window.
-	return true
-}
-
-// titleEchoesMessage reports whether a commit message shares distinctive
-// wording with a bead title.
-//
-// Short and common words are skipped: matching on "the" would make every
-// commit look related to every bead.
-func titleEchoesMessage(title, message string) bool {
-	lowerMessage := strings.ToLower(message)
-	hits := 0
-	for _, word := range strings.Fields(strings.ToLower(title)) {
-		word = strings.Trim(word, ".,:;()[]\"'`")
-		if len(word) < 5 || commonWords[word] {
-			continue
-		}
-		if strings.Contains(lowerMessage, word) {
-			hits++
-		}
-	}
-	return hits >= 2
-}
-
-var commonWords = map[string]bool{
-	"about": true, "after": true, "again": true, "there": true, "their": true,
-	"these": true, "those": true, "which": true, "while": true, "would": true,
-	"should": true, "could": true, "where": true, "other": true, "using": true,
-	"through": true, "between": true, "rather": true, "instead": true,
 }
