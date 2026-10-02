@@ -301,6 +301,14 @@ them.
   window's patterns happen to be registered. The app registers `br`'s id
   shape for the workspace's prefix; `vbx-cli` registers only `--id-pattern`,
   as bv does. See ADR-027.
+- **Where a vbx-cli modifier applies is declared once, in `ModifierRules`**
+  (VBXCore) — bv's `modifierRules`, in bv's order, with bv's message and
+  **exit 1** (bv's status for these, not the 2 of an unparseable value).
+  Adding a modifier flag to vbx-cli means adding its rule there; `--help` is
+  printed from the table, and `test-parity-check.py` fails when a bv modifier
+  vbx-cli parses has no rule, a rule differs from bv's source, or a rule has
+  no refused parity comparison. Never check a modifier by hand in
+  `parseArguments` or a request builder. See BUGS.md, 2026-10-02 (vbx-uao).
 - **Triage includes a bounded git-history walk**, because bv's does and it
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable

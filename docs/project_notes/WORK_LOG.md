@@ -5,6 +5,16 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — vbx-cli refuses a modifier without the command it modifies, as bv does (vbx-uao)
+
+`--history-limit` beside `--robot-orphans`, `--network-depth` beside triage and
+every other misplaced modifier now fail with bv's message and exit 1, from one
+table of bv's rules (`ModifierRules`) that also prints `--help`. Priority and
+suggest take bv's spellings (`--robot-by-label`, `--robot-min-confidence`,
+`--suggest-confidence`, …). The harness compares 40 refusals and 5 more accepted
+pairings, and checks the table against bv's source. Parity: 0 differing
+commands before and after. Details in BUGS.md.
+
 ## 2026-10-02 — The Swift suite is green again: the empty-commit orphan test counts what bv counts (vbx-n86)
 
 The test vbx-lh0 added expected 4 orphan-report commits; bv and the engine both

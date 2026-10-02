@@ -371,6 +371,18 @@ scoped issues and vbx the whole workspace, so <code>vbx-cli</code> refuses <code
 <code>--recipe</code> with it (exit 2) rather than answer over every bead as if scoped.
 Commands bv answers before it loads issues — the recipe list,
 triage feedback — ignore both, as bv does.</p>
+<p>A modifier given without a flag it modifies is refused as bv refuses it
+(vbx-uao): <code>--history-limit</code> beside <code>--robot-orphans</code> is bv's <code>--history-limit
+requires one of --robot-history, --bead-history or --robot-causality</code>, and exit
+1 — bv's <code>modifierRules</code>, whose exit status is 1, not the 2 of a value it cannot
+parse. <code>vbx-cli</code> holds bv's rules for every modifier it parses in one table,
+<code>ModifierRules</code>, in bv's order (bv names the first rule broken), and prints its
+<code>--help</code> from the same table. <code>test-parity-check.py</code> reads the table against
+bv's own source at the go.mod version, and the harness compares one refusal per
+rule plus the accepted pairings. Priority and suggest take bv's spellings
+<code>--robot-by-label</code>, <code>--robot-by-assignee</code>, <code>--robot-max-results</code>,
+<code>--robot-min-confidence</code> and <code>--suggest-confidence</code>; <code>--min-confidence</code> is the
+history's alone, as in bv.</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
 <p><strong>Mechanism legend</strong></p>
@@ -1260,8 +1272,8 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-suggest</code> (+ type, bead, confidence)</td>
-<td>✓</td>
+<td><code>--robot-suggest</code> (+ <code>--suggest-type</code>, bead, <code>--suggest-confidence</code>)</td>
+<td>✓ (bead as <code>--id</code>)</td>
 <td>Inspector suggestions</td>
 <td>6</td>
 </tr>
@@ -1321,7 +1333,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--robot-by-label</code>, <code>--robot-by-assignee</code></td>
-<td>✓</td>
+<td>✓ (refused beside any command but <code>--robot-priority</code>, as in bv — vbx-uao)</td>
 <td>Grouping controls</td>
 <td>6</td>
 </tr>
@@ -1333,7 +1345,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--robot-not-ready-labels</code> (+ <code>BV_ROBOT_NOT_READY_LABELS</code>), <code>--robot-max-results</code>, <code>--robot-min-confidence</code></td>
-<td>✓ (not-ready labels on triage and <code>--robot-next</code>, as in bv)</td>
+<td>✓ (not-ready labels on triage and <code>--robot-next</code>, as in bv; the other two read by <code>--robot-priority</code>)</td>
 <td>Corresponding UI controls</td>
 <td>6</td>
 </tr>

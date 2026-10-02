@@ -155,6 +155,19 @@ scoped issues and vbx the whole workspace, so `vbx-cli` refuses `--label` and
 Commands bv answers before it loads issues — the recipe list,
 triage feedback — ignore both, as bv does.
 
+A modifier given without a flag it modifies is refused as bv refuses it
+(vbx-uao): `--history-limit` beside `--robot-orphans` is bv's `--history-limit
+requires one of --robot-history, --bead-history or --robot-causality`, and exit
+1 — bv's `modifierRules`, whose exit status is 1, not the 2 of a value it cannot
+parse. `vbx-cli` holds bv's rules for every modifier it parses in one table,
+`ModifierRules`, in bv's order (bv names the first rule broken), and prints its
+`--help` from the same table. `test-parity-check.py` reads the table against
+bv's own source at the go.mod version, and the harness compares one refusal per
+rule plus the accepted pairings. Priority and suggest take bv's spellings
+`--robot-by-label`, `--robot-by-assignee`, `--robot-max-results`,
+`--robot-min-confidence` and `--suggest-confidence`; `--min-confidence` is the
+history's alone, as in bv.
+
 The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.
 
@@ -342,7 +355,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-explain-correlation`, `--robot-confirm-correlation`, `--robot-reject-correlation`, `--robot-correlation-stats` | ✓ | History feedback controls | 6 |
 | `--robot-search` (+ mode, preset, weights, limit) | ✓ | Search field | 6 |
 | `--search-min-score`, guaranteed exact-ID hit (bv 0.25) | ✓ through bv's `SearchTopKWithOptions`; `vbx-cli --search-min-score` with bv's validation and `min_score` echo (vbx-52c). No threshold control in the app yet (vbx-c1j) | Search field (hybrid mode gets the exact-ID hit) | 6 |
-| `--robot-suggest` (+ type, bead, confidence) | ✓ | Inspector suggestions | 6 |
+| `--robot-suggest` (+ `--suggest-type`, bead, `--suggest-confidence`) | ✓ (bead as `--id`) | Inspector suggestions | 6 |
 | `--robot-forecast`, `--robot-capacity` (+ agents, forecast-label, forecast-sprint, capacity-label, label and recipe scope) | ✓ | Inspector forecast, sprint scenarios | 6 |
 | `--robot-burndown`, `--robot-sprint-list`, `--robot-sprint-show` | ✓ | Sprint dashboard | 6 |
 | `--robot-label-health`, `--robot-label-flow`, `--robot-label-attention` (+ label and recipe scope) | ✓ | Label dashboard, Flow matrix, Attention | 6 |
@@ -352,9 +365,9 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-graph` (+ format, root, depth) | ✓ | Graph export menu | 6 |
 | `--robot-recipes` | ✓ | Recipe sidebar | 6 |
 | `--recipe <name or path.yaml>` as a global scope on robot commands (bv 0.25) | ✓ `vbx-cli` triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show, burndown, diff, drift and forecast, diff, drift, forecast and the nine history commands, alone or with `--label`, with `scope.recipe` and `scope_hash`; a path wherever a name goes (also `--robot-recipe-apply` and `--export`); an unknown recipe refused with bv's message and list. Matched in `parity-check.py` (vbx-7d5, vbx-shz, vbx-9gl, vbx-k7j). **Not built:** `--save-baseline`, which refuses either flag | Recipe sidebar applies by name | — |
-| `--robot-by-label`, `--robot-by-assignee` | ✓ | Grouping controls | 6 |
+| `--robot-by-label`, `--robot-by-assignee` | ✓ (refused beside any command but `--robot-priority`, as in bv — vbx-uao) | Grouping controls | 6 |
 | `--robot-capabilities`, `--robot-schema`, `--robot-docs`, `--robot-help` | ✓ | Help menu → "Robot protocol reference" | 6 |
-| `--robot-not-ready-labels` (+ `BV_ROBOT_NOT_READY_LABELS`), `--robot-max-results`, `--robot-min-confidence` | ✓ (not-ready labels on triage and `--robot-next`, as in bv) | Corresponding UI controls | 6 |
+| `--robot-not-ready-labels` (+ `BV_ROBOT_NOT_READY_LABELS`), `--robot-max-results`, `--robot-min-confidence` | ✓ (not-ready labels on triage and `--robot-next`, as in bv; the other two read by `--robot-priority`) | Corresponding UI controls | 6 |
 | `--feedback-accept ID`, `--feedback-ignore ID`, `--feedback-reset`, `--feedback-show` (not robot commands: bv prints prose and writes `.beads/feedback.json`) | ✓ (vbx-rt3; two at once is a usage error where bv picks one; answered before workspace discovery and `--workspace`, over the folder's own `.beads`, as bv does — vbx-v1t, ADR-026) | Triage panel: Accept / Not now per recommendation, feedback count line, Reset (vbx-442) | 6 |
 | TOON token-optimised encoding | ✓ | — | 6 |
 | Data hash + config echoed in every payload | ✓ | Status bar shows the hash | 6 |

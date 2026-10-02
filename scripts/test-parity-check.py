@@ -934,7 +934,8 @@ def test_search(parity) -> None:
     thresholds = {args[-1] for args in runs("demo") if "--search-min-score" in args}
     check("both bounds, a middle value and the empty value are compared",
           {"-1", "1", "0.3", ""} <= thresholds, str(thresholds))
-    rejected = {entry["bv_args"][-1] for entry in searches if entry.get("rejects")}
+    rejected = {entry["bv_args"][-1] for entry in searches
+                if entry.get("rejects") and "--search-min-score" in entry["bv_args"]}
     check("out-of-range and unparseable thresholds are compared as rejections",
           {"2", "-1.5", "abc", "NaN"} <= rejected, str(rejected))
 
@@ -958,8 +959,94 @@ def test_search(parity) -> None:
           parity.rejection_differences((2, "Error: no"), (2, message)) != [])
 
 
+def cli_modifier_rules() -> list[tuple[str, list[str]]]:
+    """vbx-cli's modifier rules, (flag, bv's required flags), in table order."""
+    source = (ROOT / "Sources" / "VBXCore" / "ModifierRules.swift").read_text()
+    table = source.split("public static let all: [ModifierRule] = [", 1)[1].split("\n    ]\n", 1)[0]
+    rules = []
+    for block in re.split(r"ModifierRule\(", table)[1:]:
+        flag = re.match(r'\s*"([^"]+)"', block)
+        requires = re.search(r"requires: \[([^\]]*)\]", block)
+        if flag and requires:
+            rules.append((flag.group(1), re.findall(r'"([^"]+)"', requires.group(1))))
+    return rules
+
+
+def bv_modifier_rules() -> list[tuple[str, list[str]]] | None:
+    """bv's modifierRules from cmd/bv/main.go at the engine's beads_viewer
+    version, or None when Go cannot name the module's directory."""
+    try:
+        directory = subprocess.run(
+            ["go", "list", "-m", "-f", "{{.Dir}}", "github.com/Dicklesworthstone/beads_viewer"],
+            cwd=ROOT / "Engine" / "bridge", capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    main_go = Path(directory) / "cmd" / "bv" / "main.go"
+    if not directory or not main_go.exists():
+        return None
+    text = main_go.read_text()
+    table = text.split("modifierRules := []modifierFlagRule{", 1)[1].split("\n\t\t}\n", 1)[0]
+    return [(flag, re.findall(r'"([^"]+)"', requires))
+            for flag, requires in re.findall(
+                r'\{modifier: "([^"]+)", requires: \[\]string\{([^}]*)\}\}', table)]
+
+
+def test_modifier_rules(parity) -> None:
+    print("\nvbx-cli's modifier rules are bv's, and each is compared refused (vbx-uao)")
+    rules = cli_modifier_rules()
+    check("the CLI's rule table was read", len(rules) > 30
+          and ("history-limit", ["robot-history", "bead-history", "robot-causality"]) in rules,
+          str(rules))
+
+    bv = bv_modifier_rules()
+    check("bv's modifier rules were read from its source", bool(bv), "go list found no module")
+    if bv:
+        # Each of vbx-cli's rules is bv's, word for word, and in bv's order:
+        # bv names the first rule broken, so the order is part of the message.
+        bv_flags = [flag for flag, _ in bv]
+        missing = [flag for flag, requires in rules if (flag, requires) not in bv]
+        check("every vbx-cli rule is one of bv's, with the same requirements", not missing,
+              str(missing))
+        order = [bv_flags.index(flag) for flag, _ in rules if flag in bv_flags]
+        check("the rules are in bv's order", order == sorted(order), str(order))
+        # A bv modifier vbx-cli parses must have its rule. The flags vbx-cli
+        # parses are its option cases.
+        source = (ROOT / "Sources" / "vbx-cli" / "main.swift").read_text()
+        parsed = set(re.findall(r'case "--([a-z][a-z-]*)"', source))
+        unruled = sorted(flag for flag in bv_flags
+                         if flag in parsed and flag not in dict(rules))
+        check("every bv modifier vbx-cli parses has its rule", not unruled, str(unruled))
+
+    # Each rule is compared refused: its modifier beside a command it does not
+    # modify, or — for --robot-search and --robot-diff — the command alone.
+    def refused(flag: str) -> bool:
+        for command, vbx_args, bv_args in parity.MODIFIER_REJECTS:
+            if f"--{flag}" in vbx_args and f"--{flag}" in bv_args:
+                return True
+            if command == flag and not vbx_args:
+                return True
+        return False
+    uncovered = [flag for flag, _ in rules if not refused(flag)]
+    check("each rule has a refused comparison", not uncovered, str(uncovered))
+    names = {entry.get("name") for entry in parity.COMPARISONS if entry.get("rejects")}
+    check("the refusals are compared",
+          all(f"{command} {' '.join(bv_args)}".strip() in names
+              for command, _, bv_args in parity.MODIFIER_REJECTS))
+    check("the refusal the bead reported is one of them",
+          "robot-orphans --history-limit 3" in names)
+    accepted = {entry.get("name") or "" for entry in parity.COMPARISONS
+                if not entry.get("rejects")}
+    wanted = {"robot-causality hist-3 --history-limit 5", "robot-history --history-limit 5",
+              "robot-orphans --orphans-min-score 0", "robot-priority --robot-by-label engine",
+              "robot-suggest --suggest-confidence 0.9"}
+    check("modifiers are compared beside a command they modify", wanted <= accepted,
+          str(wanted - accepted))
+
+
 def main() -> int:
     parity = load_parity()
+    test_modifier_rules(parity)
     test_workspace_discovery(parity)
     test_search(parity)
     test_report_exports(parity)
