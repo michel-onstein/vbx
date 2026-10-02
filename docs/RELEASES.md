@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.26.0 — 2026-10-02
+
+### Features
+
+- vbx-cli's diff, drift and forecast answer over --label and --recipe, as bv's do ([#127](https://github.com/michel-onstein/vbx/pull/127))
+
 ## 0.25.2 — 2026-10-02
 
 ### Fixes
