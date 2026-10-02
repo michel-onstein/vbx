@@ -361,9 +361,12 @@ public actor BeadsEngine {
     }
 
     /// How long the open work takes with `agents` working in parallel.
-    public func capacity(agents: Int, label: String? = nil) throws -> Capacity {
+    ///
+    /// `capacityLabel` is bv's `--capacity-label`: it simulates only the beads
+    /// carrying exactly that label.
+    public func capacity(agents: Int, capacityLabel: String? = nil) throws -> Capacity {
         var req: [String: Any] = ["agents": agents]
-        if let label, !label.isEmpty { req["label"] = label }
+        if let capacityLabel, !capacityLabel.isEmpty { req["capacity_label"] = capacityLabel }
         return try call("capacity", request: req, as: Capacity.self)
     }
 

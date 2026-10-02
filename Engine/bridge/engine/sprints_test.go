@@ -31,23 +31,6 @@ type burndownShape struct {
 	} `json:"ideal_line"`
 }
 
-type capacityShape struct {
-	Agents             int      `json:"agents"`
-	OpenIssueCount     int      `json:"open_issue_count"`
-	TotalMinutes       int      `json:"total_minutes"`
-	SerialMinutes      int      `json:"serial_minutes"`
-	ParallelMinutes    int      `json:"parallel_minutes"`
-	ParallelizablePct  float64  `json:"parallelizable_pct"`
-	EffectiveMinutes   int      `json:"effective_minutes"`
-	CriticalPathLength int      `json:"critical_path_length"`
-	CriticalPath       []string `json:"critical_path"`
-	ActionableCount    int      `json:"actionable_count"`
-	Bottlenecks        []struct {
-		ID          string `json:"id"`
-		BlocksCount int    `json:"blocks_count"`
-	} `json:"bottlenecks"`
-}
-
 // sprintWorkspace writes the fixture plus a sprint covering it.
 func sprintWorkspace(t *testing.T, start, end time.Time) string {
 	t.Helper()
@@ -251,95 +234,6 @@ func TestBurndownBeforeTheSprintStarts(t *testing.T) {
 	}
 	if result.ActualBurnRate != 0 {
 		t.Errorf("a future sprint has a burn rate of %v", result.ActualBurnRate)
-	}
-}
-
-func TestCapacityScalesWithAgents(t *testing.T) {
-	s := openFixture(t)
-
-	one := call[capacityShape](t, s, "capacity", map[string]any{"agents": 1})
-	four := call[capacityShape](t, s, "capacity", map[string]any{"agents": 4})
-
-	if one.OpenIssueCount == 0 {
-		t.Fatal("no open beads to simulate")
-	}
-	if one.TotalMinutes == 0 {
-		t.Fatal("the simulation estimated no work at all")
-	}
-	// More agents cannot make the work take longer, and cannot beat the
-	// serial chain either.
-	if four.EffectiveMinutes > one.EffectiveMinutes {
-		t.Errorf("four agents were slower: %d vs %d",
-			four.EffectiveMinutes, one.EffectiveMinutes)
-	}
-	if four.EffectiveMinutes < four.SerialMinutes {
-		t.Errorf("effective time %d beat the serial chain %d",
-			four.EffectiveMinutes, four.SerialMinutes)
-	}
-	if one.SerialMinutes+one.ParallelMinutes != one.TotalMinutes {
-		t.Errorf("serial %d + parallel %d != total %d",
-			one.SerialMinutes, one.ParallelMinutes, one.TotalMinutes)
-	}
-	if one.ParallelizablePct < 0 || one.ParallelizablePct > 100 {
-		t.Errorf("parallelizable share is %v%%", one.ParallelizablePct)
-	}
-}
-
-func TestCapacityCriticalPathFollowsBlockingEdges(t *testing.T) {
-	s := openFixture(t)
-	result := call[capacityShape](t, s, "capacity", nil)
-
-	// The fixture's chain is c -> b -> a, and c is also blocking e. The
-	// longest dependent run therefore starts at c.
-	if result.CriticalPathLength < 2 {
-		t.Errorf("critical path is %v", result.CriticalPath)
-	}
-	if len(result.CriticalPath) > 0 && result.CriticalPath[0] != "c" {
-		t.Errorf("critical path starts at %q, want c", result.CriticalPath[0])
-	}
-	// c holds up both b and e, so it is the one bottleneck.
-	if len(result.Bottlenecks) != 1 || result.Bottlenecks[0].ID != "c" {
-		t.Errorf("bottlenecks were %+v", result.Bottlenecks)
-	}
-	if result.Bottlenecks[0].BlocksCount != 2 {
-		t.Errorf("c blocks %d beads, want 2", result.Bottlenecks[0].BlocksCount)
-	}
-}
-
-func TestCapacityLabelNarrowsTheSimulation(t *testing.T) {
-	s := openFixture(t)
-	all := call[capacityShape](t, s, "capacity", nil)
-	scoped := call[capacityShape](t, s, "capacity", map[string]any{"label": "infra"})
-
-	if scoped.OpenIssueCount >= all.OpenIssueCount {
-		t.Errorf("scoping to a label did not narrow the set: %d vs %d",
-			scoped.OpenIssueCount, all.OpenIssueCount)
-	}
-	if scoped.OpenIssueCount == 0 {
-		t.Error("the infra label matched nothing")
-	}
-}
-
-func TestLongestChainTerminatesOnACycle(t *testing.T) {
-	// The graph is not guaranteed acyclic — detecting cycles is one of bv's
-	// features — so the walk must not recurse forever.
-	blocks := map[string][]string{"a": {"b"}, "b": {"c"}, "c": {"a"}}
-	minutes := map[string]int{"a": 10, "b": 10, "c": 10}
-	chain := longestChain([]string{"a"}, blocks, minutes)
-	if len(chain) == 0 || len(chain) > 3 {
-		t.Errorf("cycle produced chain %v", chain)
-	}
-}
-
-func TestLongestChainPicksTheSlowestPath(t *testing.T) {
-	// Two paths from the root: a->b->c is three steps but cheap; a->d is one
-	// step and expensive. Capacity is asking how long the work takes, so the
-	// expensive path wins.
-	blocks := map[string][]string{"a": {"b", "d"}, "b": {"c"}}
-	minutes := map[string]int{"a": 10, "b": 10, "c": 10, "d": 500}
-	chain := longestChain([]string{"a"}, blocks, minutes)
-	if len(chain) != 2 || chain[1] != "d" {
-		t.Errorf("chose %v, want the expensive path a->d", chain)
 	}
 }
 

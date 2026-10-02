@@ -271,9 +271,9 @@ struct SprintTests {
         await store.loadCapacity()
         let four = store.capacity
 
-        #expect(four.effectiveMinutes <= one.effectiveMinutes)
+        #expect(four.estimatedDays <= one.estimatedDays)
         // The serial chain is the floor: no number of agents beats it.
-        #expect(four.effectiveMinutes >= four.serialMinutes)
+        #expect(four.estimatedDays * 60 * 8 >= Double(four.serialMinutes))
         #expect(one.serialMinutes + one.parallelMinutes == one.totalMinutes)
 
         await store.close()

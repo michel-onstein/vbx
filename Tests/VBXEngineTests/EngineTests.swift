@@ -236,6 +236,26 @@ func alertLabelFiltersAlerts() async throws {
     await engine.close()
 }
 
+@Test("A capacity label simulates only the beads carrying it, as bv's --capacity-label")
+func capacityLabelFiltersTheSimulation() async throws {
+    let engine = BeadsEngine()
+    _ = try await engine.open(path: fixturePath)
+
+    let all = try await engine.capacity(agents: 1)
+    let ui = try await engine.capacity(agents: 1, capacityLabel: "ui")
+
+    // Regression (vbx-ko1): `label` was capacity's filter and judged readiness
+    // inside it, so ui beads waiting on an engine bead looked ready.
+    #expect(ui.label == "ui")
+    #expect(ui.openIssueCount > 0 && ui.openIssueCount < all.openIssueCount)
+    #expect(ui.actionable.isEmpty)
+    #expect(all.actionable == ["vbx-12", "vbx-14", "vbx-3"])
+    let unknown = try await engine.capacity(agents: 1, capacityLabel: "no-such-label")
+    #expect(unknown.openIssueCount == 0 && unknown.criticalPath.isEmpty)
+
+    await engine.close()
+}
+
 @Test("Graph edges are returned for the dependency DAG")
 func graphEdges() async throws {
     let engine = BeadsEngine()

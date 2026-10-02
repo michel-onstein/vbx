@@ -3,7 +3,6 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
@@ -11,16 +10,15 @@ import (
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
 
-// Sprints, burndown and capacity.
+// Sprints and burndown. Capacity is in capacity.go.
 //
 // Ported from bv v0.25.2. `loader.LoadSprints` reads the sprint file and
 // `analysis.DetectAtRisk` flags at-risk sprint beads; both are bv's own,
 // called rather than copied. Everything else — the burndown maths
 // (`calculateBurndownAt`, `generateDailyBurndown`, `generateIdealLine`,
-// `generateIdealLineScoped`), the scope-change walk
-// (`computeSprintScopeChanges`, see sprint_scope.go) and the capacity
-// simulation — is still unexported in v0.25.2's `cmd/bv` (main.go and
-// robot_registry.go) and is reproduced here.
+// `generateIdealLineScoped`) and the scope-change walk
+// (`computeSprintScopeChanges`, see sprint_scope.go) — is still unexported in
+// v0.25.2's `cmd/bv` (main.go and robot_registry.go) and is reproduced here.
 
 // workspaceRoot is the directory sprints are loaded relative to.
 func (s *Session) workspaceRoot() string {
@@ -56,10 +54,6 @@ func (s *Session) sprintList() ([]byte, error) {
 type sprintRequest struct {
 	// ID names a sprint, or "current" for the active one.
 	ID string `json:"id"`
-	// Agents is how many workers the capacity simulation assumes.
-	Agents int `json:"agents"`
-	// Label narrows the capacity simulation to one label.
-	Label string `json:"label"`
 }
 
 func decodeSprintRequest(req []byte) (sprintRequest, error) {
@@ -392,213 +386,4 @@ func idealLineScoped(sprint *model.Sprint, total int, events []scopeChange) []mo
 		})
 	}
 	return points
-}
-
-// capacity simulates how long the open work takes with N agents.
-//
-// One deliberate divergence from bv: the dependency maps here are built from
-// *blocking* edges only. bv's capacity handler walks every dependency type,
-// so a parent-child link inflates its critical chain and therefore its serial
-// time. This repository's rule is that only `blocks` and the empty type block,
-// and applying it anywhere else while ignoring it here would be incoherent.
-func (s *Session) capacity(req []byte) ([]byte, error) {
-	r, err := decodeSprintRequest(req)
-	if err != nil {
-		return nil, err
-	}
-	agents := r.Agents
-	if agents <= 0 {
-		agents = 1
-	}
-
-	issues, _, _ := s.snapshot()
-	stats := analysis.NewAnalyzer(issues).Analyze()
-
-	targets := issues
-	if r.Label != "" {
-		filtered := make([]model.Issue, 0, len(issues))
-		for _, issue := range issues {
-			for _, label := range issue.Labels {
-				if label == r.Label {
-					filtered = append(filtered, issue)
-					break
-				}
-			}
-		}
-		targets = filtered
-	}
-
-	open := make([]model.Issue, 0, len(targets))
-	byID := make(map[string]model.Issue, len(targets))
-	for _, issue := range targets {
-		byID[issue.ID] = issue
-		if issue.Status != model.StatusClosed && issue.Status != model.StatusTombstone {
-			open = append(open, issue)
-		}
-	}
-
-	minutes := map[string]int{}
-	totalMinutes := 0
-	now := robotNow()
-	for _, issue := range open {
-		estimate, err := analysis.EstimateETAForIssue(targets, &stats, issue.ID, 1, now)
-		if err != nil {
-			continue
-		}
-		minutes[issue.ID] = estimate.EstimatedMinutes
-		totalMinutes += estimate.EstimatedMinutes
-	}
-
-	blocks, blockedBy := dependencyMaps(open, byID)
-
-	actionable := []string{}
-	for _, issue := range open {
-		if len(blockedBy[issue.ID]) == 0 {
-			actionable = append(actionable, issue.ID)
-		}
-	}
-	sort.Strings(actionable)
-
-	chain := longestChain(actionable, blocks, minutes)
-	serialMinutes := 0
-	for _, id := range chain {
-		serialMinutes += minutes[id]
-	}
-	parallelMinutes := totalMinutes - serialMinutes
-	if parallelMinutes < 0 {
-		parallelMinutes = 0
-	}
-
-	parallelPct := 0.0
-	if totalMinutes > 0 {
-		parallelPct = float64(parallelMinutes) / float64(totalMinutes) * 100
-	}
-	effectiveMinutes := serialMinutes + parallelMinutes/agents
-
-	return json.Marshal(map[string]any{
-		"agents":               agents,
-		"label":                r.Label,
-		"open_issue_count":     len(open),
-		"total_minutes":        totalMinutes,
-		"total_days":           float64(totalMinutes) / (60 * 8),
-		"serial_minutes":       serialMinutes,
-		"parallel_minutes":     parallelMinutes,
-		"parallelizable_pct":   parallelPct,
-		"effective_minutes":    effectiveMinutes,
-		"estimated_days":       float64(effectiveMinutes) / (60 * 8),
-		"critical_path_length": len(chain),
-		"critical_path":        chain,
-		"actionable_count":     len(actionable),
-		"actionable":           actionable,
-		"bottlenecks":          bottlenecks(open, blocks),
-	})
-}
-
-// dependencyMaps builds blocks/blocked-by over blocking edges only.
-func dependencyMaps(
-	open []model.Issue, byID map[string]model.Issue,
-) (blocks map[string][]string, blockedBy map[string][]string) {
-	blocks = map[string][]string{}
-	blockedBy = map[string][]string{}
-	present := map[string]bool{}
-	for _, issue := range open {
-		present[issue.ID] = true
-	}
-
-	for _, issue := range open {
-		for _, dep := range issue.Dependencies {
-			if dep == nil || !dep.Type.IsBlocking() {
-				continue
-			}
-			// Only edges between beads still in scope: a closed blocker is
-			// not holding anything up.
-			if !present[dep.DependsOnID] {
-				continue
-			}
-			blockedBy[issue.ID] = append(blockedBy[issue.ID], dep.DependsOnID)
-			blocks[dep.DependsOnID] = append(blocks[dep.DependsOnID], issue.ID)
-		}
-	}
-	return blocks, blockedBy
-}
-
-// longestChain finds the slowest dependent path, measured in minutes.
-//
-// bv picks the path with the most *steps*; measuring minutes instead answers
-// the question capacity is actually asking, which is how long the work takes.
-func longestChain(roots []string, blocks map[string][]string, minutes map[string]int) []string {
-	var best []string
-	bestCost := -1
-	visiting := map[string]bool{}
-
-	var walk func(id string, path []string, cost int)
-	walk = func(id string, path []string, cost int) {
-		// A cycle would otherwise recurse forever. The graph is not
-		// guaranteed acyclic — detecting cycles is one of bv's features.
-		if visiting[id] {
-			return
-		}
-		visiting[id] = true
-		defer func() { visiting[id] = false }()
-
-		path = append(path, id)
-		cost += minutes[id]
-
-		// Every node is a candidate, not just a leaf. Recording only at
-		// leaves loses the answer entirely when a cycle means no leaf is ever
-		// reached — the walk unwinds having found nothing.
-		if cost > bestCost {
-			bestCost = cost
-			best = append([]string(nil), path...)
-		}
-
-		for _, child := range blocks[id] {
-			walk(child, path, cost)
-		}
-	}
-
-	for _, root := range roots {
-		walk(root, nil, 0)
-	}
-	if best == nil {
-		best = []string{}
-	}
-	return best
-}
-
-// bottlenecks are the open beads holding up more than one other.
-func bottlenecks(open []model.Issue, blocks map[string][]string) []map[string]any {
-	type entry struct {
-		id    string
-		title string
-		count int
-		ids   []string
-	}
-	var found []entry
-	for _, issue := range open {
-		if len(blocks[issue.ID]) > 1 {
-			found = append(found, entry{
-				id: issue.ID, title: issue.Title,
-				count: len(blocks[issue.ID]), ids: blocks[issue.ID],
-			})
-		}
-	}
-	sort.SliceStable(found, func(i, j int) bool {
-		if found[i].count != found[j].count {
-			return found[i].count > found[j].count
-		}
-		// Ties break on id so the list is reproducible.
-		return found[i].id < found[j].id
-	})
-	if len(found) > 5 {
-		found = found[:5]
-	}
-
-	out := make([]map[string]any, 0, len(found))
-	for _, e := range found {
-		out = append(out, map[string]any{
-			"id": e.id, "title": e.title, "blocks_count": e.count, "blocks": e.ids,
-		})
-	}
-	return out
 }

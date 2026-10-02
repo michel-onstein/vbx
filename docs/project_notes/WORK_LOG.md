@@ -5,6 +5,19 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Capacity matches bv, with `--capacity-label` (vbx-ko1)
+
+`vbx-cli --robot-capacity` is now bv 0.25.2's capacity simulation: readiness
+from the full source, the critical path counted in steps, bv's payload and
+envelope. It gains `--capacity-label`, an exact-match filter on the beads
+simulated, and `--label` is now the global scope the other label-aware
+commands share. On the demo, unscoped: 3 actionable, critical path
+vbx-3 → vbx-4 → vbx-13, 85% parallelisable (was 5, vbx-12 → vbx-6, 72%). The
+app's Sprint capacity panel shows the same numbers. Parity with bv 0.25.2: 0
+differing commands before and after; the capacity skip became eight demo
+comparisons plus unscoped and `--agents 3` runs on every fixture (the
+`beads.db` hashes declared, as for suggest, graph and next). See BUGS.md.
+
 ## 2026-10-01 — Alerts filter and scope by label like bv (vbx-jnm)
 
 `vbx-cli --robot-alerts` gains bv 0.25.2's `--alert-label`, which keeps only
