@@ -1289,6 +1289,82 @@ def test_br_worktree_writes_land_in_the_main_checkout() -> None:
               (result.stdout + result.stderr).strip()[-300:])
 
 
+def test_beads_fix_from_a_worktree() -> None:
+    """`beads-check.py --fix` fixes the export it checked, wherever it runs.
+
+    Regression (vbx-p00): `--fix` called a bare `br update`, which from a
+    worktree resolves to the main checkout's workspace. The shared tree's
+    export was rewritten, the worktree's kept its wrong stamps, and the check
+    went on failing straight after reporting a fix.
+    """
+    print("\nbeads-check --fix from a worktree")
+    br = shutil.which("br")
+    if not br:
+        print("  skip  br is not on the PATH")
+        return
+
+    def run(args: list[str], cwd: Path, env: dict[str, str] | None = None
+            ) -> subprocess.CompletedProcess[str]:
+        base = {k: v for k, v in os.environ.items() if k != "BEADS_DB"}
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True,
+                              env={**base, **GIT_ENV, **(env or {})})
+
+    with tempfile.TemporaryDirectory() as raw:
+        repo = Path(raw).resolve() / "repo"
+        (repo / "scripts").mkdir(parents=True)
+        (repo / "scripts" / BEADS_CHECK.name).write_bytes(BEADS_CHECK.read_bytes())
+        run(["git", "init", "-q", "-b", "main"], repo)
+        run([br, "init", "--prefix", "tst"], repo)
+        created = run([br, "create", "--title", "probe", "--json"], repo)
+        payload = json.loads(created.stdout)
+        issue = (payload[0] if isinstance(payload, list) else payload)["id"]
+        run([br, "sync", "--flush-only"], repo)
+        main_jsonl = repo / ".beads" / "issues.jsonl"
+        # Stamp the main checkout correctly, so only the worktree is wrong.
+        fixed = run([sys.executable, "scripts/" + BEADS_CHECK.name, "--fix"], repo)
+        check("--fix in the main checkout succeeds", fixed.returncode == 0,
+              (fixed.stdout + fixed.stderr).strip()[-300:])
+        run(["git", "add", "-A"], repo)
+        run(["git", "commit", "-q", "-m", "init"], repo)
+
+        topic = repo / ".claude" / "worktrees" / "topic"
+        run(["git", "worktree", "add", "-q", str(topic), "-b", "topic"], repo)
+        topic_jsonl = topic / ".beads" / "issues.jsonl"
+        rows = [json.loads(line) for line in topic_jsonl.read_text().splitlines() if line]
+        for row in rows:
+            row["source_repo"] = "some-topic"
+            row["source_repo_path"] = "/gone/some-topic"
+        topic_jsonl.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        main_before = main_jsonl.read_bytes()
+
+        script = [sys.executable, "scripts/" + BEADS_CHECK.name]
+        result = run([*script, "--fix"], topic)
+        output = (result.stdout + result.stderr).strip()
+        check("--fix from a worktree exits 0", result.returncode == 0, output[-400:])
+        check("...names the database it wrote through",
+              str(topic / ".beads" / "beads.db") in result.stdout, output[-400:])
+        check("...fixes the worktree's export",
+              jsonl_field(topic_jsonl, issue, "source_repo") == "repo",
+              str(jsonl_field(topic_jsonl, issue, "source_repo")))
+        check("...and leaves the main checkout's byte-identical",
+              main_jsonl.read_bytes() == main_before)
+        recheck = run(script, topic)
+        check("...so the check passes afterwards", recheck.returncode == 0,
+              (recheck.stdout + recheck.stderr).strip()[-300:])
+
+        # A BEADS_DB that is not this export's database is honoured, and the
+        # re-read catches that the fix landed somewhere else.
+        topic_jsonl.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        elsewhere = {"BEADS_DB": str(repo / ".beads" / "beads.db")}
+        result = run([*script, "--fix"], topic, elsewhere)
+        output = (result.stdout + result.stderr).strip()
+        check("a fix that lands elsewhere fails", result.returncode == 1, output[-400:])
+        check("...naming BEADS_DB as the source", "from BEADS_DB" in result.stdout,
+              output[-400:])
+        check("...and saying the stamps did not land", "still carry" in result.stderr,
+              output[-400:])
+
+
 # Every file `br` writes beside its database. Names are the ones observed on
 # disk — not paraphrased from a glob — so a rule that stops matching a real
 # name fails here.
@@ -2060,6 +2136,7 @@ def main() -> int:
     test_docs_html_check()
     test_beads_source_repo_check()
     test_br_worktree_writes_land_in_the_main_checkout()
+    test_beads_fix_from_a_worktree()
     test_beads_side_files_are_ignored()
     test_bump_regenerates_the_html()
     test_no_v_prefix()

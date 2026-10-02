@@ -27,10 +27,13 @@ Until then a failing check in the verify block turns "remember to run
 mess — into something the build says out loud, with `--fix` as the one-line
 answer.
 
-From a worktree, run `--fix` with `BEADS_DB` pointing at the worktree's
-`.beads/beads.db`: an unpinned `br update` resolves to the main checkout's
-workspace and rewrites *its* export, leaving the one this script reads as it
-was.
+`--fix` pins every `br` call to the `.beads/beads.db` beside the export it
+checked, with `--db`. Unpinned, `br` resolves its workspace through git's
+common directory — the main checkout's — so from a worktree the fix used to
+rewrite the shared tree's export and leave the one this script reads as it
+was, failing the check it had just claimed to fix. An explicit `BEADS_DB` is
+honoured (and named), and either way the export is re-read afterwards: a fix
+that did not land in the file that was checked fails out loud.
 
 The canonical name and path come from git rather than from a constant: the
 common git directory is shared by every worktree and its parent is the primary
@@ -39,6 +42,7 @@ checkout, so this is right whichever worktree it runs in.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -53,6 +57,18 @@ def canonical() -> tuple[str, str]:
         cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
     primary = Path(common).parent
     return primary.name, str(primary)
+
+
+def database(jsonl: Path) -> tuple[Path, str]:
+    """The database `--fix` writes through, and why that one.
+
+    The one beside the checked export, unless `BEADS_DB` says otherwise — in
+    which case it is honoured, and the post-fix re-read catches a mismatch.
+    """
+    explicit = os.environ.get("BEADS_DB")
+    if explicit:
+        return Path(explicit), "from BEADS_DB"
+    return jsonl.parent / "beads.db", "beside the checked export"
 
 
 def records(path: Path) -> list[dict]:
@@ -106,13 +122,20 @@ def main() -> int:
             print(f"  {len(ids):>3}  {repo}: {shown}{more}", file=sys.stderr)
         return 1
 
+    db, why = database(jsonl)
+    print(f"==> fixing through {db} ({why})")
+    # Never unpinned: from a worktree a bare `br` writes the main checkout.
+    br = ["br", "--db", str(db)]
     failed: list[str] = []
     for issue, _, _ in wrong:
         result = subprocess.run(
-            ["br", "update", issue, "--source-repo", name, "--source-repo-path", path],
+            [*br, "update", issue, "--source-repo", name, "--source-repo-path", path],
             cwd=ROOT, capture_output=True, text=True)
         if result.returncode != 0:
             failed.append(f"{issue}: {(result.stderr or result.stdout).strip()}")
+    # `br` exports eagerly, so this is normally a no-op; it is here so the
+    # re-read below cannot race a deferred flush.
+    subprocess.run([*br, "sync", "--flush-only"], cwd=ROOT, capture_output=True, text=True)
     print(f"==> rewrote {len(wrong) - len(failed)} of {len(wrong)} records to {name}")
     if failed:
         # A tombstone, or a record `br` will not update, is a real answer rather
@@ -121,7 +144,20 @@ def main() -> int:
         for line in failed:
             print(f"  {line}", file=sys.stderr)
         return 1
-    print("Now: br sync --flush-only, then check the JSONL diff is per-record, not a rewrite.")
+
+    # `br` exiting 0 says it wrote *somewhere*; only the file that was checked
+    # says it wrote here.
+    attempted = {issue for issue, _, _ in wrong}
+    still = [row for row in offenders(records(jsonl), name, path) if row[0] in attempted]
+    if still:
+        print(
+            f"error: br reported success but {len(still)} of {len(wrong)} records in "
+            f"{jsonl} still carry another stamp — {db} is not this export's database",
+            file=sys.stderr)
+        for issue, repo, _ in still[:6]:
+            print(f"  {issue}: {repo or '<unset>'}", file=sys.stderr)
+        return 1
+    print(f"==> confirmed in {jsonl}; check the diff is per-record, not a rewrite.")
     return 0
 
 

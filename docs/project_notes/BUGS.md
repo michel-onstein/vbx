@@ -4,6 +4,32 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — `beads-check.py --fix` rewrote the main checkout from a worktree
+
+**Symptom:** run from `.claude/worktrees/<topic>`, `--fix` reported "rewrote N
+of N records", yet the worktree's `.beads/issues.jsonl` kept its wrong stamps
+and the check went on failing; the shared main checkout was left holding an
+uncommitted change to its export. (vbx-p00)
+
+**Cause:** `--fix` called a bare `br update`. `br` resolves its workspace
+through git's common dir, so from a worktree it wrote the main checkout's
+database and export — the same unpinned-write trap as the entry below. The
+script trusted `br`'s exit code and never looked at the file it had checked.
+
+**Fix:** `--fix` passes `--db` to every `br` call: the `beads.db` beside the
+checked export, or `BEADS_DB` when that is set, and says which it used. It then
+re-reads the export and exits 1 if any record it rewrote still carries a foreign
+stamp, so a fix that landed elsewhere is loud. The CLAUDE.md `source_repo`
+entry drops its "set `BEADS_DB` from a worktree" caveat.
+
+**Regression test:** `test_beads_fix_from_a_worktree` in
+`scripts/test-packaging.py` — a temporary repository with a linked worktree
+whose export is mis-stamped; `--fix` from the worktree fixes the worktree's
+export, names its database, leaves the main checkout's export byte-identical,
+and the check then passes; with `BEADS_DB` pointing at the main checkout it
+exits 1 saying the stamps did not land. Fails on the old script; skips, saying
+so, when `br` is not on the PATH.
+
 ## 2026-10-01 — "`br update --description-file` is a silent no-op" was a worktree write
 
 **Symptom:** CLAUDE.md carried a rule, measured on `vbx-g3q`, that
