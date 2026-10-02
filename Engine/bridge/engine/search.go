@@ -203,11 +203,18 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 	}
 	// The hybrid metrics are the whole workspace's, as bv's are: a scope
 	// narrows what may be returned, not the graph that ranks it.
-	scored, err := hybridResults(results, issues, weights, exactID, limit, titles)
+	//
+	// Recency is measured from robotNow(), once for the whole ranking, as bv's
+	// --robot-search does: SOURCE_DATE_EPOCH pins it, and without it every
+	// candidate is still scored against the same instant. bv echoes that
+	// instant as ranking_time, in UTC, in hybrid mode only.
+	rankingTime := robotNow().UTC()
+	scored, err := hybridResults(results, issues, weights, exactID, limit, titles, rankingTime)
 	if err != nil {
 		return nil, err
 	}
 	payload["results"] = scored
+	payload["ranking_time"] = rankingTime
 	payload["preset"] = preset
 	payload["weights"] = weights
 	return s.withEnvelope(payload, v.dataHash, v.scope)
@@ -284,16 +291,19 @@ func textResults(results []search.SearchResult, limit int, titles map[string]str
 }
 
 // hybridResults re-scores candidates with graph metrics. exactID is the bead
-// the index marked as the query's exact-id match, or empty.
+// the index marked as the query's exact-id match, or empty. now is the instant
+// recency is measured from — never the scorer's own wall-clock read, which is
+// what bv's NewHybridScorer would take.
 func hybridResults(
 	candidates []search.SearchResult, issues []model.Issue,
 	weights search.Weights, exactID string, limit int, titles map[string]string,
+	now time.Time,
 ) ([]map[string]any, error) {
 	cache := search.NewMetricsCache(search.NewAnalyzerMetricsLoader(issues))
 	if err := cache.Refresh(); err != nil {
 		return nil, fmt.Errorf("loading metrics for hybrid ranking: %w", err)
 	}
-	scorer := search.NewHybridScorer(weights, cache)
+	scorer := search.NewHybridScorerAt(weights, cache, now)
 
 	scored := make([]search.HybridScore, 0, len(candidates))
 	for _, candidate := range candidates {
