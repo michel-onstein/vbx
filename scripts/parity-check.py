@@ -366,6 +366,9 @@ SPRINT_OMITZERO = {"created_at", "updated_at"}
 #
 # What a search comparison compares: the ranking and the request it echoes.
 SEARCH_KEYS = ("query", "mode", "limit", "min_score", "results")
+# What a hybrid search adds: the weights it ranked with and the instant its
+# recency component is measured from (vbx-rgw).
+HYBRID_SEARCH_KEYS = ("preset", "weights", "ranking_time")
 NOT_READY = "needs-design"
 # bv's envelope keys that say what a payload was computed over (vbx-shz). A
 # command whose vbx payload is the analysis result itself, with the envelope
@@ -803,9 +806,8 @@ COMPARISONS = [
     # bead, first, even outside the text top-K, and --search-min-score drops
     # candidates below a raw-similarity threshold — exact ids too. Compared on
     # the ranking and what echoes it (SEARCH_KEYS), not the envelope, whose
-    # index statistics and hashes are bv's alone. Text mode only: hybrid
-    # recency reads the wall clock in vbx (vbx-48y), so its scores differ for
-    # a reason that is not search's.
+    # index statistics and hashes are bv's alone. Text mode here; hybrid is
+    # compared below.
     {"vbx": "robot-search", "bv": "robot-search", "name": "robot-search " + " ".join(arg or "''" for arg in args),
      "vbx_args": ["--search", query, "--search-limit", limit, *rest],
      "bv_args": ["--search", query, "--search-limit", limit, *rest],
@@ -828,6 +830,35 @@ COMPARISONS = [
         ("search", "case-1", "2", []),
         ("search", "CASE-1", "2", []),
         ("search", "tax-70", "3", []),
+    )
+    for args in [[query, limit, *rest]]
+] + [
+    # Hybrid search (vbx-rgw): the text candidates re-scored by bv's own
+    # scorer, compared in full — every component score, recency included,
+    # the resolved preset and weights, and ranking_time, the instant recency
+    # is measured from. bv takes it from SOURCE_DATE_EPOCH (robotNow, through
+    # search.NewHybridScorerAt), and so does vbx, so nothing here is declared.
+    # The id queries are the ones that matter: re-ranking can bury the bead
+    # whose id was typed, and both promote it back to the front.
+    {"vbx": "robot-search", "bv": "robot-search",
+     "name": "robot-search hybrid " + " ".join(arg or "''" for arg in args),
+     "vbx_args": ["--search", query, "--search-limit", limit, "--search-mode", "hybrid", *rest],
+     "bv_args": ["--search", query, "--search-limit", limit, "--search-mode", "hybrid", *rest],
+     "keys": (*SEARCH_KEYS, *HYBRID_SEARCH_KEYS, *scope_keys), "only": {fixture}}
+    for fixture, query, limit, rest, scope_keys in (
+        ("demo", "graph", "5", [], ()),
+        ("search", "tax 7", "3", [], ()),
+        ("search", "tax-7", "3", [], ()),
+        ("search", "TAX-7", "3", [], ()),
+        ("search", "tax-7", "1", [], ()),
+        ("search", "tax-7", "3", ["--search-min-score", "0.2"], ()),
+        ("search", "case-1", "2", [], ()),
+        ("search", "tax-70", "3", [], ()),
+        ("search", "tax-7", "3", ["--search-preset", "bug-hunting"], ()),
+        ("search", "tax-7", "3", ["--search-preset", "sprint-planning"], ()),
+        ("search", "tax-7", "3", ["--search-preset", "impact-first"], ()),
+        ("search", "tax-7", "3", ["--search-preset", "text-only"], ()),
+        ("search", "tax-7", "3", ["--label", "tax"], ("scope", "scope_hash", "data_hash")),
     )
     for args in [[query, limit, *rest]]
 ] + [

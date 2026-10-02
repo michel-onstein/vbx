@@ -5,6 +5,19 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Hybrid search is compared with bv in full (vbx-rgw)
+
+Hybrid recency was the engine's own wall-clock read (`NewHybridScorer`), not
+an unpinnable term in bv: bv 0.25.2 scores with
+`NewHybridScorerAt(..., robotNow())` and echoes `ranking_time`. vbx now does
+the same, so `SOURCE_DATE_EPOCH` pins hybrid search too; the app, with no
+epoch set, still uses the wall clock. `parity-check.py` gains 13 hybrid
+`--robot-search` runs (demo and `Fixtures/search`: the buried exact id and its
+control, an absent id, a threshold, every non-default preset, a label scope),
+comparing results, component scores, preset, weights and `ranking_time` — all
+match, nothing declared. Go regression test and harness tests added.
+semver:patch. Parity: 0 differing commands before and after.
+
 ## 2026-10-02 — A workspace session reports the workspace kind (vbx-j7r)
 
 Swift's `SourceKind` gains a `workspace` case and becomes an open enum

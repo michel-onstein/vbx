@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"math"
+	"strconv"
 	"testing"
 )
 
@@ -116,6 +118,63 @@ func TestHybridIsDeterministic(t *testing.T) {
 			t.Errorf("ordering is unstable at %d: %q vs %q",
 				i, first.Results[i].IssueID, second.Results[i].IssueID)
 		}
+	}
+}
+
+// Hybrid recency is measured from SOURCE_DATE_EPOCH, as bv's --robot-search
+// measures it, and the instant is echoed as ranking_time (vbx-rgw). The scorer
+// used to read the wall clock itself, so two pinned clocks thirty days apart
+// gave the same recency — and bv's, pinned, never matched.
+func TestHybridRecencyFollowsThePinnedClock(t *testing.T) {
+	type pinned struct {
+		RankingTime string `json:"ranking_time"`
+		Results     []struct {
+			IssueID         string             `json:"issue_id"`
+			ComponentScores map[string]float64 `json:"component_scores"`
+		} `json:"results"`
+	}
+	const at = int64(1788000000) // 2026-08-29T10:40:00Z, after every fixture bead
+	run := func(epoch int64) pinned {
+		t.Setenv("SOURCE_DATE_EPOCH", strconv.FormatInt(epoch, 10))
+		return call[pinned](t, openFixture(t), "search", map[string]any{
+			"query": "core", "limit": 5, "mode": "hybrid",
+		})
+	}
+	now := run(at)
+	later := run(at + 30*24*60*60)
+
+	if now.RankingTime != "2026-08-29T10:40:00Z" {
+		t.Errorf("ranking_time is %q, want the pinned instant in UTC", now.RankingTime)
+	}
+	if later.RankingTime != "2026-09-28T10:40:00Z" {
+		t.Errorf("ranking_time is %q thirty days on", later.RankingTime)
+	}
+	if len(now.Results) == 0 || len(now.Results) != len(later.Results) {
+		t.Fatalf("result counts %d and %d", len(now.Results), len(later.Results))
+	}
+	// Recency is exp(-days/30), so thirty more days scales it by exactly 1/e.
+	laterByID := make(map[string]float64, len(later.Results))
+	for _, entry := range later.Results {
+		laterByID[entry.IssueID] = entry.ComponentScores["recency"]
+	}
+	for _, entry := range now.Results {
+		recency, ok := entry.ComponentScores["recency"]
+		if !ok || recency <= 0 || recency >= 1 {
+			t.Fatalf("%s: recency %v at the pinned clock", entry.IssueID, recency)
+		}
+		want := recency / math.E
+		if got := laterByID[entry.IssueID]; math.Abs(got-want) > 1e-12 {
+			t.Errorf("%s: recency %v thirty days on, want %v — the clock is not the pinned one",
+				entry.IssueID, got, want)
+		}
+	}
+}
+
+// Text mode ranks nothing by time, and bv omits ranking_time there.
+func TestTextSearchCarriesNoRankingTime(t *testing.T) {
+	result := call[map[string]any](t, openFixture(t), "search", map[string]any{"query": "core"})
+	if _, ok := result["ranking_time"]; ok {
+		t.Errorf("text search carries ranking_time %v", result["ranking_time"])
 	}
 }
 

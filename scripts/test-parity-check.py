@@ -946,6 +946,10 @@ def test_search(parity) -> None:
               if {"--label", "--recipe"} & set(entry["vbx_args"])]
     # The load_stats run (vbx-dv5) compares that envelope key and nothing else.
     compared = [entry for entry in compared if not entry["name"].endswith(" load_stats")]
+    # Hybrid runs (vbx-rgw) compare more keys, and are checked below.
+    hybrid = [entry for entry in compared if "hybrid" in entry["vbx_args"]]
+    compared = [entry for entry in compared if entry not in hybrid]
+    scoped = [entry for entry in scoped if entry not in hybrid]
     check("search compares the ranking and its echo, not the envelope",
           all(entry.get("keys") == parity.SEARCH_KEYS
               for entry in compared if entry not in scoped)
@@ -977,6 +981,33 @@ def test_search(parity) -> None:
                 if entry.get("rejects") and "--search-min-score" in entry["bv_args"]}
     check("out-of-range and unparseable thresholds are compared as rejections",
           {"2", "-1.5", "abc", "NaN"} <= rejected, str(rejected))
+
+    # Hybrid (vbx-rgw): recency is pinned to SOURCE_DATE_EPOCH on both sides,
+    # so the whole ranking is compared — component scores, the weights and
+    # the instant recency is measured from — and nothing about it is declared.
+    check("hybrid search is compared on bv's flag, both sides alike",
+          hybrid != [] and all(
+              entry["vbx_args"] == entry["bv_args"]
+              and entry["bv_args"][entry["bv_args"].index("--search-mode") + 1] == "hybrid"
+              for entry in hybrid), str([entry["name"] for entry in hybrid]))
+    check("hybrid compares the ranking, its weights and its ranking_time",
+          {"preset", "weights", "ranking_time"} == set(parity.HYBRID_SEARCH_KEYS)
+          and all(set(parity.SEARCH_KEYS) | set(parity.HYBRID_SEARCH_KEYS)
+                  <= set(entry["keys"]) for entry in hybrid))
+    hybrid_runs = {(next(iter(entry["only"])), entry["bv_args"][1]) for entry in hybrid}
+    check("hybrid covers the buried exact id, its control and an absent id",
+          {("search", "tax-7"), ("search", "tax 7"), ("search", "tax-70")} <= hybrid_runs,
+          str(hybrid_runs))
+    presets = {entry["bv_args"][entry["bv_args"].index("--search-preset") + 1]
+               for entry in hybrid if "--search-preset" in entry["bv_args"]}
+    check("hybrid is compared under every non-default preset",
+          {"bug-hunting", "sprint-planning", "impact-first", "text-only"} <= presets, str(presets))
+    check("a scoped hybrid search compares its scope too",
+          any("--label" in entry["bv_args"] and "scope_hash" in entry["keys"] for entry in hybrid))
+    declared_paths = [path for declarations in parity.DECLARED_DIFFERENCES.values()
+                      for (command, path) in declarations if command.startswith("robot-search")]
+    check("no search difference is declared — recency is pinnable on both sides",
+          declared_paths == [], str(declared_paths))
 
     fixture = next(f for f in parity.FIXTURES if f["name"] == "search")
     check("the search fixture runs only what names it", fixture.get("only_named") is True)

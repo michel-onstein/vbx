@@ -4,6 +4,32 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — Hybrid search's recency read the wall clock, not SOURCE_DATE_EPOCH
+
+**Symptom:** `vbx-cli --robot-search --search-mode hybrid` disagreed with bv
+0.25.2 on every result's `component_scores.recency`, and so on `score`, under
+the same `SOURCE_DATE_EPOCH`; vbx also omitted bv's `ranking_time`. The
+vbx-52c parity pass therefore compared search in text mode only. (vbx-rgw.)
+
+**Cause:** the engine built its scorer with `search.NewHybridScorer`, which
+calls `time.Now()` itself. bv's `--robot-search` uses
+`search.NewHybridScorerAt(weights, cache, robotNow())`, so its recency is
+measured from the pinned clock, and echoes that instant as `ranking_time`. The
+difference was vbx's, not an unpinnable term on bv's side.
+
+**Fix:** `searchIssues` takes `robotNow().UTC()` once per hybrid ranking,
+passes it to `NewHybridScorerAt`, and returns it as `ranking_time` (hybrid
+only, as bv). The app sets no `SOURCE_DATE_EPOCH`, so it still ranks against
+the wall clock.
+
+**Regression tests:** `TestHybridRecencyFollowsThePinnedClock` pins two clocks
+thirty days apart and asserts each bead's recency falls by exactly 1/e and
+`ranking_time` is the pinned instant — it fails against `NewHybridScorer`.
+`TestTextSearchCarriesNoRankingTime` keeps text mode without it.
+`parity-check.py` now compares hybrid search in full — 13 runs over
+`Fixtures/search` and the demo, every preset, the buried exact id and a label
+scope — with nothing declared, and `test-parity-check.py` asserts that.
+
 ## 2026-10-02 — A multi-repository session said it was JSONL, titled ".bv"
 
 **Symptom:** Opening a `.bv/workspace.yaml` showed **JSONL** in the status
