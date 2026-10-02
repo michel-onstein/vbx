@@ -4,6 +4,37 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — Alert label filtering kept every alert
+
+**Symptom:** on `Fixtures/demo`, `vbx-cli --robot-alerts --label X` returned
+all 18 alerts for `engine`, `ui` and an unknown label alike, where bv 0.25.2's
+`--alert-label` returns 6, 9 and 0, and its global `--label` 11, 12 and 0.
+(vbx-jnm)
+
+**Cause:** two. vbx's `alertMatchesLabel` kept every alert carrying no
+`label`, and an issue-level alert's labels live in `labels`, which it never
+read — so nothing was ever filtered out. And vbx-cli sent `--label` to that
+filter, where bv has two flags: `--alert-label` filters the alerts, and the
+global `--label` scopes the issue set they are computed over.
+
+**Fix:** `alertMatchesLabel` is bv's rule (trimmed, case-blind; an exact
+match on the issue's `labels` or the alert's `label`, else a substring of a
+detail line; otherwise dropped). The engine request takes `alert_label` for the
+filter and `label` for the scope, computed over `Session.view` with the
+calculator borrowing the view's analyzer through `ReuseAnalyzer`, as bv's
+does — without the borrow a scoped run still raised a cascade and a high-impact
+unblock for vbx-3, because a fresh analyzer treats the label's dependency
+neighbours as candidates too. vbx-cli gains `--alert-label`; `--label` on
+`--robot-alerts` is now the scope, like every other label-aware command.
+`BeadsEngine.alerts(label:)` became `alerts(alertLabel:)`.
+
+**Regression test:** `TestAlertLabelsMatchBV` and
+`TestAlertMatchesLabelDropsWorkspaceWideAlerts` in `alerts_label_test.go`
+(pinned to bv 0.25.2's alerts for each label, scoped and filtered), and the
+`--robot-alerts --label` / `--alert-label` runs in `parity-check.py`.
+
+---
+
 ## 2026-10-01 — `--label` scoped the graph and nothing else
 
 **Symptom:** on `Fixtures/demo`, `vbx-cli --robot-triage --label engine`

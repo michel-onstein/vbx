@@ -54,12 +54,14 @@ stops firing fails the run.
 bv's `--label` is a global scope — the label's subgraph, its beads plus their
 direct dependency neighbours — so the harness also runs label-scoped commands
 over the demo. The engine applies that scope in one place (`Session.view`,
-`scope.go`), and graph, triage, plan, priority, next, suggest and insights all
-read it, so each is compared with a known label (`engine`) and an unknown one
-(vbx-4cz); insights compares its `full_stats`, since bv shapes its top level
-differently. The two that do not match yet are listed as label-scoped skips,
-each naming its bead: `--label` on alerts keeps every alert (vbx-jnm), and
-`--robot-capacity` is not compared at all yet (vbx-ko1).
+`scope.go`), and graph, triage, plan, priority, next, suggest, insights and
+alerts all read it, so each is compared with a known label (`engine`) and an
+unknown one (vbx-4cz, vbx-jnm); insights compares its `full_stats`, since bv
+shapes its top level differently. Alerts also take bv's separate
+`--alert-label` filter, which keeps only the alerts naming the label and is
+compared with `engine`, `ui` and an unknown label (vbx-jnm). The one that does
+not match yet is a label-scoped skip naming its bead: `--robot-capacity` is not
+compared at all yet (vbx-ko1).
 
 The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.
@@ -244,7 +246,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-forecast`, `--robot-capacity` | ✓ | Inspector forecast, sprint scenarios | 6 |
 | `--robot-burndown`, `--robot-sprint-list`, `--robot-sprint-show` | ✓ | Sprint dashboard | 6 |
 | `--robot-label-health`, `--robot-label-flow`, `--robot-label-attention` | ✓ | Label dashboard, Flow matrix, Attention | 6 |
-| `--robot-alerts` (+ severity, type, label) | ✓ | Alerts panel | 6 |
+| `--robot-alerts` (+ severity, alert-type, alert-label, label scope) | ✓ | Alerts panel | 6 |
 | `--robot-drift`, `--check-drift`, baseline save/show | ✓ | Alerts + baseline menu | 6 |
 | `--robot-diff`, `--diff-since`, `--as-of` | ✓ | Time-travel mode | 7 |
 | `--robot-graph` (+ format, root, depth) | ✓ | Graph export menu | 6 |

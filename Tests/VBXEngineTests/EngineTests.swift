@@ -217,6 +217,25 @@ func labelScopedTriageAndPlan() async throws {
     await engine.close()
 }
 
+@Test("An alert label keeps only the alerts on beads carrying it, as bv's --alert-label")
+func alertLabelFiltersAlerts() async throws {
+    let engine = BeadsEngine()
+    _ = try await engine.open(path: fixturePath)
+
+    let all = try await engine.alerts()
+    let engineAlerts = try await engine.alerts(alertLabel: "engine")
+    let labelled = Set(try await engine.issues().filter { $0.labels.contains("engine") }.map(\.id))
+
+    // Regression (vbx-jnm): every alert was kept whatever the label.
+    #expect(!engineAlerts.alerts.isEmpty)
+    #expect(engineAlerts.alerts.count < all.alerts.count)
+    #expect(engineAlerts.alerts.allSatisfy { labelled.contains($0.issueID) })
+    #expect(try await engine.alerts(alertLabel: "no-such-label").alerts.isEmpty)
+    #expect(try await engine.alerts(alertLabel: "").alerts.count == all.alerts.count)
+
+    await engine.close()
+}
+
 @Test("Graph edges are returned for the dependency DAG")
 func graphEdges() async throws {
     let engine = BeadsEngine()

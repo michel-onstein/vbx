@@ -275,15 +275,24 @@ COMPARISONS = [
         ("robot-next", {}),
         ("robot-suggest", {}),
         ("robot-insights", {"bv_path": "full_stats", "vbx_path": "full_stats"}),
+        ("robot-alerts", {"bv_path": "alerts", "vbx_path": "alerts"}),
     )
     for label in ("engine", "no-such-label")
+] + [
+    # bv's --alert-label is a filter on the alerts, separate from the --label
+    # scope: it keeps the alerts naming the label and drops workspace-wide ones,
+    # so an unknown label returns none (vbx-jnm). Two demo labels, because
+    # `engine` and `ui` keep different alert types, and an unknown one.
+    {"vbx": "robot-alerts", "bv": "robot-alerts", "name": f"robot-alerts --alert-label {label}",
+     "vbx_args": ["--alert-label", label], "bv_args": ["--alert-label", label],
+     "only": {"demo"}, "bv_path": "alerts", "vbx_path": "alerts"}
+    for label in ("engine", "ui", "no-such-label")
 ] + [
     # Label-scoped commands that do not match yet, each a skip naming the bead
     # that owns it — a coverage gap on the report, never a pass.
     {"vbx": command, "bv": command, "name": f"{command} --label", "compare": False,
      "note": note}
     for command, note in (
-        ("robot-alerts", "vbx's --label keeps every alert, unlike bv's --alert-label (vbx-jnm)"),
         ("robot-capacity", "differs from bv's --capacity-label, scoped or not (vbx-ko1)"),
     )
 ]
