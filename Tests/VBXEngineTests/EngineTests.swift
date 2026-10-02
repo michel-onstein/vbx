@@ -177,6 +177,31 @@ func feedbackCommandSkipsDiscovery() async throws {
     await engine.close()
 }
 
+@Test("vbx-cli reads feedback from the working directory's .beads; the app from the root's")
+func feedbackFromPathCrossesTheBridge() async throws {
+    // vbx-15s: below a workspace root, bv's robot commands read the folder's
+    // own .beads/feedback.json, whichever graph they answer over. The app
+    // keeps the root's, which it both shows and writes.
+    let root = try copiedWorkspace()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let notes = root.appendingPathComponent("notes")
+    try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: false)
+    let config = root.appendingPathComponent(".bv/workspace.yaml").path
+
+    let engine = BeadsEngine()
+    for workspace in [nil, config] {
+        _ = try await engine.open(
+            path: notes.path, skipPhase2: true, workspace: workspace, feedbackFromPath: true)
+        let cli = try await engine.triageFeedback().path
+        #expect(cli.hasSuffix("/notes/.beads/feedback.json"), "--workspace \(workspace ?? "none"): \(cli)")
+
+        _ = try await engine.open(path: notes.path, skipPhase2: true, workspace: workspace)
+        let app = try await engine.triageFeedback().path
+        #expect(app.hasSuffix("/.beads/feedback.json") && !app.contains("/notes/"), "\(app)")
+    }
+    await engine.close()
+}
+
 @Test("Issues cross the bridge with their fields intact")
 func issuesDecode() async throws {
     let engine = BeadsEngine()

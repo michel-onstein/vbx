@@ -1507,3 +1507,31 @@ bv bug: the feedback handler predates workspace discovery and was never moved
 after it. vbx follows bv here, as the parity rule requires, and does not fix
 it. Triage's `feedback` block from a folder below a workspace root differs
 the same way and is tracked separately (vbx-15s).
+
+**Robot commands read feedback from the working directory too (vbx-15s,
+2026-10-02).** bv's triage, next and priority read `feedback.json` through
+`loader.GetBeadsDir("")` (`cmd/bv/main.go` ~3825 for the block,
+`loadRobotFeedback` for the weights), whichever graph they answer over. From a
+folder below a workspace root that is the folder's own `.beads`, which is
+absent. So bv reports no `feedback` block and scores with the default
+weights, with `--workspace` or without, even when the root's `.beads` holds
+enough verdicts to apply. `vbx-cli` matches it: every robot command opens the
+engine with `OpenConfig.FeedbackFromPath`, which resolves the feedback
+directory as bv does for `--path`, the working directory, rather than from
+the source loaded.
+
+**The app keeps its own rule, and this split is deliberate.** The app has no
+working directory. It opens a workspace by its configuration, and reads and
+writes feedback in the root's `.beads` (`feedbackDir`). Applying bv's rule
+there would change nothing for the app, since the root is its only
+"working directory". But it would make the path the app writes a verdict to
+depend on how the session was opened. The rule that matters for the app is
+that Accept / Not now is followed by a triage that shows the verdict. That
+holds only while the directory it reads is the one it writes. So
+`FeedbackFromPath` is off in the app, and both the read and the write go
+through `sessionFeedbackDir`, one function for both. A `vbx-cli` run from a
+folder below a workspace root therefore does not see verdicts the app
+recorded at the root, exactly as bv does not. Parity-checked over the
+`discovery` fixture, whose root now carries `Fixtures/feedback`'s four
+verdicts: triage, next and priority from the root, from a member and from
+`notes/`, with and without `--workspace`.

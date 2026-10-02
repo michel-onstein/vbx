@@ -5,6 +5,21 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Triage, next and priority read feedback from the working directory, as bv's do (vbx-15s)
+
+bv 0.25.2 reads `feedback.json` for triage, next and priority from the
+working directory's `.beads`, whichever graph it answers over. From a folder
+below a workspace root, `vbx-cli` read the root's file instead. It reported
+that file's block and applied its weights where bv reports nothing. Robot
+commands now open the engine with `OpenConfig.FeedbackFromPath`, which
+resolves the directory as bv does. The app keeps the root's file, the one it
+writes verdicts to, so Accept / Not now still shows its effect. The ADR-026
+addendum records that split. The parity `discovery` fixture's root now
+carries `Fixtures/feedback`'s verdicts, and `--robot-priority` joins its
+comparisons. With the fixture change and before the fix, the run had 6
+differing commands. After the fix it has 0, with 5 more comparisons matched.
+Tests: `feedback_path_test.go`, `EngineTests.swift`.
+
 ## 2026-10-02 — The feedback flags answer before workspace discovery, as bv's do (vbx-v1t)
 
 bv 0.25.2 answers `--feedback-accept`, `--feedback-ignore`, `--feedback-show`

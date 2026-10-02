@@ -82,11 +82,21 @@ func readFeedback(dir string) (*analysis.FeedbackData, string) {
 }
 
 // sessionFeedbackDir is the directory this session reads feedback from:
-// feedbackDir for the source, or — for a FeedbackCommand session — the beads
-// directory bv resolved, whatever was loaded.
+// feedbackDir for the source, or — for a FeedbackCommand or FeedbackFromPath
+// session — the beads directory bv resolved for the working directory,
+// whatever was loaded.
+//
+// The two rules part only for a workspace opened from a folder below its
+// root: bv's robot commands read the folder's own `.beads` (vbx-15s), while
+// the app, which opens a workspace by its configuration and has no working
+// directory, reads the root's. The app writes its verdicts through this same
+// directory, so what it shows is always what it records.
 func (s *Session) sessionFeedbackDir(source, kind string) string {
 	if s.config.FeedbackCommand {
 		return s.feedbackCommandDir
+	}
+	if s.config.FeedbackFromPath {
+		return s.pathFeedbackDir
 	}
 	return feedbackDir(source, kind)
 }

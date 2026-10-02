@@ -628,10 +628,19 @@ COMPARISONS = [
     # first and climbs to a configuration only without one; --workspace
     # overrides both. Triage and next name every bead they rank, so the wrong
     # graph cannot match.
+    #
+    # The root's `.beads` also holds a feedback.json with enough verdicts to
+    # apply its weights, and bv reads it from the working directory's `.beads`
+    # alone — `loader.GetBeadsDir("")` — whichever graph it answers over. So
+    # from `notes/` triage reports no feedback block, and triage, next and
+    # priority score with the default weights, with --workspace or without
+    # (vbx-15s).
     {"vbx": command, "bv": command, "name": f"{command} discovery {where}",
      "only": {"discovery"}, **paths, "vbx_args": args, "bv_args": args,
      **({"cwd": cwd} if cwd else {})}
-    for command, paths in (("robot-triage", TRIAGE_PATHS), ("robot-next", {}))
+    for command, paths in (("robot-triage", TRIAGE_PATHS), ("robot-next", {}),
+                           ("robot-priority", {"bv_path": "recommendations",
+                                               "vbx_path": "recommendations"}))
     for where, cwd, args in (
         ("root with both", None, []),
         ("root with both --workspace", None, ["--workspace", ".bv/workspace.yaml"]),
@@ -1209,7 +1218,9 @@ def build_recipe_workspace(source: Path, destination: Path) -> Path:
 def build_discovery_workspace(source: Path, demo: Path, destination: Path) -> Path:
     """Copies the workspace at `source` to `destination`, outside this
     repository, and gives its root a `.beads` — the demo's — and an empty
-    `notes/` folder.
+    `notes/` folder. The root's `.beads` also gets `Fixtures/feedback`'s
+    feedback.json — enough verdicts to apply its weights — so a command that
+    reads feedback from the wrong directory scores differently (vbx-15s).
 
     Outside, because inside this checkout both binaries' discovery reaches the
     repository's own `.beads`. The root's beads are the demo's so that the
@@ -1220,6 +1231,8 @@ def build_discovery_workspace(source: Path, demo: Path, destination: Path) -> Pa
         shutil.rmtree(destination)
     shutil.copytree(source, destination)
     shutil.copytree(demo / ".beads", destination / ".beads")
+    shutil.copy(demo.parent / "feedback" / ".beads" / "feedback.json",
+                destination / ".beads" / "feedback.json")
     (destination / "notes").mkdir()
     return destination
 

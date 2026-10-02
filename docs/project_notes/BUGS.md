@@ -4,6 +4,30 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — `vbx-cli` triage applied the workspace root's feedback from a folder below it
+
+**Symptom:** in a folder below a workspace root whose `.beads` holds a
+`feedback.json`, bv 0.25.2's `--robot-triage` reports no `feedback` block and
+scores with the default weights. `vbx-cli` reported the root's block and,
+from three verdicts on, applied its weights. `--robot-next` and
+`--robot-priority` scored with them as well. This happened with and without
+`--workspace`. (vbx-15s)
+
+**Cause:** bv reads feedback through `loader.GetBeadsDir("")`, the working
+directory's `.beads`, whichever graph it answers over. The engine's
+`feedbackDir` for a workspace session is the root's `.beads`.
+
+**Fix:** `OpenConfig.FeedbackFromPath`, which `vbx-cli` sets for every robot
+command. It resolves the feedback directory once, at open, with bv's
+`GetBeadsDir` over the path. The app leaves it off and keeps the root's
+file. It writes verdicts through the same `sessionFeedbackDir` it reads,
+so it shows what it records. See ADR-026.
+
+**Regression test:** `feedback_path_test.go`,
+`feedbackFromPathCrossesTheBridge` in `EngineTests.swift`, and the
+`discovery` fixture's comparisons in `parity-check.py`. Its root now has a
+`feedback.json`, and `--robot-priority` joins triage and next there.
+
 ## 2026-10-02 — `vbx-cli`'s feedback flags answered over a discovered workspace
 
 **Symptom:** at a workspace root with no `.beads`, or in a folder below one,
