@@ -230,6 +230,9 @@ public final class ProjectStore: ObservableObject {
     @Published public private(set) var isWatching = false
     @Published public private(set) var lastReloadAt: Date?
     @Published public private(set) var lastExportPath: String?
+    /// Why the last report export failed, shown in the export sheet rather
+    /// than as a load error: the workspace itself is fine.
+    @Published public private(set) var reportError: String?
 
     // MARK: Correlation
     //
@@ -1821,27 +1824,74 @@ public final class ProjectStore: ObservableObject {
 
     // MARK: - Export
 
-    /// Renders the Markdown report and asks the user where to save it.
+    /// The report's default title: bv's heading is a fixed "Beads Export",
+    /// which says nothing about which workspace a saved file came from.
+    public var reportTitle: String? {
+        info.map { "\($0.displayName) — Bead Report" }
+    }
+
+    /// Renders a report — bv's `--export` — without saving it.
+    ///
+    /// Errors are recorded in ``reportError`` and the result is nil, so the
+    /// sheet can say what was wrong with the options it was given.
+    public func renderReport(_ request: ReportRequest) async -> ReportExport? {
+        guard isLoaded else { return nil }
+        var request = request
+        if request.title == nil { request.title = reportTitle }
+        do {
+            let report = try await engine.exportReport(request)
+            reportError = nil
+            return report
+        } catch {
+            reportError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Renders a report and asks the user where to save it. Returns whether a
+    /// file was written.
     ///
     /// The engine returns the content and this writes it, rather than letting
     /// the engine write directly, so the save panel's grant is what authorises
     /// the write — which is what keeps it working under the App Sandbox.
-    public func exportMarkdown() async {
-        guard let info else { return }
+    @discardableResult
+    public func exportReport(_ request: ReportRequest) async -> Bool {
+        guard let info, let report = await renderReport(request) else { return false }
+        let format = ReportFormat(rawValue: report.format) ?? .markdown
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(info.displayName)-beads.\(format.fileExtension)"
+        panel.allowedContentTypes = [.init(filenameExtension: format.fileExtension) ?? .plainText]
+        panel.message = "Save the \(format.displayName) report"
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        return saveReport(report, to: url)
+    }
+
+    /// Writes a rendered report, recording the path or the failure.
+    @discardableResult
+    public func saveReport(_ report: ReportExport, to url: URL) -> Bool {
         do {
-            let report = try await engine.exportMarkdown(title: "\(info.displayName) — Bead Report")
-
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = "\(info.displayName)-beads.md"
-            panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .plainText]
-            panel.message = "Save the Markdown report"
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-
-            try report.markdown.write(to: url, atomically: true, encoding: .utf8)
+            try Data(report.content.utf8).write(to: url, options: .atomic)
             lastExportPath = url.path
+            reportError = nil
+            return true
         } catch {
-            loadError = error.localizedDescription
+            reportError = error.localizedDescription
+            return false
         }
+    }
+
+    /// Asks for a Markdown template. The open panel's grant is what lets the
+    /// engine, in this process, read it under the App Sandbox.
+    public func chooseReportTemplate() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a Go text/template for the Markdown report."
+        panel.prompt = "Use Template"
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
     }
 
     // MARK: - Static site export

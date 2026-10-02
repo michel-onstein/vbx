@@ -844,7 +844,11 @@ flowchart TB
 All export formats are produced by the engine's existing `pkg/export`, so output is
 identical to `bv`:
 
-- **Markdown report** with Mermaid — `⌘⇧E`, plus a Share-sheet destination.
+- **Report** — bv 0.25's `export.GenerateReport` as Markdown (Mermaid included, or
+  through a custom template), JSON, CSV or a Mermaid graph. File → Export Report (`⌘⇧E`)
+  is a sheet for the format, the graph and the template; `vbx-cli --export` takes bv's
+  flags, and a recipe's `export:` block supplies defaults. A Share-sheet destination is
+  still planned.
 - **Interactive HTML graph** — self-contained, opens in the default browser.
 - **Static site bundle** — the wizard becomes a native multi-step sheet; deploy targets
   (GitHub Pages, Cloudflare) keep their existing flows, with credentials stored in the
@@ -1031,7 +1035,7 @@ surface self-documenting and the parity suite exhaustive:
 `recipes` · `by_label` · `by_assignee` · `capabilities` · `schema` · `docs`
 
 Plus `vbx`-local methods that are not robot commands: `open`, `close`, `reload`, `data_hash`,
-`parse_warnings`, `snapshot_at`, `export_markdown`, `export_graph`, `export_site`.
+`parse_warnings`, `snapshot_at`, `export_report`, `export_graph`, `export_site`.
 
 ---
 

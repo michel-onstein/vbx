@@ -5,6 +5,29 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Reports in bv 0.25's four formats (vbx-im9)
+
+The engine's `export_markdown` (bv's old `GenerateMarkdown`) is replaced by
+`export_report`, which calls bv's `export.ResolveReportOptions` and
+`export.GenerateReport`. Only the selection and provenance wiring from
+`cmd/bv` is ported: a label scope's own beads, a recipe's filter, order and
+`max_items`, the whole source as graph context, the unscoped data hash,
+readiness and claim safety. `vbx-cli` takes bv's `--export`, `--export-md`,
+`--export-format`, `--export-include-graph[=bool]` and `--export-template`
+(`=` disables a recipe's), plus `--recipe` (name or `.yaml` path) and `--label`.
+It prints bv's progress lines and bv's error text. In the app, File → Export
+Report (`⌘⇧E`) opens a sheet with format, graph and template. The app titles the
+report after the workspace, and the Export Report intent gains a format.
+`parity-check.py` compares 25 export runs over the demo and readiness fixtures:
+each format, with and without the graph, a template, recipe defaults and
+overrides, `--label`, `--export-md`, and the five rejections. Exit status,
+stdout, stderr and the file all match byte for byte. The one exception is the
+JSON report, which is parsed so its `source_authority` and `authority_hash` can
+be dropped (ADR-023). bv's export hooks are filed as vbx-uos, and the parity
+matrix row that claimed them is corrected. Tests: `report_test.go`,
+`ExportTests`, `ReportExportTests`, `ReportExportSheetTests`, and the harness's
+`test_report_exports`.
+
 ## 2026-10-01 — bv 0.21–0.25 capabilities mapped and the remaining work filed (vbx-htg)
 
 Each capability the epic lists was checked against main and bv 0.25.2 and

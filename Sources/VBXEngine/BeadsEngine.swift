@@ -226,15 +226,24 @@ public actor BeadsEngine {
         try call("label_attention", as: LabelAttention.self)
     }
 
-    /// Renders bv's Markdown report, Mermaid diagrams included.
+    /// Renders a report the way `bv --export` does: markdown, json, csv or
+    /// mermaid, with a recipe's export defaults under the explicit options.
     ///
     /// The content is always returned; `path` additionally writes it, which the
     /// CLI uses. The app writes it itself, through the save panel's URL, so it
     /// keeps working under the App Sandbox.
-    public func exportMarkdown(title: String, path: String? = nil) throws -> MarkdownExport {
-        var request: [String: Any] = ["title": title]
+    public func exportReport(_ options: ReportRequest = ReportRequest(), path: String? = nil)
+        throws -> ReportExport
+    {
+        var request: [String: Any] = [:]
+        if let value = options.format { request["format"] = value.rawValue }
+        if let value = options.includeGraph { request["include_graph"] = value }
+        if let value = options.template { request["template"] = value }
+        if let value = options.recipe { request["recipe"] = value }
+        if let value = options.label { request["label"] = value }
+        if let value = options.title { request["title"] = value }
         if let path { request["path"] = path }
-        return try call("export_markdown", request: request, as: MarkdownExport.self)
+        return try call("export_report", request: request, as: ReportExport.self)
     }
 
     // MARK: - Git correlation

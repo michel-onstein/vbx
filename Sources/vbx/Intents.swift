@@ -173,22 +173,37 @@ struct ForecastBead: AppIntent {
     }
 }
 
+/// bv's `--export-format`, for the Shortcuts parameter.
+enum ReportFormatOption: String, AppEnum {
+    case markdown, json, csv, mermaid
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Report Format"
+    static var caseDisplayRepresentations: [ReportFormatOption: DisplayRepresentation] = [
+        .markdown: "Markdown", .json: "JSON", .csv: "CSV", .mermaid: "Mermaid",
+    ]
+}
+
 struct ExportReport: AppIntent {
     static var title: LocalizedStringResource = "Export Report"
     static var description = IntentDescription(
-        "The workspace's Markdown report, Mermaid diagrams included.")
+        "The workspace's report as Markdown, JSON, CSV or a Mermaid graph.")
 
     @Parameter(title: "Workspace")
     var workspace: String?
+
+    @Parameter(title: "Format", default: .markdown)
+    var format: ReportFormatOption
 
     @Parameter(title: "Title", default: "Bead Report")
     var reportTitle: String
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        let markdown = try await withSession(workspace) { engine in
-            try await engine.exportMarkdown(title: reportTitle).markdown
+        let request = ReportRequest(
+            format: ReportFormat(rawValue: format.rawValue), title: reportTitle)
+        let content = try await withSession(workspace) { engine in
+            try await engine.exportReport(request).content
         }
-        return .result(value: markdown)
+        return .result(value: content)
     }
 }
 

@@ -1261,7 +1261,11 @@ that is not a replacement.</p>
 <p>All export formats are produced by the engine's existing <code>pkg/export</code>, so output is
 identical to <code>bv</code>:</p>
 <ul>
-<li><strong>Markdown report</strong> with Mermaid — <code>⌘⇧E</code>, plus a Share-sheet destination.</li>
+<li><strong>Report</strong> — bv 0.25's <code>export.GenerateReport</code> as Markdown (Mermaid included, or
+  through a custom template), JSON, CSV or a Mermaid graph. File → Export Report (<code>⌘⇧E</code>)
+  is a sheet for the format, the graph and the template; <code>vbx-cli --export</code> takes bv's
+  flags, and a recipe's <code>export:</code> block supplies defaults. A Share-sheet destination is
+  still planned.</li>
 <li><strong>Interactive HTML graph</strong> — self-contained, opens in the default browser.</li>
 <li><strong>Static site bundle</strong> — the wizard becomes a native multi-step sheet; deploy targets
   (GitHub Pages, Cloudflare) keep their existing flows, with credentials stored in the
@@ -1537,7 +1541,7 @@ surface self-documenting and the parity suite exhaustive:</p>
 <code>label_health</code> · <code>label_flow</code> · <code>label_attention</code> · <code>alerts</code> · <code>drift</code> · <code>diff</code> · <code>graph</code> ·
 <code>recipes</code> · <code>by_label</code> · <code>by_assignee</code> · <code>capabilities</code> · <code>schema</code> · <code>docs</code></p>
 <p>Plus <code>vbx</code>-local methods that are not robot commands: <code>open</code>, <code>close</code>, <code>reload</code>, <code>data_hash</code>,
-<code>parse_warnings</code>, <code>snapshot_at</code>, <code>export_markdown</code>, <code>export_graph</code>, <code>export_site</code>.</p>
+<code>parse_warnings</code>, <code>snapshot_at</code>, <code>export_report</code>, <code>export_graph</code>, <code>export_site</code>.</p>
 <hr />
 <h2 id="appendix-b-glossary"><a class="toclink" href="#appendix-b-glossary">Appendix B — Glossary</a></h2>
 <div class="table-wrap"><table>

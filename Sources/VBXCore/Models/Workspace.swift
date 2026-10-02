@@ -112,26 +112,105 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     public var shortHash: String { String(dataHash.prefix(8)) }
 }
 
-/// Result of rendering the Markdown report.
-public struct MarkdownExport: Codable, Sendable, Hashable {
-    public var markdown: String
+/// The formats bv 0.25's `--export-format` accepts.
+///
+/// Which combinations are valid is the engine's rule (bv's
+/// `ResolveReportOptions`); the properties here only let the export sheet
+/// offer the controls that rule leaves open, and the engine still rejects
+/// anything else.
+public enum ReportFormat: String, Codable, Sendable, CaseIterable, Identifiable {
+    case markdown, json, csv, mermaid
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .markdown: "Markdown"
+        case .json: "JSON"
+        case .csv: "CSV"
+        case .mermaid: "Mermaid"
+        }
+    }
+
+    public var fileExtension: String {
+        switch self {
+        case .markdown: "md"
+        case .json: "json"
+        case .csv: "csv"
+        case .mermaid: "mmd"
+        }
+    }
+
+    /// The graph setting this format forces, or nil when it is a choice: a
+    /// CSV row has nowhere to put a graph, and a Mermaid export *is* one.
+    public var fixedGraph: Bool? {
+        switch self {
+        case .csv: false
+        case .mermaid: true
+        case .markdown, .json: nil
+        }
+    }
+
+    /// Only the Markdown report takes a custom template.
+    public var acceptsTemplate: Bool { self == .markdown }
+}
+
+/// What to export: bv's `--export-format`, `--export-include-graph` and
+/// `--export-template`, plus the recipe and label scope that select the beads.
+///
+/// A nil field is "not given", so a recipe's `export:` default applies; an
+/// explicit `false` or empty template overrides it, exactly as in bv.
+public struct ReportRequest: Sendable, Hashable {
+    public var format: ReportFormat?
+    public var includeGraph: Bool?
+    public var template: String?
+    public var recipe: String?
+    public var label: String?
+    /// Replaces bv's fixed "Beads Export" heading. bv has no flag for it.
+    public var title: String?
+
+    public init(
+        format: ReportFormat? = nil, includeGraph: Bool? = nil, template: String? = nil,
+        recipe: String? = nil, label: String? = nil, title: String? = nil
+    ) {
+        self.format = format
+        self.includeGraph = includeGraph
+        self.template = template
+        self.recipe = recipe
+        self.label = label
+        self.title = title
+    }
+}
+
+/// A rendered report, and the options it was rendered with once a recipe's
+/// defaults were applied.
+public struct ReportExport: Codable, Sendable, Hashable {
+    public var content: String
+    public var format: String
+    public var includeGraph: Bool
+    public var template: String
+    public var title: String
+    public var issueCount: Int
     public var bytes: Int
     /// Non-empty when the engine also wrote the file itself.
     public var path: String
 
-    private enum CodingKeys: String, CodingKey { case markdown, bytes, path }
+    private enum CodingKeys: String, CodingKey {
+        case content, format, template, title, bytes, path
+        case includeGraph = "include_graph"
+        case issueCount = "issue_count"
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        markdown = try c.decodeIfPresent(String.self, forKey: .markdown) ?? ""
+        content = try c.decodeIfPresent(String.self, forKey: .content) ?? ""
+        format = try c.decodeIfPresent(String.self, forKey: .format) ?? ""
+        includeGraph = try c.decodeIfPresent(Bool.self, forKey: .includeGraph) ?? false
+        template = try c.decodeIfPresent(String.self, forKey: .template) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        issueCount = try c.decodeIfPresent(Int.self, forKey: .issueCount) ?? 0
         bytes = try c.decodeIfPresent(Int.self, forKey: .bytes) ?? 0
         path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
-    }
-
-    public init(markdown: String, bytes: Int, path: String = "") {
-        self.markdown = markdown
-        self.bytes = bytes
-        self.path = path
     }
 }
 
