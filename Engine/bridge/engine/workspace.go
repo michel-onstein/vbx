@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/loader"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/workspace"
 )
@@ -40,20 +41,92 @@ type repoLoad struct {
 	disabled   bool
 }
 
-// findWorkspaceConfig looks for a workspace configuration at or above path.
+// workspaceConfigFor decides whether a session opens as a multi-repository
+// workspace, returning the configuration to load or "" for a single source.
 //
-// Returns "" when there is none, which is the ordinary single-repository case
-// rather than a failure.
-func findWorkspaceConfig(path string) string {
-	dir := path
-	if info, err := os.Stat(path); err == nil && !info.IsDir() {
-		dir = filepath.Dir(path)
+// An explicit configuration — OpenConfig.Workspace, vbx-cli's --workspace —
+// is used as given, with no discovery, as bv's --workspace is. Otherwise the
+// path is discovered by discoverWorkspaceConfig.
+//
+// The explicit path is kept as given, not made absolute: bv reports its
+// --workspace argument verbatim as the envelope's source_path, and so does
+// vbx-cli. It resolves against the process's working directory either way.
+func workspaceConfigFor(cfg OpenConfig) string {
+	if cfg.Workspace != "" {
+		return cfg.Workspace
 	}
-	found, err := workspace.FindWorkspaceConfig(dir)
+	return discoverWorkspaceConfig(cfg.Path)
+}
+
+// discoverWorkspaceConfig is bv's precedence, applied to a path (ADR-026).
+//
+// A port of the unexported discoverWorkspaceConfig in bv v0.25.2's
+// cmd/bv/main.go, which works from the working directory; this one takes the
+// path the caller names instead, because the app opens a folder the user chose
+// and vbx-cli's --path names one too. The rule is bv's: a reachable `.beads`
+// always wins, so a repository inside a workspace keeps its own view. Reachable
+// is what loader.GetBeadsDir resolves — BEADS_DB or BEADS_DIR when set, else
+// `.beads` in the directory itself, else at the root of the checkout it sits
+// in (the main checkout's, for a linked worktree). It does not climb arbitrary
+// parents. Only when no `.beads` is reachable does a `.bv/workspace.yaml` here
+// or in any parent select the workspace.
+//
+// Two cases bv never meets, because it starts from a directory, are vbx's:
+//
+//   - a file chosen directly is its own answer — a `.jsonl` or `.db` is a
+//     single source, and a `.yaml`/`.yml` is the workspace configuration
+//     itself, which is how the app opens the aggregate of a folder that also
+//     holds a `.beads` of its own;
+//   - a `.beads` directory chosen directly is that repository.
+//
+// Returns "" for a single source, which is not a failure.
+func discoverWorkspaceConfig(path string) string {
+	if path == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		path = wd
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return ""
+	}
+	if !info.IsDir() {
+		if isWorkspaceConfigFile(abs) {
+			return abs
+		}
+		return ""
+	}
+	if filepath.Base(abs) == ".beads" {
+		return ""
+	}
+	if beadsDir, err := loader.GetBeadsDir(abs); err == nil {
+		if st, statErr := os.Stat(beadsDir); statErr == nil && st.IsDir() {
+			return ""
+		}
+	}
+	found, err := workspace.FindWorkspaceConfig(abs)
 	if err != nil {
 		return ""
 	}
 	return found
+}
+
+// isWorkspaceConfigFile reports whether a chosen file is taken for a
+// workspace configuration: a YAML file, by extension. Whether it parses is
+// the loader's question — and, for the Open panel, Probe's, which parses it
+// without opening anything.
+func isWorkspaceConfigFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".yaml", ".yml":
+		return true
+	}
+	return false
 }
 
 // loadWorkspace aggregates every repository the configuration names.

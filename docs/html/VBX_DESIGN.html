@@ -862,7 +862,10 @@ the git object store and diffs it against the current state, producing per-issue
 <code>.beads/</code>, or a <code>.bv/workspace.yaml</code>). This gives recent-documents, window restoration,
 drag-and-drop onto the Dock icon, and <code>open</code> from the CLI for free.</p>
 <p>Discovery order and the <code>BEADS_DIR</code> override are delegated to the Go engine so the rules
-cannot drift from <code>bv</code>. <code>vbx</code> adds a native folder picker when discovery finds nothing.</p>
+cannot drift from <code>bv</code>. That includes bv's workspace precedence: a reachable <code>.beads</code> wins
+over a <code>.bv/workspace.yaml</code> found upward. To open the aggregate of a folder that also holds
+its own <code>.beads</code>, choose the configuration file itself, which is the app's counterpart of
+<code>--workspace</code> (<a href="project_notes/DECISIONS.html">ADR-026</a>). <code>vbx</code> adds a native folder picker when discovery finds nothing.</p>
 <h3 id="82-file-watching"><a class="toclink" href="#82-file-watching">8.2 File watching</a></h3>
 <p><code>FileWatchService</code> uses <strong>FSEvents</strong> rather than kqueue: it coalesces at directory level,
 survives atomic-rename writes (which is how <code>bd</code> rewrites JSONL), and is cheap. A 200 ms

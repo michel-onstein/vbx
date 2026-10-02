@@ -1420,3 +1420,66 @@ until the read-write question is settled. **Revisit** when the App Store build
 gains read-write access with security-scoped bookmarks. The write then has to
 happen while that access is started, and the denied-write test is where the
 switch shows up.
+
+## ADR-026 — Workspace discovery is bv's: a reachable `.beads` wins, in the app too
+
+**Date:** 2026-10-02 · **Status:** Accepted, implemented
+
+**Context.** bv 0.25.2 uses a `.bv/workspace.yaml` only when no `.beads` is
+reachable (`discoverWorkspaceConfig` in `cmd/bv/main.go`: `loader.GetBeadsDir`
+first, then `workspace.FindWorkspaceConfig`), and `--workspace <file>` is the
+explicit override. *Reachable* means `BEADS_DB` / `BEADS_DIR`, else `.beads` in
+the directory itself, else at the root of the checkout it sits in. It does
+not mean any parent. The configuration, by contrast, is found in the directory
+or in any parent. vbx's engine did the opposite and checked for a
+configuration first, so a repository with its own `.beads` under (or beside) a
+`.bv/workspace.yaml` opened as the aggregate in vbx and as the single
+repository in bv. The result was namespaced ids, a different graph and a
+different value for every metric. No ADR recorded the difference, and
+`vbx-cli` had no `--workspace`. (vbx-1y5)
+
+**Decision.** One rule, in the engine, for every caller: `discoverWorkspaceConfig`
+in `workspace.go` ports bv's and applies it to the path the caller names
+instead of the working directory. `vbx-cli` gains `--workspace FILE`. It sets
+`OpenConfig.Workspace`, which loads that configuration as given, with no
+discovery. Like bv, it echoes the argument verbatim as `source_path`. `Probe`
+asks the same function, so the Open panel offers exactly what opens. Two cases
+are vbx's own, because bv always starts from a directory. A `.yaml`/`.yml`
+file chosen directly is the configuration itself, and `Probe` parses it, so a
+YAML file that is not a workspace is greyed out. A `.beads` directory chosen
+directly is that repository.
+
+**The app follows the same rule, and that changes what some paths open.** A
+path that holds both a `.beads` and a `.bv/workspace.yaml`, or a repository
+below a workspace root, used to open as the aggregate. It now opens as that
+repository, and a recents entry or a restored window pointing at it reopens as
+the repository. To get the aggregate, the user opens the
+`.bv/workspace.yaml` file itself. The Open panel offers it (⌘⇧. shows the
+hidden `.bv`). A workspace root without a `.beads` of its own opens as
+before. So does any folder below it from which no `.beads` is reachable.
+Launch discovery still only probes (CLAUDE.md), and the probe now answers by
+the new rule.
+
+**Alternatives.**
+
+- *Keep workspace-first for the app, bv's rule for `vbx-cli`.* Rejected.
+  Opening the same folder would then give a different graph in the app than in
+  the CLI that ships inside it. That is the drift ADR-001 exists to prevent,
+  moved from bv-versus-vbx to vbx-versus-vbx. It would also need a second
+  discovery rule that `Probe` and `load` both carry.
+- *Keep workspace-first everywhere and record it as a divergence.* Rejected.
+  An agent running `bv` and a person looking at vbx in the same directory
+  would rank different beads, and nothing on screen would say why.
+- *Show the hidden `.bv` folder in the Open panel by default.* Not done. It
+  clutters every folder the panel shows, to help with a case that the
+  configuration file already handles.
+
+**Consequences.** `vbx-cli` and bv agree on which graph a directory means.
+This is parity-checked from a root holding both, from a member, and from a
+plain folder below a workspace, each with and without `--workspace`. One
+trap is inherited from bv rather than introduced here. A workspace root that
+has a `.beads` only for `feedback.json` is now taken for a single repository
+with no bead data. The Open panel refuses it and `vbx-cli` reports "no bead
+data found", so open the configuration instead. Neither bv nor the engine
+creates that directory when it records feedback, because `FeedbackData.Save`
+writes into an existing one.

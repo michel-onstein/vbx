@@ -5,6 +5,22 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Workspace discovery follows bv's `.beads`-first precedence, and `vbx-cli` gains `--workspace` (vbx-1y5)
+
+The engine's `discoverWorkspaceConfig` ports bv 0.25.2's rule: a reachable
+`.beads` wins, and a `.bv/workspace.yaml` found upward applies only without
+one. `vbx-cli --workspace FILE` (`OpenConfig.Workspace`) loads a configuration
+as given. `Probe` uses the same rule, and also offers a chosen workspace YAML
+when it parses. The app follows the same rule, so a folder that holds both
+now opens as its own repository. ADR-026 records this. Parity: the
+`dropped (workspace)` claim gate now runs by discovery and again with
+`--workspace`, from a copy outside this checkout. A new `discovery` fixture
+compares a root holding both, a member, and a plain folder below the
+workspace. Result: 11 → 12 workspaces, 0 differing commands before and after,
+and 12 more matches. Tests: `discovery_test.go`,
+`workspaceDiscoveryCrossesTheBridge`, `OpenPanelGuardTests`,
+`test-parity-check.py`.
+
 ## 2026-10-02 — A workspace member's dropped record withholds the claim, as bv's does (vbx-koc)
 
 The workspace claim-safety verdict is now bv's `newRobotSourceAuthority` rule

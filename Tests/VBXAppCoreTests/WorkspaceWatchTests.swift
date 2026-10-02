@@ -25,6 +25,14 @@ private func scratchMultiRepoWorkspace() throws -> URL {
     return root
 }
 
+/// What the tests open: the configuration itself. The root holds a `.beads`
+/// for feedback.json, so opening the folder would take it for a single
+/// repository, as bv's discovery does (ADR-026); choosing the configuration
+/// is how the app opens such a workspace.
+private func configPath(_ root: URL) -> String {
+    root.appendingPathComponent(".bv/workspace.yaml").path
+}
+
 private func writeMember(_ root: URL, _ name: String, _ lines: String...) throws {
     let beads = root.appendingPathComponent(name).appendingPathComponent(".beads")
     try FileManager.default.createDirectory(at: beads, withIntermediateDirectories: true)
@@ -80,7 +88,7 @@ func workspaceWatchCoversEveryMember() async throws {
 
     let store = ProjectStore()
     store.skipPhase2 = true
-    await store.open(path: root.path)
+    await store.open(path: configPath(root))
     #expect(store.isLoaded)
     #expect(store.isWatching)
 
@@ -101,7 +109,7 @@ func memberEditReachesTheStore() async throws {
 
     let store = ProjectStore()
     store.skipPhase2 = true
-    await store.open(path: root.path)
+    await store.open(path: configPath(root))
     #expect(store.isLoaded)
     let before = store.issues.count
 
@@ -130,7 +138,7 @@ func rootFeedbackReloadsTheWorkspace() async throws {
 
     let store = ProjectStore()
     store.skipPhase2 = true
-    await store.open(path: root.path)
+    await store.open(path: configPath(root))
     #expect(store.isLoaded)
     #expect(store.lastReloadAt == nil, "precondition: nothing has reloaded yet")
 
@@ -161,7 +169,7 @@ func addedMemberIsWatched() async throws {
 
     let store = ProjectStore()
     store.skipPhase2 = true
-    await store.open(path: root.path)
+    await store.open(path: configPath(root))
     #expect(store.isLoaded)
 
     try await Task.sleep(for: .milliseconds(400))

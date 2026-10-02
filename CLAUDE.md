@@ -17,7 +17,7 @@ box, the README title.
 | [FEATURE_PARITY.md](docs/FEATURE_PARITY.md) | — | Every bv capability mapped to a vbx surface and delivery phase | Living |
 | [RELEASES.md](docs/RELEASES.md) | ADR-013 | User-facing changes per release — generated from the git tags, never edited | Generated |
 | [project_notes/BUGS.md](docs/project_notes/BUGS.md) | — | Bug log with the regression test locking each fix in | Living |
-| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…025 | Architectural decisions and their trade-offs | Living |
+| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…026 | Architectural decisions and their trade-offs | Living |
 | [project_notes/KEY_FACTS.md](docs/project_notes/KEY_FACTS.md) | — | Toolchain, commands, layout, gotchas | Living |
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
@@ -254,6 +254,13 @@ them.
   App Sandbox forbids. Workspaces load through `workspace_loader.go`, a port
   whose tracker access is the session's choice, and `TestWorkspaceLoaderMatchesBV`
   holds it to bv's. See ADR-020 and BUGS.md, 2026-10-01.
+- **Workspace discovery is bv's precedence, in the app as in `vbx-cli`.** A
+  reachable `.beads` wins over a `.bv/workspace.yaml` found upward, and an
+  explicit configuration (`--workspace`, or the YAML file chosen in the app)
+  wins over both. `discoverWorkspaceConfig` is the only copy of the rule, and
+  `Probe` and `load` both ask it. Parity over a workspace must run outside
+  this checkout, because from inside it discovery reaches this repository's
+  own `.beads`. See ADR-026.
 - **Triage includes a bounded git-history walk**, because bv's does and it
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable

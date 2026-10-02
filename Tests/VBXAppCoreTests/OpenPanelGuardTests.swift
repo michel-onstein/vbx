@@ -65,6 +65,32 @@ struct OpenPanelGuardTests {
         #expect(guardDelegate.result(for: root.path).kind == "workspace")
     }
 
+    @Test("A folder with its own .beads under a workspace offers the repository; the yaml offers the aggregate")
+    func bothOffersTheRepositoryAndTheConfigOffersTheAggregate() throws {
+        // bv's precedence (ADR-026): the folder's own `.beads` wins, and the
+        // aggregate is reached by choosing the configuration file itself.
+        let root = try Self.temporaryDirectory()
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: demoFixture).appendingPathComponent(".beads"),
+            to: root.appendingPathComponent(".beads"))
+        let config = root.appendingPathComponent(".bv")
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        let yaml = config.appendingPathComponent("workspace.yaml")
+        try """
+            repos:
+              - path: alpha
+            """.write(to: yaml, atomically: true, encoding: .utf8)
+        let other = root.appendingPathComponent("notes.yaml")
+        try "title: not a workspace\n".write(to: other, atomically: true, encoding: .utf8)
+
+        let guardDelegate = OpenPanelGuard()
+
+        #expect(guardDelegate.result(for: root.path).kind == "jsonl")
+        #expect(guardDelegate.canOpen(yaml.path))
+        #expect(guardDelegate.result(for: yaml.path).kind == "workspace")
+        #expect(!guardDelegate.canOpen(other.path))
+    }
+
     @Test("A folder with no bead data is refused, with a reason")
     func refusesEmptyFolder() throws {
         let empty = try Self.temporaryDirectory()

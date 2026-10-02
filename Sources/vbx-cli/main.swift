@@ -490,6 +490,10 @@ func runExport(_ options: Options, path: String, engine: BeadsEngine) async -> I
 struct Options {
     var command: String?
     var path = FileManager.default.currentDirectoryPath
+    /// bv's --workspace: a workspace configuration loaded as given, with no
+    /// discovery. Without it the path is discovered by bv's precedence, where
+    /// a reachable `.beads` wins over a `.bv/workspace.yaml` (ADR-026).
+    var workspace: String?
     var format = "json"
     var id: String?
     var file: String?
@@ -595,6 +599,7 @@ func parseArguments() throws -> Options {
             }
         case "--no-hooks": options.noHooks = true
         case "--path": options.path = try next(arg)
+        case "--workspace": options.workspace = try next(arg)
         case "--format", "-f": options.format = try next(arg).lowercased()
         case "--json": options.format = "json"
         case "--toon": options.format = "toon"
@@ -652,6 +657,11 @@ func parseArguments() throws -> Options {
         index += 1
     }
 
+    if options.given.contains("workspace"), options.given.contains("path") {
+        // --workspace names what to load and --path where to discover it
+        // from; together one of them would be silently ignored.
+        throw UsageError(message: "--workspace and --path cannot be used together")
+    }
     for modifier in exportModifiers where options.given.contains(modifier) {
         if options.exportPath == nil, options.exportMarkdownPath == nil {
             throw UsageError(message: "--\(modifier) requires one of --export or --export-md")
@@ -766,7 +776,8 @@ func usageText() -> String {
     lines.append(contentsOf: [
         "",
         "COMMON OPTIONS:",
-        "  --path PATH          Workspace, .beads directory, or data file",
+        "  --path PATH          Folder, .beads directory, data file or workspace.yaml",
+        "  --workspace FILE     Load this .bv/workspace.yaml, skipping discovery",
         "  --format json|toon   Output format (default json)",
         "  --pretty             Indent JSON output",
         "  --list-commands      Print the command list as JSON",
@@ -923,7 +934,8 @@ func run() async -> Int32 {
             // Export hooks are repository-configured commands, run as bv runs
             // them; the CLI is never sandboxed, and the app never asks.
             _ = try await engine.open(
-                path: options.path, liveTrackerActions: true, exportHooks: !options.noHooks)
+                path: options.path, liveTrackerActions: true, exportHooks: !options.noHooks,
+                workspace: options.workspace)
         } catch {
             complain("Error: \(error.localizedDescription)")
             return 1
@@ -959,7 +971,8 @@ func run() async -> Int32 {
         // The CLI is never sandboxed, so it alone may ask `br` what it
         // supports — which is what puts claim commands in triage and
         // --robot-next (ADR-020). The app leaves this off.
-        _ = try await engine.open(path: options.path, liveTrackerActions: true)
+        _ = try await engine.open(
+            path: options.path, liveTrackerActions: true, workspace: options.workspace)
     } catch {
         complain("Error: \(error.localizedDescription)")
         return 1

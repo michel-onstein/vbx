@@ -554,7 +554,10 @@ the git object store and diffs it against the current state, producing per-issue
 drag-and-drop onto the Dock icon, and `open` from the CLI for free.
 
 Discovery order and the `BEADS_DIR` override are delegated to the Go engine so the rules
-cannot drift from `bv`. `vbx` adds a native folder picker when discovery finds nothing.
+cannot drift from `bv`. That includes bv's workspace precedence: a reachable `.beads` wins
+over a `.bv/workspace.yaml` found upward. To open the aggregate of a folder that also holds
+its own `.beads`, choose the configuration file itself, which is the app's counterpart of
+`--workspace` ([ADR-026](project_notes/DECISIONS.md)). `vbx` adds a native folder picker when discovery finds nothing.
 
 ### 8.2 File watching
 
