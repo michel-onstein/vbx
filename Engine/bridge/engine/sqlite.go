@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dicklesworthstone/beads_viewer/pkg/loader"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 	_ "modernc.org/sqlite"
 )
@@ -26,19 +27,28 @@ import (
 // `tombstone` column where the schema has one. `deleted_at` alone is not it;
 // bv does not read that column, and br sets both together anyway. The session
 // keeps tombstones out of analysis (see readiness.go).
-func LoadSQLite(path string) ([]model.Issue, error) {
+//
+// A row bv's SQLite reader would drop is dropped here too, and counted: one
+// that fails the model's validation (no id, no title, updated_at before
+// created_at) or repeats an id already read. The same record in a JSONL is
+// dropped by bv's own loader, which vbx uses there, so this keeps the two
+// sources agreeing. stats is that accounting in bv's ParseStats shape —
+// Skipped is always zero, a database having no non-issue records — and
+// dropped is a warning per dropped row, in bv's wording. Both feed the robot
+// envelope's load_stats (vbx-dv5).
+func LoadSQLite(path string) (issues []model.Issue, stats loader.ParseStats, dropped []string, err error) {
 	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(path))
 	if err != nil {
-		return nil, err
+		return nil, stats, nil, err
 	}
 	defer db.Close()
 
 	cols, err := tableColumns(db, "issues")
 	if err != nil {
-		return nil, fmt.Errorf("reading issues schema: %w", err)
+		return nil, stats, nil, fmt.Errorf("reading issues schema: %w", err)
 	}
 	if len(cols) == 0 {
-		return nil, fmt.Errorf("%s has no issues table", path)
+		return nil, stats, nil, fmt.Errorf("%s has no issues table", path)
 	}
 
 	// Project only columns this database actually has.
@@ -56,7 +66,7 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 		}
 	}
 	if !cols["id"] || !cols["title"] {
-		return nil, fmt.Errorf("%s issues table lacks id/title", path)
+		return nil, stats, nil, fmt.Errorf("%s issues table lacks id/title", path)
 	}
 
 	// Order as bv's reader does: newest update first, by id where there is no
@@ -74,7 +84,7 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 
 	rows, err := db.Query(q)
 	if err != nil {
-		return nil, err
+		return nil, stats, nil, err
 	}
 	defer rows.Close()
 
@@ -82,7 +92,7 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 	deps := loadDependencies(db)
 	comments := loadComments(db)
 
-	var issues []model.Issue
+	seen := map[string]bool{}
 	for rows.Next() {
 		scan := make([]any, len(selected))
 		holders := make([]sql.NullString, len(selected))
@@ -90,7 +100,7 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 			scan[i] = &holders[i]
 		}
 		if err := rows.Scan(scan...); err != nil {
-			return nil, err
+			return nil, stats, nil, err
 		}
 
 		var it model.Issue
@@ -101,24 +111,34 @@ func LoadSQLite(path string) ([]model.Issue, error) {
 			}
 			assignIssueField(&it, col, v.String)
 		}
-		if it.ID == "" {
-			continue
-		}
 		if it.Status == "" {
 			it.Status = model.StatusOpen
 		}
 		if it.IssueType == "" {
 			it.IssueType = model.TypeTask
 		}
+		// bv's LoadIssueAuthority rule, and its wording.
+		if err := it.Validate(); err != nil {
+			stats.Errors++
+			dropped = append(dropped, fmt.Sprintf("invalid issue %q: %v", it.ID, err))
+			continue
+		}
+		if seen[it.ID] {
+			stats.Errors++
+			dropped = append(dropped, fmt.Sprintf("duplicate issue ID %q", it.ID))
+			continue
+		}
+		seen[it.ID] = true
 		it.Labels = labels[it.ID]
 		it.Dependencies = deps[it.ID]
 		it.Comments = comments[it.ID]
 		issues = append(issues, it)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, stats, nil, err
 	}
-	return issues, nil
+	stats.Valid = len(issues)
+	return issues, stats, dropped, nil
 }
 
 func sqliteReadOnlyDSN(path string) string {

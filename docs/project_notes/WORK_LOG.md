@@ -5,6 +5,26 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Dropped records reported as bv's `load_stats`, and counted in the app (vbx-dv5)
+
+bv 0.25.2 adds `load_stats {source_path, valid, errors, skipped, warnings}` to
+every robot envelope whose load dropped a record. vbx now does too, through
+the shared envelope helper (`provenance.go`, ADR-023), built in `loadstats.go`
+from the loaders' own accounting: bv's `loader.ParseStats` for a JSONL, each
+member's `workspace.LoadResult` for a workspace, and vbx's SQLite reader,
+which now drops and counts rows by bv's SQLite rule (see BUGS.md). `info`
+carries it too, and the sidebar's warnings badge reads "2 records dropped, 4
+loaded". A reload whose bead set is unchanged now still updates the
+accounting (BUGS.md). New `Fixtures/dropped` — a malformed line and an invalid
+record — compared as JSONL and as a `beads.db` on every command, plus a
+`load_stats`-keyed run for the five whose usual subtree leaves it out. Parity:
+331 → 359 matches over 10 workspaces, 0 differences; the `beads.db` form
+declares only the ADR-024 fingerprint. Filed: vbx-koc (a workspace member's
+dropped record does not withhold the claim), vbx-6su (triage, plan, alerts
+and metrics carry no envelope), vbx-1l6 (feedback commands print no loader
+warnings). Tests: `loadstats_test.go`, `loadStatsCrossTheBridge`,
+`WarningsBadgeTests`, `test-parity-check.py`.
+
 ## 2026-10-02 — `vbx-cli --export` runs bv's export hooks, with `--no-hooks` (vbx-uos)
 
 bv 0.25.2 runs `.bv/hooks.yaml` around `--export` / `--export-md`; vbx-cli

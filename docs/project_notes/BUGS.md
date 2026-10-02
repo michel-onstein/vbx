@@ -4,6 +4,42 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — A reload could not see a record being dropped
+
+**Symptom:** appending a malformed line to `issues.jsonl` in an open
+workspace left the app saying nothing had been dropped: the warnings stayed
+as they were, and so did the claim-safety verdict. (vbx-dv5)
+
+**Cause:** the reload is gated on bv's content hash over the decoded records,
+and a dropped record is by definition not one of them — the bead set, and so
+the hash, are identical either side of it. The gate returned early, before
+the warnings and the verdict were replaced.
+
+**Fix:** the unchanged-hash path now replaces the load's accounting —
+`load_stats`, the warnings and the verdict — and reports `changed` when any
+of it moved (`Session.refreshAccounting`), for the single repository and the
+workspace alike. A workspace member added with no beads still reloads as
+unchanged.
+
+**Regression test:** `TestReloadFollowsADroppedRecordTheHashCannotSee`.
+
+## 2026-10-02 — A `beads.db` row bv drops stayed in vbx's graph
+
+**Symptom:** a bead whose `updated_at` precedes its `created_at`, or with no
+title, was in the graph when read from a `beads.db` and absent when read from
+the same beads as JSONL, and bv 0.25.2 dropped it from both. (vbx-dv5)
+
+**Cause:** vbx's JSONL path is bv's loader, which validates each record; its
+own SQLite reader skipped only rows with no id. bv's SQLite reader validates
+every row and rejects a repeated id.
+
+**Fix:** `LoadSQLite` applies bv's rule — `Issue.Validate`, then the
+duplicate check — counts each drop and words its warning as bv does, which
+is also what `load_stats` reports for a `beads.db`.
+
+**Regression test:** `TestLoadSQLiteDropsAndCountsWhatBvDrops`; parity over
+`dropped (beads.db)`.
+
 ## 2026-10-02 — `--label` and `--recipe` were silently ignored by most robot commands
 
 **Symptom:** `vbx-cli --robot-label-health --recipe actionable` — and the

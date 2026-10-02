@@ -1,0 +1,6 @@
+{"id": "drop-1", "title": "Parse the import file", "description": "Read every row of the import.", "status": "open", "issue_type": "task", "priority": 1, "created_at": "2026-08-01T09:00:00Z", "updated_at": "2026-08-02T09:00:00Z", "labels": ["import"]}
+{"id": "drop-2", "title": "Validate imported rows", "description": "Reject rows that do not parse.", "status": "open", "issue_type": "task", "priority": 2, "created_at": "2026-08-01T09:00:00Z", "updated_at": "2026-08-02T09:00:00Z", "labels": ["import"], "dependencies": [{"issue_id": "drop-2", "depends_on_id": "drop-1", "type": "blocks"}]}
+{"id": "drop-3", "title": "Report the import summary", "description": "Count what was imported.", "status": "in_progress", "issue_type": "feature", "priority": 2, "created_at": "2026-08-01T09:00:00Z", "updated_at": "2026-08-03T09:00:00Z", "labels": ["import", "ui"]}
+{"id": "drop-4", "title": "Plan the import epic", "description": "Done when the import is.", "status": "blocked", "issue_type": "epic", "priority": 3, "created_at": "2026-08-01T09:00:00Z", "updated_at": "2026-08-04T09:00:00Z", "labels": ["import"]}
+{"id": "drop-5", "title": "This line is cut off mid-record", "status": "open",
+{"id": "drop-6", "title": "Updated before it was created", "status": "open", "issue_type": "task", "priority": 2, "created_at": "2026-08-05T09:00:00Z", "updated_at": "2026-08-01T09:00:00Z"}

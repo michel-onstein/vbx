@@ -258,9 +258,10 @@ and in the app (vbx-upz), <code>.beads/recipes/*.yaml</code> recipe files — ed
 deleted in their own file (vbx-7d5) — the multi-repository loader, triage
 feedback, <code>--export</code> reports in four formats (vbx-im9), <code>--search-min-score</code>
 with bv's guaranteed exact-ID hit (vbx-52c), <code>--recipe</code> as a robot scope,
-by name or path (vbx-7d5), and <code>.bv/hooks.yaml</code> export hooks with <code>--no-hooks</code>
-in <code>vbx-cli</code> (vbx-uos). Not yet built, each with a child bead of epic
-vbx-htg: the app's search threshold control (vbx-c1j), <code>load_stats</code> in the robot envelope (vbx-dv5),
+by name or path (vbx-7d5), <code>.bv/hooks.yaml</code> export hooks with <code>--no-hooks</code>
+in <code>vbx-cli</code> (vbx-uos), and <code>load_stats</code> in the robot envelope, counted in the
+app's warnings badge (vbx-dv5). Not yet built, each with a child bead of epic
+vbx-htg: the app's search threshold control (vbx-c1j),
 and bv's <code>.beads</code>-first workspace discovery with <code>--workspace</code> (vbx-1y5). A row naming a bead is not built until
 that bead closes.</p>
 <p><strong>Verified rather than asserted.</strong> <code>scripts/parity-check.py</code> runs <code>vbx-cli</code> and
@@ -276,7 +277,10 @@ the only one with sprints, where <code>--robot-sprint-show</code> and <code>--ro
 (at-risk beads included) are compared. <code>--robot-search</code> is compared in text
 mode over the demo — thresholds at both bounds, between them and empty, and
 five rejected values — and over <code>Fixtures/search</code>, whose text buries a bead
-below a query for its own id, the case bv's exact-ID guarantee exists for.</p>
+below a query for its own id, the case bv's exact-ID guarantee exists for.
+<code>Fixtures/dropped</code>, as JSONL and as a <code>beads.db</code>, holds a malformed line and a
+record that fails validation, so every envelope's <code>load_stats</code> is compared
+there — and the clean fixtures prove it absent.</p>
 <p>Two known non-comparisons are declared in the harness rather than hidden:
 <code>--robot-insights</code>, because bv inlines <code>analysis.Insights</code>' untagged PascalCase
 fields at the top level, and <code>--robot-label-attention</code>, because bv projects a
@@ -399,7 +403,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td><code>load_stats</code> (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records</td>
-<td>App: the warnings badge lists the loader's warnings, without counts. <strong>Not built:</strong> <code>vbx-cli</code> emits no <code>load_stats</code> (vbx-dv5)</td>
+<td><code>vbx-cli</code>: in every envelope vbx carries, JSONL, <code>beads.db</code> and workspace alike, compared against bv over <code>Fixtures/dropped</code> (vbx-dv5, ADR-023); triage, plan, alerts and metrics carry no envelope yet (vbx-6su). App: the warnings badge states how many records were dropped</td>
 <td>Engine + Native</td>
 <td>—</td>
 </tr>

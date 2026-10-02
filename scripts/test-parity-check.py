@@ -10,6 +10,7 @@ a harness bug cannot read as agreement.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sqlite3
 import sys
 import tempfile
@@ -65,6 +66,49 @@ def test_sqlite_workspace_keeps_every_record(parity) -> None:
     check("every label is a row", labels == 21, str(labels))
 
 
+def test_sqlite_workspace_skips_a_malformed_line(parity) -> None:
+    print("\nbeads.db built from Fixtures/dropped (vbx-dv5)")
+    jsonl = ROOT / "Fixtures" / "dropped" / ".beads" / "issues.jsonl"
+    with tempfile.TemporaryDirectory() as scratch:
+        workspace = parity.build_sqlite_workspace(jsonl, Path(scratch) / "ws")
+        connection = sqlite3.connect(workspace / ".beads" / "beads.db")
+        try:
+            ids = sorted(row[0] for row in connection.execute("SELECT id FROM issues"))
+        finally:
+            connection.close()
+    check("the malformed line is no row, and the invalid record still is one",
+          ids == ["drop-1", "drop-2", "drop-3", "drop-4", "drop-6"], str(ids))
+
+
+def test_dropped_fixture_drops_what_it_says(parity) -> None:
+    print("\nFixtures/dropped (vbx-dv5)")
+    lines = (ROOT / "Fixtures" / "dropped" / ".beads" / "issues.jsonl").read_text().splitlines()
+    malformed, records = [], []
+    for number, line in enumerate(lines, start=1):
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            malformed.append(number)
+    check("exactly one line is malformed", malformed == [5], str(malformed))
+    invalid = [record["id"] for record in records
+               if record.get("updated_at", "") < record.get("created_at", "")]
+    check("exactly one record is updated before it was created", invalid == ["drop-6"], str(invalid))
+    skips = {fixture["name"]: fixture.get("skip_feedback") for fixture in parity.FIXTURES}
+    check("both dropped fixtures skip the feedback sequences, naming the bead",
+          all("vbx-1l6" in (skips.get(name) or "") for name in ("dropped", "dropped (beads.db)")),
+          str(skips))
+    check("no other fixture skips them",
+          [name for name, reason in skips.items() if reason and not name.startswith("dropped")]
+          == [], str(skips))
+    check("load_stats is lifted with the rest of the envelope", "load_stats" in parity.ENVELOPE_KEYS,
+          str(parity.ENVELOPE_KEYS))
+    keyed = {entry["vbx"] for entry in parity.COMPARISONS
+             if "load_stats" in entry.get("keys", ()) and "dropped" in entry.get("only", ())}
+    check("the commands whose subtree leaves load_stats out compare it on its own",
+          keyed == {"robot-priority", "robot-insights", "robot-sprint-list", "robot-search",
+                    "robot-blocker-chain"}, str(sorted(keyed)))
+
+
 def test_every_difference_is_reported(parity) -> None:
     print("\nDifference walk")
     vbx = {"a": 1, "b": [1, 2], "c": {"d": 1.0, "e": "x"}, "only_vbx": 0}
@@ -87,9 +131,11 @@ def test_default_run_covers_every_fixture(parity) -> None:
     print("\nFixtures")
     names = [fixture["name"] for fixture in parity.FIXTURES]
     check("the demo, the readiness fixture, its beads.db form, the sprints, both feedback"
-          " fixtures, the search fixture and the recipes workspace are all compared",
+          " fixtures, the search fixture, the recipes workspace and the dropped records in"
+          " both forms are all compared",
           names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
-                    "feedback-few", "search", "recipes"], str(names))
+                    "feedback-few", "search", "recipes", "dropped", "dropped (beads.db)"],
+          str(names))
     for fixture in parity.FIXTURES:
         path = ROOT / fixture["workspace"] / ".beads" / "issues.jsonl"
         check(f"{fixture['workspace']} exists", path.exists(), str(path))
@@ -124,7 +170,8 @@ def test_envelope_only_keys_are_one_list(parity) -> None:
     check("every declared key gives its reason",
           all(isinstance(reason, str) and reason.strip() for reason in keys.values()), str(keys))
     # The provenance vbx ports must be compared, not hidden.
-    ported = {"output_format", "source_path", "source_kind", "scope_hash", "data_hash"}
+    ported = {"output_format", "source_path", "source_kind", "scope_hash", "data_hash",
+              "load_stats"}
     check("the ported provenance is not declared away", not (ported & set(keys)),
           str(ported & set(keys)))
     check("no ported key is volatile either", not (ported & parity.VOLATILE_KEYS),
@@ -145,8 +192,11 @@ def test_declared_differences_are_narrow(parity) -> None:
     print("\nDeclared differences (ADR-024)")
     declared = parity.DECLARED_DIFFERENCES
     names = {fixture["name"] for fixture in parity.FIXTURES}
-    check("only the readiness beads.db declares differences",
-          set(declared) == {"readiness (beads.db)"}, str(sorted(declared)))
+    check("only the beads.db fixtures declare differences",
+          set(declared) == {"readiness (beads.db)", "dropped (beads.db)"}, str(sorted(declared)))
+    dropped = {path for (_, path) in declared["dropped (beads.db)"]}
+    check("the dropped beads.db declares only the lossy fingerprint, never load_stats",
+          dropped == {".data_hash", ".scope_hash", ".suggestions.data_hash"}, str(dropped))
     check("every declaring fixture is a real one", set(declared) <= names,
           str(set(declared) - names))
     sqlite_fixtures = {fixture["name"] for fixture in parity.FIXTURES if fixture.get("sqlite")}
@@ -533,6 +583,8 @@ def test_search(parity) -> None:
     # that much of the envelope.
     scoped = [entry for entry in compared
               if {"--label", "--recipe"} & set(entry["vbx_args"])]
+    # The load_stats run (vbx-dv5) compares that envelope key and nothing else.
+    compared = [entry for entry in compared if not entry["name"].endswith(" load_stats")]
     check("search compares the ranking and its echo, not the envelope",
           all(entry.get("keys") == parity.SEARCH_KEYS
               for entry in compared if entry not in scoped)
@@ -597,6 +649,8 @@ def main() -> int:
     test_envelope_only_keys_are_one_list(parity)
     test_declared_differences_are_narrow(parity)
     test_sqlite_workspace_keeps_every_record(parity)
+    test_sqlite_workspace_skips_a_malformed_line(parity)
+    test_dropped_fixture_drops_what_it_says(parity)
     test_every_difference_is_reported(parity)
     test_default_run_covers_every_fixture(parity)
     test_bv_zero_times_are_dropped_only_when_zero(parity)

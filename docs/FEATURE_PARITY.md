@@ -32,9 +32,10 @@ and in the app (vbx-upz), `.beads/recipes/*.yaml` recipe files — edited and
 deleted in their own file (vbx-7d5) — the multi-repository loader, triage
 feedback, `--export` reports in four formats (vbx-im9), `--search-min-score`
 with bv's guaranteed exact-ID hit (vbx-52c), `--recipe` as a robot scope,
-by name or path (vbx-7d5), and `.bv/hooks.yaml` export hooks with `--no-hooks`
-in `vbx-cli` (vbx-uos). Not yet built, each with a child bead of epic
-vbx-htg: the app's search threshold control (vbx-c1j), `load_stats` in the robot envelope (vbx-dv5),
+by name or path (vbx-7d5), `.bv/hooks.yaml` export hooks with `--no-hooks`
+in `vbx-cli` (vbx-uos), and `load_stats` in the robot envelope, counted in the
+app's warnings badge (vbx-dv5). Not yet built, each with a child bead of epic
+vbx-htg: the app's search threshold control (vbx-c1j),
 and bv's `.beads`-first workspace discovery with `--workspace` (vbx-1y5). A row naming a bead is not built until
 that bead closes.
 
@@ -52,6 +53,9 @@ the only one with sprints, where `--robot-sprint-show` and `--robot-burndown`
 mode over the demo — thresholds at both bounds, between them and empty, and
 five rejected values — and over `Fixtures/search`, whose text buries a bead
 below a query for its own id, the case bv's exact-ID guarantee exists for.
+`Fixtures/dropped`, as JSONL and as a `beads.db`, holds a malformed line and a
+record that fails validation, so every envelope's `load_stats` is compared
+there — and the clean fixtures prove it absent.
 
 Two known non-comparisons are declared in the harness rather than hidden:
 `--robot-insights`, because bv inlines `analysis.Insights`' untagged PascalCase
@@ -130,7 +134,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.
 | `bd` workspace layout detection | Document open | Engine | 0 |
 | `BEADS_DIR` override | Settings + env | Engine | 0 |
 | BOM stripping, 10 MB line cap, malformed-line skip with warnings | Warnings banner in the window, expandable to a list | Engine + Native | 0 |
-| `load_stats` (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records | App: the warnings badge lists the loader's warnings, without counts. **Not built:** `vbx-cli` emits no `load_stats` (vbx-dv5) | Engine + Native | — |
+| `load_stats` (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records | `vbx-cli`: in every envelope vbx carries, JSONL, `beads.db` and workspace alike, compared against bv over `Fixtures/dropped` (vbx-dv5, ADR-023); triage, plan, alerts and metrics carry no envelope yet (vbx-6su). App: the warnings badge states how many records were dropped | Engine + Native | — |
 | `source_authority` / `authority_hash` (bv 0.25 multi-source ranking) | Deliberately not ported — vbx resolves one source and ranks none; declared envelope-only in the parity harness (ADR-023, ADR-024) | — | — |
 | Legacy field aliases (`depends_on`, `target_id`) | Transparent | Engine | 0 |
 | Comment ID as UUIDv7 or legacy integer | Transparent | Engine | 0 |

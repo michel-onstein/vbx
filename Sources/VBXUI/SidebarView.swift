@@ -15,8 +15,8 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            if let warnings = store.info?.warnings, !warnings.isEmpty {
-                WarningsBadge(warnings: warnings)
+            if let info = store.info, !info.warnings.isEmpty || info.loadStats != nil {
+                WarningsBadge(warnings: info.warnings, loadStats: info.loadStats)
             }
         }
     }
@@ -170,9 +170,29 @@ private struct LabelRow: View {
 
 /// Surfaces loader warnings rather than hiding them — a skipped malformed line
 /// silently changes the graph, so the user needs to know it happened.
+///
+/// When the load dropped records the badge says how many, from the engine's
+/// `load_stats` (vbx-dv5): a workspace member's dropped line reaches the app
+/// only there, not as a warning.
 struct WarningsBadge: View {
     let warnings: [String]
+    var loadStats: LoadStats?
     @State private var expanded = false
+
+    /// The badge's one line. The counts are the engine's, stated as given.
+    static func title(warnings: [String], loadStats: LoadStats?) -> String {
+        if let stats = loadStats {
+            let records = stats.errors == 1 ? "record" : "records"
+            return "\(stats.errors) \(records) dropped, \(stats.valid) loaded"
+        }
+        return "\(warnings.count) load warning\(warnings.count == 1 ? "" : "s")"
+    }
+
+    /// What expanding lists: the session's warnings, or the dropped records'
+    /// reasons where those are all there is.
+    static func details(warnings: [String], loadStats: LoadStats?) -> [String] {
+        warnings.isEmpty ? (loadStats?.warnings ?? []) : warnings
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -180,7 +200,7 @@ struct WarningsBadge: View {
                 expanded.toggle()
             } label: {
                 Label(
-                    "\(warnings.count) load warning\(warnings.count == 1 ? "" : "s")",
+                    Self.title(warnings: warnings, loadStats: loadStats),
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.caption)
@@ -189,7 +209,8 @@ struct WarningsBadge: View {
             .buttonStyle(.plain)
 
             if expanded {
-                ForEach(Array(warnings.prefix(8).enumerated()), id: \.offset) { _, warning in
+                let details = Self.details(warnings: warnings, loadStats: loadStats)
+                ForEach(Array(details.prefix(8).enumerated()), id: \.offset) { _, warning in
                     Text("• \(warning)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
