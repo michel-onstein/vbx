@@ -110,6 +110,55 @@ func liveTrackerActionsCrossTheBridge() async throws {
     #expect(cli == "source has no readable tracker metadata")
 }
 
+/// Exports the demo, from a copy holding a `.bv/hooks.yaml` whose pre-export
+/// hook leaves a marker; returns the reply's hook output and whether the
+/// marker was left.
+private func exportWithHook(exportHooks: Bool?) async throws -> (output: String?, ran: Bool) {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("vbx-hooks-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(
+        at: dir.appendingPathComponent(".bv"), withIntermediateDirectories: true)
+    try FileManager.default.copyItem(
+        at: URL(fileURLWithPath: fixturePath).appendingPathComponent(".beads"),
+        to: dir.appendingPathComponent(".beads"))
+    try """
+    hooks:
+      pre-export:
+        - name: marker
+          command: 'touch "$BV_EXPORT_PATH.ran"'
+    """.write(to: dir.appendingPathComponent(".bv/hooks.yaml"), atomically: true, encoding: .utf8)
+
+    let engine = BeadsEngine()
+    if let exportHooks {
+        _ = try await engine.open(path: dir.path, skipPhase2: true, exportHooks: exportHooks)
+    } else {
+        _ = try await engine.open(path: dir.path, skipPhase2: true)
+    }
+    defer { Task { await engine.close() } }
+    let report = dir.appendingPathComponent("report.md").path
+    let data = try await engine.rawJSON(
+        "export_report", request: ["path": report, "hooks_dir": dir.path])
+    let reply = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    return (reply["hook_output"] as? String,
+            FileManager.default.fileExists(atPath: report + ".ran"))
+}
+
+@Test("The app's default open never runs an export hook; the CLI's does")
+func exportHooksCrossTheBridge() async throws {
+    // A hook is a repository-configured subprocess the App Sandbox forbids,
+    // so the app's default must not even read the hook file.
+    let app = try await exportWithHook(exportHooks: nil)
+    #expect(app.output == nil)
+    #expect(!app.ran)
+
+    // vbx-cli's setting reaches the engine, which runs bv's hooks around the
+    // write and returns bv's summary for the CLI to print.
+    let cli = try await exportWithHook(exportHooks: true)
+    #expect(cli.ran)
+    #expect(cli.output?.contains("Hook execution: 1 succeeded, 0 failed") == true)
+}
+
 @Test("Phase 2 metrics arrive and rank the deepest blocker highest")
 func phase2Metrics() async throws {
     let engine = BeadsEngine()

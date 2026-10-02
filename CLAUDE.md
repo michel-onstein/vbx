@@ -272,6 +272,12 @@ them.
   the claim is bv's atomic `br update --claim`, taken from the bead's actions.
   Multi-repository workspaces are the exception still open — bv's workspace
   loader binds origins itself. See ADR-020.
+- **Only vbx-cli runs export hooks.** `.bv/hooks.yaml` commands run through
+  bv's `pkg/hooks` inside `export_report`, and only for a session opened with
+  `export_hooks` — which vbx-cli sets unless `--no-hooks` is given, and the app
+  never does, because a hook is a subprocess the sandbox forbids. The hook
+  text bv prints comes back in the payload for the CLI to print; the engine
+  has no stdout. Same pattern as live tracker actions (ADR-020).
 - **Analysis reads "now" from `robotNow()`, on every call.** It honours
   `SOURCE_DATE_EPOCH` everywhere bv 0.23+ does — label health, alerts, impact,
   ETA, readiness — which is what lets the parity check compare exactly. The

@@ -101,8 +101,14 @@ public actor BeadsEngine {
     /// which the App Sandbox forbids — so only `vbx-cli` passes `true`, and in
     /// the app every bead's actions carry the reason they are unavailable
     /// instead. See ADR-020.
+    ///
+    /// `exportHooks` runs the project's `.bv/hooks.yaml` around a report
+    /// `export_report` writes to disk, as `bv --export` does. A hook is a
+    /// repository-configured shell command — the same subprocess the sandbox
+    /// forbids — so only `vbx-cli` passes `true`, and not under `--no-hooks`.
     public func open(
-        path: String, skipPhase2: Bool = false, liveTrackerActions: Bool = false
+        path: String, skipPhase2: Bool = false, liveTrackerActions: Bool = false,
+        exportHooks: Bool = false
     ) throws -> WorkspaceInfo {
         close()
 
@@ -110,6 +116,7 @@ public actor BeadsEngine {
             [
                 "path": path, "skip_phase2": skipPhase2,
                 "live_tracker_actions": liveTrackerActions,
+                "export_hooks": exportHooks,
             ] as [String: Any]
         let configData = try JSONSerialization.data(withJSONObject: config)
         let configString = String(decoding: configData, as: UTF8.self)

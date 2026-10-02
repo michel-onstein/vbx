@@ -39,6 +39,12 @@ type OpenConfig struct {
 	// forbids, so only vbx-cli sets it. Off — the app's setting — every
 	// bead's actions say why they are unavailable instead. See ADR-020.
 	LiveTrackerActions bool `json:"live_tracker_actions"`
+	// ExportHooks runs the project's .bv/hooks.yaml around a report written
+	// to disk by export_report, as bv's --export does. A hook is a command
+	// the repository configures, run through `sh -c` — a subprocess the App
+	// Sandbox forbids — so only vbx-cli sets it, and only without
+	// --no-hooks. Off, export_report never reads the hook file.
+	ExportHooks bool `json:"export_hooks"`
 }
 
 // Session holds one loaded workspace and its analysis state.

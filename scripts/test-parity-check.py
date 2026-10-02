@@ -482,6 +482,47 @@ def test_report_exports(parity) -> None:
           any("data_hash" in difference for difference in found), str(found))
 
 
+def test_export_hooks(parity) -> None:
+    print("\nExport hooks (vbx-uos)")
+    names = [entry["name"] for entry in parity.HOOK_COMPARISONS]
+    check("each hook run has its own name", len(names) == len(set(names)), str(names))
+    check("every hook config runs with and without --no-hooks",
+          all({(entry["config"], "--no-hooks" in entry["args"])
+               for entry in parity.HOOK_COMPARISONS} >= {(config, False), (config, True)}
+              for config in parity.HOOK_CONFIGS), str(names))
+    yaml = "".join(parity.HOOK_CONFIGS.values())
+    check("pre- and post-export, an on_error: fail, a timeout and bad YAML are all covered",
+          all(part in yaml for part in ("pre-export:", "post-export:", "on_error: fail",
+                                        "timeout:", "hooks: [")), yaml)
+    check("--export-md and a JSON export run the hooks too",
+          any(entry.get("flag") == "--export-md" for entry in parity.HOOK_COMPARISONS)
+          and any("json" in entry["args"] for entry in parity.HOOK_COMPARISONS))
+
+    with tempfile.TemporaryDirectory() as scratch:
+        workspace = parity.build_hook_workspace(
+            ROOT / "Fixtures" / "demo", Path(scratch) / "ws", "pass")
+        check("the hooked workspace is the demo's beads beside .bv/hooks.yaml",
+              (workspace / ".beads" / "issues.jsonl").exists()
+              and (workspace / ".bv" / "hooks.yaml").read_text() == parity.HOOK_CONFIGS["pass"])
+
+    summary = "  [OK] before ({})\n  [OK] after ({})\n"
+    for left, right in (("3ms", "12ms"), ("0s", "1.002s"), ("250µs", "1m0s")):
+        check(f"run times {left} and {right} normalise alike",
+              parity.HOOK_DURATION.sub("x", summary.format(left, left))
+              == parity.HOOK_DURATION.sub("x", summary.format(right, right)))
+    check("a timeout is not a run time",
+          parity.HOOK_DURATION.sub("x", "  [FAIL] slow: timeout after 200ms\n")
+          == "  [FAIL] slow: timeout after 200ms\n")
+
+    ok = ((0, "Done!\n", "", b"r"), {"report.pre": "absent\n"})
+    check("identical hooked runs are no difference", parity.hook_differences(ok, ok) == [])
+    found = parity.hook_differences(((0, "Done!\n", "", b"r"), {"report.pre": "present\n"}), ok)
+    check("a differing marker is a difference", len(found) == 1 and "report.pre" in found[0],
+          str(found))
+    found = parity.hook_differences(((0, "Done!\n", "", b"r"), {}), ok)
+    check("a marker only one side left is a difference", len(found) == 1, str(found))
+
+
 def test_search(parity) -> None:
     print("\nSearch (vbx-52c)")
     searches = [entry for entry in parity.COMPARISONS if entry["vbx"] == "robot-search"]
@@ -547,6 +588,7 @@ def main() -> int:
     parity = load_parity()
     test_search(parity)
     test_report_exports(parity)
+    test_export_hooks(parity)
     test_feedback_recording(parity)
     test_triage_feedback_and_not_ready(parity)
     test_bv_version_gate(parity)

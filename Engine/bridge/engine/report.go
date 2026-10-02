@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/export"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/hooks"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/recipe"
 )
@@ -41,6 +43,10 @@ type reportRequest struct {
 	Title string `json:"title"`
 	// Path, when set, writes the report to disk as well as returning it.
 	Path string `json:"path"`
+	// HooksDir is the project directory whose .bv/hooks.yaml is run around
+	// the write. Empty is bv's choice, the working directory. Read only when
+	// the session was opened with ExportHooks and Path is set.
+	HooksDir string `json:"hooks_dir"`
 }
 
 // reportPayload is what the engine returns. The content always comes back,
@@ -57,6 +63,13 @@ type reportPayload struct {
 	// LabelMatches is how many beads carry the requested label, present only
 	// when one was requested: bv warns when it is zero.
 	LabelMatches *int `json:"label_matches,omitempty"`
+	// HookOutput is what bv prints to stdout around the write — each hook
+	// as it starts, the summary, and the failure line — byte for byte, for
+	// the caller to print after its "Exporting" line. HookFailed is bv's
+	// os.Exit(1): a pre-export hook failed (and nothing was written) or an
+	// `on_error: fail` post-export hook did (after the write).
+	HookOutput string `json:"hook_output,omitempty"`
+	HookFailed bool   `json:"hook_failed,omitempty"`
 }
 
 // exportReport renders a report the way `bv --export` does.
@@ -122,15 +135,7 @@ func (s *Session) exportReport(req []byte) ([]byte, error) {
 		return nil, fmt.Errorf("rendering report: %w", err)
 	}
 
-	written := ""
-	if r.Path != "" {
-		if err := os.WriteFile(r.Path, content, 0o644); err != nil {
-			return nil, fmt.Errorf("writing %s: %w", r.Path, err)
-		}
-		written = r.Path
-	}
-
-	return json.Marshal(reportPayload{
+	payload := reportPayload{
 		Content:      string(content),
 		Format:       options.Format,
 		IncludeGraph: options.IncludeGraph,
@@ -138,9 +143,73 @@ func (s *Session) exportReport(req []byte) ([]byte, error) {
 		Title:        options.Title,
 		IssueCount:   len(selected),
 		Bytes:        len(content),
-		Path:         written,
 		LabelMatches: labelMatches,
-	})
+	}
+	if r.Path != "" {
+		hooksDir := ""
+		if s.config.ExportHooks {
+			hooksDir = r.HooksDir
+			if hooksDir == "" {
+				hooksDir, _ = os.Getwd()
+			}
+		}
+		if err := writeReport(&payload, r.Path, content, hooks.ExportContext{
+			ExportPath:   r.Path,
+			ExportFormat: options.Format,
+			IssueCount:   len(selected),
+			Timestamp:    options.GeneratedAt,
+		}, s.config.ExportHooks, hooksDir); err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(payload)
+}
+
+// writeReport writes a rendered report to path, running the project's export
+// hooks around the write when runHooks is set — bv's export branch in
+// cmd/bv, from loading .bv/hooks.yaml to the post-export summary. The hooks
+// themselves are bv's pkg/hooks: its loader, its executor (environment,
+// credential scrubbing, timeouts, on_error) and its summary. Only the
+// printing is redirected, into payload.HookOutput, because the engine has no
+// stdout of its own; the text is bv's, line for line.
+func writeReport(payload *reportPayload, path string, content []byte,
+	ctx hooks.ExportContext, runHooks bool, hooksDir string) error {
+	var out strings.Builder
+	var executor *hooks.Executor
+	if runHooks {
+		loader := hooks.NewLoader(hooks.WithProjectDir(hooksDir))
+		if err := loader.Load(); err != nil {
+			fmt.Fprintf(&out, "Warning: failed to load hooks: %v\n", err)
+		} else if loader.HasHooks() {
+			executor = hooks.NewExecutor(loader.Config(), ctx)
+			executor.SetLogger(func(msg string) {
+				fmt.Fprintf(&out, "  → %s\n", msg)
+			})
+			if err := executor.RunPreExport(); err != nil {
+				fmt.Fprintf(&out, "Error: pre-export hook failed: %v\n", err)
+				payload.HookOutput, payload.HookFailed = out.String(), true
+				return nil
+			}
+		}
+	}
+
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	payload.Path = path
+
+	if executor != nil {
+		postErr := executor.RunPostExport()
+		if len(executor.Results()) > 0 {
+			fmt.Fprintln(&out, executor.Summary())
+		}
+		if postErr != nil {
+			fmt.Fprintf(&out, "Error: %v (export written to %s)\n", postErr, path)
+			payload.HookFailed = true
+		}
+	}
+	payload.HookOutput = out.String()
+	return nil
 }
 
 // reportSelection is the beads a report renders, in the order it renders
