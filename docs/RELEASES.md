@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.14.3 — 2026-10-02
+
+### Fixes
+
+- beads-check --fix stamps the worktree it runs in, not the main checkout ([#110](https://github.com/michel-onstein/vbx/pull/110))
+
 ## 0.14.2 — 2026-10-02
 
 ### Fixes
