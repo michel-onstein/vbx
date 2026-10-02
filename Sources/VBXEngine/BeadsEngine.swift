@@ -184,6 +184,34 @@ public actor BeadsEngine {
         try call("triage", request: Self.labelScope(label), as: Triage.self)
     }
 
+    // MARK: - Triage feedback
+
+    /// The feedback on disk, as `bv --feedback-show` reports it. Writes
+    /// nothing.
+    public func triageFeedback() throws -> TriageFeedbackResult {
+        try call("triage_feedback", as: TriageFeedbackResult.self)
+    }
+
+    /// Records a verdict on one bead into `.beads/feedback.json`, scored by
+    /// the engine as `bv --feedback-accept` / `--feedback-ignore` scores it.
+    ///
+    /// The session's own copy of the feedback is deliberately not refreshed:
+    /// the reload that follows sees the file changed, and re-ranks.
+    @discardableResult
+    public func recordTriageFeedback(
+        id: String, verdict: TriageVerdict
+    ) throws -> TriageFeedbackResult {
+        try call(
+            "triage_feedback_record", request: ["id": id, "action": verdict.rawValue],
+            as: TriageFeedbackResult.self)
+    }
+
+    /// Drops every verdict, as `bv --feedback-reset` does.
+    @discardableResult
+    public func resetTriageFeedback() throws -> TriageFeedbackResult {
+        try call("triage_feedback_reset", as: TriageFeedbackResult.self)
+    }
+
     public func labelHealth() throws -> LabelAnalysis {
         try call("label_health", as: LabelAnalysis.self)
     }

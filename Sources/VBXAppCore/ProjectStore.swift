@@ -130,6 +130,18 @@ public final class ProjectStore: ObservableObject {
     @Published public private(set) var labelFlow: LabelFlow = .empty
     @Published public private(set) var labelAttention: LabelAttention = .empty
     @Published public private(set) var triage: Triage = .empty
+    /// The triage feedback summary the panel shows: the block triage was
+    /// scored with, or — when triage omits it, as bv does with no verdict on
+    /// file — the engine's `triage_feedback`, which still names how many
+    /// verdicts the weights wait for. Nil only until the first triage loads.
+    @Published public private(set) var triageFeedbackState: TriageFeedback?
+    /// Verdicts given from this window, by bead, so a row shows which one it
+    /// got. Cleared by a reset and by opening another workspace; the counts
+    /// themselves always come from the engine.
+    @Published public private(set) var triageVerdicts: [String: TriageVerdict] = [:]
+    /// Why the last feedback write failed — say, a workspace this process may
+    /// read but not write. Cleared by the next one that succeeds.
+    @Published public private(set) var triageFeedbackError: String?
     @Published public private(set) var info: WorkspaceInfo?
     @Published public private(set) var loadError: String?
     @Published public private(set) var isLoading = false
@@ -693,6 +705,9 @@ public final class ProjectStore: ObservableObject {
                 // no repository at all, where no walk runs to overwrite it, it
                 // would simply stay.
                 resetHistory()
+                // Verdicts name beads of the workspace being left.
+                triageVerdicts = [:]
+                triageFeedbackError = nil
             }
             try await refreshAll()
             // Positions name beads, and the previous workspace's beads do not
@@ -1000,7 +1015,7 @@ public final class ProjectStore: ObservableObject {
         // thing a user wants to see without asking.
         await refreshAlerts()
         // Triage depends on Phase-2 scores; it is refreshed again once they land.
-        triage = (try? await engine.triage()) ?? .empty
+        await publishTriage((try? await engine.triage()) ?? .empty)
         rebuildUnblocksCache()
         // Drop ids the reload removed, and fall back to the first row when
         // that empties the selection — an empty inspector after a reload reads
@@ -1032,7 +1047,7 @@ public final class ProjectStore: ObservableObject {
             // Recommendations are scored from PageRank and betweenness, so
             // they are only meaningful once Phase 2 has landed.
             if triageNeedsRefresh {
-                triage = (try? await engine.triage()) ?? triage
+                await publishTriage((try? await engine.triage()) ?? triage)
                 triageNeedsRefresh = false
             }
         } catch {
@@ -1498,6 +1513,64 @@ public final class ProjectStore: ObservableObject {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    // MARK: - Triage feedback
+
+    /// Publishes a triage, with the feedback summary the panel shows beside it.
+    ///
+    /// Triage carries bv's `feedback` block only once a verdict exists. With
+    /// none, the engine's `triage_feedback` answers instead, so the panel can
+    /// still say how many verdicts the weights wait for — a number that is
+    /// bv's, not one written down here.
+    private func publishTriage(_ fresh: Triage) async {
+        triage = fresh
+        if let block = fresh.feedback {
+            triageFeedbackState = block
+        } else {
+            triageFeedbackState = (try? await engine.triageFeedback())?.feedback
+        }
+    }
+
+    /// Records a verdict on a triage recommendation, then reloads.
+    ///
+    /// The engine writes `.beads/feedback.json` in-process, through bv's own
+    /// functions; the score it records is the engine's. It deliberately leaves
+    /// the session's copy of the feedback alone, so the reload sees the file
+    /// changed and re-ranks — the same path a `bv --feedback-accept` from a
+    /// terminal takes through the watch. Reloading here rather than waiting
+    /// for the watch makes the panel answer the click at once; the watch's own
+    /// reload then finds nothing changed and costs nothing.
+    ///
+    /// A write the process is not allowed to make — the App Store build holds
+    /// the workspace read-only (ADR-025) — lands in ``triageFeedbackError``
+    /// and changes nothing else.
+    public func recordTriageFeedback(_ verdict: TriageVerdict, for id: String) async {
+        guard isLoaded else { return }
+        do {
+            try await engine.recordTriageFeedback(id: id, verdict: verdict)
+        } catch {
+            triageFeedbackError = error.localizedDescription
+            return
+        }
+        triageFeedbackError = nil
+        triageVerdicts[id] = verdict
+        await reload()
+    }
+
+    /// Drops every triage verdict, as `bv --feedback-reset` does, then
+    /// reloads so the ranking returns to the default weights.
+    public func resetTriageFeedback() async {
+        guard isLoaded else { return }
+        do {
+            try await engine.resetTriageFeedback()
+        } catch {
+            triageFeedbackError = error.localizedDescription
+            return
+        }
+        triageFeedbackError = nil
+        triageVerdicts = [:]
+        await reload()
     }
 
     // MARK: - Alerts
