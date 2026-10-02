@@ -100,6 +100,7 @@ view snapshots for inspection.
 | `Fixtures/demo` | 18-bead workspace used by tests and demos |
 | `Fixtures/readiness` | 21 beads covering bv 0.25's readiness and blocking cases; tests and parity only |
 | `Fixtures/sprints` | 15 beads and 3 sprints: each at-risk signal, a stale `closed_at`, a tombstone; tests and parity only |
+| `Fixtures/feedback`, `Fixtures/feedback-few` | The same 8 beads with a triage `feedback.json` of 4 verdicts (applied: fb-5 outranks the hub fb-1) and of 2 (reported, not applied); fb-6 carries the not-ready label `needs-design`. Tests and parity only |
 | `Resources` | App icon: generated `vbx-icon.svg` and the committed `vbx.icns` |
 | `Resources/entitlements` | Developer ID entitlements, plus the App Store *template* |
 | `docs/images` | `vbx-icon.png`, the same artwork at 512px for the README |

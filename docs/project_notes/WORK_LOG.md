@@ -5,6 +5,21 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Triage feedback and not-ready labels, as in bv (vbx-5ba)
+
+Triage, `--robot-next` and `--robot-priority` now score with the factor
+weights in `.beads/feedback.json` once it holds 3 verdicts, as bv 0.25.2's
+`loadRobotFeedback` does, and triage carries bv's `feedback` block (absent
+with no verdicts; `applied: false` below 3). The session holds the parsed file
+and the reload gate fingerprints it, so an edit to it alone reloads the app's
+triage — the file is in the `.beads` directory the watch already follows.
+`vbx-cli` gains `--robot-not-ready-labels` with the `BV_ROBOT_NOT_READY_LABELS`
+fallback, on triage and `--robot-next` only. New `Fixtures/feedback` and
+`Fixtures/feedback-few`; parity lifts bv's `feedback` block into every triage
+comparison and compares the not-ready flag, the variable and both. Parity with
+bv 0.25.2: 0 differing commands before (4 workspaces) and after (6). Recording
+feedback (`--feedback-accept` and friends) is left to the parity epic vbx-htg.
+
 ## 2026-10-01 — Parity check refuses a bv that is not the engine's (vbx-1z7)
 
 `scripts/parity-check.py` reads the beads_viewer version from

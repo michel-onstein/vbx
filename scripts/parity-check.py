@@ -41,9 +41,11 @@ tombstoned blocker — which is how numbers moved under the engine bump while
 every check stayed green. So the run covers every workspace in FIXTURES: the
 demo, `Fixtures/readiness`, the same readiness beads as a `beads.db`, built
 at run time by `build_sqlite_workspace` because vbx reads SQLite through its
-own loader rather than bv's, and `Fixtures/sprints`, the only one with sprints
-for the burndown and sprint commands to read. `--workspace` narrows the run to
-one.
+own loader rather than bv's, `Fixtures/sprints`, the only one with sprints
+for the burndown and sprint commands to read, and `Fixtures/feedback` and
+`Fixtures/feedback-few`, the only ones with a triage feedback file — one with
+enough verdicts for bv to apply its weights and one without. `--workspace`
+narrows the run to one.
 
 Each differing command reports its first difference and how many more there
 are; `--verbose` lists every one.
@@ -92,6 +94,12 @@ FIXTURES = [
     # each at-risk signal, a reopened bead with a stale closed_at, a tombstone
     # and an id no bead has.
     {"name": "sprints", "workspace": "Fixtures/sprints"},
+    # Triage feedback (.beads/feedback.json), which bv applies to triage, next
+    # and priority once it holds MinFeedbackSamples (3) verdicts. The same
+    # beads twice: with four verdicts, whose weights put fb-5 above the hub
+    # fb-1, and with two, which bv reports but does not apply (vbx-5ba).
+    {"name": "feedback", "workspace": "Fixtures/feedback"},
+    {"name": "feedback-few", "workspace": "Fixtures/feedback-few"},
 ]
 
 # br's issues columns, in br's order. A beads.db built here has the column
@@ -235,12 +243,21 @@ SPRINT_OMITZERO = {"created_at", "updated_at"}
 # `bv_args` follow the flag on each side — the two spell a value differently.
 # `only` names the fixtures a command is compared over, for one that needs data
 # only some fixtures hold; elsewhere it is reported as skipped, never passed.
+# `bv_lift` copies top-level bv keys into the compared subtree (see lift), and
+# `env` is given to both binaries.
+#
+# Triage's `feedback` block is lifted on every run, so a fixture with no
+# feedback.json proves vbx emits none, as well as the feedback fixtures
+# proving it emits bv's.
+TRIAGE_PATHS = {"bv_path": "triage", "bv_lift": ("feedback",)}
+NOT_READY = "needs-design"
+
 COMPARISONS = [
     {"vbx": "robot-label-flow", "bv": "robot-label-flow", "bv_path": "flow"},
     {"vbx": "robot-label-health", "bv": "robot-label-health", "bv_path": "results"},
     {"vbx": "robot-label-attention", "bv": "robot-label-attention", "compare": False,
      "note": "bv projects a ranked subset; vbx returns the full result"},
-    {"vbx": "robot-triage", "bv": "robot-triage", "bv_path": "triage"},
+    {"vbx": "robot-triage", "bv": "robot-triage", **TRIAGE_PATHS},
     {"vbx": "robot-plan", "bv": "robot-plan", "bv_path": "plan"},
     {"vbx": "robot-suggest", "bv": "robot-suggest"},
     {"vbx": "robot-recipes", "bv": "robot-recipes", "compare": False,
@@ -289,7 +306,7 @@ COMPARISONS = [
      **paths}
     for command, paths in (
         ("robot-graph", {}),
-        ("robot-triage", {"bv_path": "triage"}),
+        ("robot-triage", TRIAGE_PATHS),
         ("robot-plan", {"bv_path": "plan"}),
         ("robot-priority", {"bv_path": "recommendations", "vbx_path": "recommendations"}),
         ("robot-next", {}),
@@ -321,6 +338,26 @@ COMPARISONS = [
         ["--capacity-label", "ui"],
         ["--capacity-label", "no-such-label"],
         ["--label", "ui", "--capacity-label", "engine"],
+    )
+] + [
+    # bv's opt-in not-ready label-class keeps a bead out of the claimable top
+    # picks of triage and --robot-next, from the flag or, failing that, the
+    # environment (vbx-5ba). Over the feedback fixture, whose fb-6 is a
+    # high-ranked bead labelled needs-design. The last run sets both, and the
+    # flag must win.
+    {"vbx": command, "bv": command, "name": f"{command} {spelling}", "only": {"feedback"},
+     **paths, **how}
+    for command, paths in (("robot-triage", TRIAGE_PATHS), ("robot-next", {}))
+    for spelling, how in (
+        (f"--robot-not-ready-labels {NOT_READY}",
+         {"vbx_args": ["--robot-not-ready-labels", NOT_READY],
+          "bv_args": ["--robot-not-ready-labels", NOT_READY]}),
+        (f"BV_ROBOT_NOT_READY_LABELS={NOT_READY}",
+         {"env": {"BV_ROBOT_NOT_READY_LABELS": NOT_READY}}),
+        (f"--robot-not-ready-labels control BV_ROBOT_NOT_READY_LABELS={NOT_READY}",
+         {"vbx_args": ["--robot-not-ready-labels", "control"],
+          "bv_args": ["--robot-not-ready-labels", "control"],
+          "env": {"BV_ROBOT_NOT_READY_LABELS": NOT_READY}}),
     )
 ]
 
@@ -387,9 +424,14 @@ def check_bv_version(engine: str | None, bv_path: str | None,
         + GET_MATCHING_BV.format(version=engine))
 
 
-def run(binary: str, args: list[str], cwd: Path) -> tuple[int, str, str]:
-    """Runs a binary, returning (status, stdout, stderr)."""
-    environment = dict(os.environ, SOURCE_DATE_EPOCH=PINNED_CLOCK)
+def run(binary: str, args: list[str], cwd: Path,
+        env: dict[str, str] | None = None) -> tuple[int, str, str]:
+    """Runs a binary, returning (status, stdout, stderr).
+
+    `env` adds variables on top of the inherited environment — a comparison's
+    own, given identically to both binaries.
+    """
+    environment = dict(os.environ, SOURCE_DATE_EPOCH=PINNED_CLOCK, **(env or {}))
     result = subprocess.run(
         [binary, *args],
         cwd=cwd,
@@ -410,6 +452,23 @@ def dig(value, path: str | None):
             return None
         value = value[part]
     return value
+
+
+def lift(whole, subtree, keys):
+    """Copies bv's top-level `keys` into the subtree being compared.
+
+    bv puts some of a command's data beside its payload rather than in it —
+    triage's `feedback` block sits next to `triage` — where vbx, which returns
+    the payload itself, carries it at the payload's top level. A key bv omits
+    stays omitted, so a block vbx emits and bv does not is still a difference.
+    """
+    if not keys or not isinstance(whole, dict) or not isinstance(subtree, dict):
+        return subtree
+    lifted = dict(subtree)
+    for key in keys:
+        if key in whole:
+            lifted[key] = whole[key]
+    return lifted
 
 
 def build_sqlite_workspace(jsonl: Path, destination: Path) -> Path:
@@ -634,9 +693,10 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
             continue
 
         vbx_status, vbx_out, vbx_err = run(
-            vbx, [f"--{command}", *entry.get("vbx_args", [])], workspace)
+            vbx, [f"--{command}", *entry.get("vbx_args", [])], workspace, entry.get("env"))
         bv_status, bv_out, bv_err = run(
-            bv, [f"--{entry['bv']}", *entry.get("bv_args", []), "--format", "json"], workspace)
+            bv, [f"--{entry['bv']}", *entry.get("bv_args", []), "--format", "json"], workspace,
+            entry.get("env"))
 
         if vbx_status != 0:
             differed.append((name, [f"vbx-cli exited {vbx_status}: {vbx_err.strip()}"]))
@@ -647,7 +707,9 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
 
         try:
             vbx_payload = dig(strip_envelope_only(json.loads(vbx_out)), entry.get("vbx_path"))
-            bv_payload = dig(strip_envelope_only(json.loads(bv_out)), entry.get("bv_path"))
+            bv_whole = strip_envelope_only(json.loads(bv_out))
+            bv_payload = lift(bv_whole, dig(bv_whole, entry.get("bv_path")),
+                              entry.get("bv_lift", ()))
         except json.JSONDecodeError as error:
             differed.append((name, [f"could not parse output: {error}"]))
             continue

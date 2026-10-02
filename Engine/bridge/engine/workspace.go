@@ -99,6 +99,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
 	analyzer, stats := s.analyse(issues, readiness, nil)
+	s.refreshFeedback(configPath, "workspace")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -130,12 +131,14 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 	}
 	s.mu.RUnlock()
 
+	// As in the single-repository reload: feedback is outside the hash.
+	feedbackChanged := s.refreshFeedback(configPath, "workspace")
 	if newHash == oldHash && oldHash != "" {
 		payload, err := s.info()
 		if err != nil {
 			return nil, err
 		}
-		return withChangedFlag(payload, false)
+		return withChangedFlag(payload, feedbackChanged)
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)

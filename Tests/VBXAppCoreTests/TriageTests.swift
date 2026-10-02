@@ -85,3 +85,39 @@ func triageDecodingIsTolerant() throws {
     #expect(triage.blockersToClear.isEmpty)
     #expect(!triage.isEmpty)
 }
+
+/// A feedback edit changes no bead, so a reload gated on the bead hash alone
+/// would never re-read triage — and the app would go on ranking with the old
+/// weights until some unrelated bead changed (vbx-5ba). The file sits beside
+/// the beads, in the directory the watch follows; this pins the other half,
+/// that the reload it triggers counts as a change.
+@MainActor
+@Test("Adding triage feedback alone reloads and reorders triage")
+func feedbackEditReloadsTriage() async throws {
+    let fixture = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/feedback/.beads")
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("vbx-feedback-\(UUID().uuidString)")
+    let beads = dir.appendingPathComponent(".beads")
+    try FileManager.default.createDirectory(at: beads, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.copyItem(
+        at: fixture.appendingPathComponent("issues.jsonl"),
+        to: beads.appendingPathComponent("issues.jsonl"))
+
+    let store = ProjectStore()
+    await store.open(path: dir.path)
+    #expect(store.triage.recommendations.first?.id == "fb-1")
+
+    try FileManager.default.copyItem(
+        at: fixture.appendingPathComponent("feedback.json"),
+        to: beads.appendingPathComponent("feedback.json"))
+    let reloaded = await store.reload()
+
+    #expect(reloaded, "a feedback-only edit did not count as a change")
+    #expect(store.triage.recommendations.first?.id == "fb-5")
+    await store.close()
+}
