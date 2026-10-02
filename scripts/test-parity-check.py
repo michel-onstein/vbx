@@ -150,7 +150,9 @@ def test_declared_differences_are_narrow(parity) -> None:
     sqlite_fixtures = {fixture["name"] for fixture in parity.FIXTURES if fixture.get("sqlite")}
     check("every declaring fixture is read from a beads.db", set(declared) <= sqlite_fixtures,
           str(set(declared) - sqlite_fixtures))
-    commands = {entry["vbx"] for entry in parity.COMPARISONS if entry.get("bv")}
+    # Declarations are keyed by the run's name, which is the command unless the
+    # entry is one of several runs of it (`robot-capacity --agents 3`).
+    commands = {entry.get("name", entry["vbx"]) for entry in parity.COMPARISONS if entry.get("bv")}
     for fixture, entries in declared.items():
         for (command, path), reason in entries.items():
             check(f"{fixture}: --{command} {path} names a compared command",
@@ -216,13 +218,79 @@ def test_label_scoped_runs(parity) -> None:
 
     gaps = [entry for entry in parity.COMPARISONS
             if entry.get("compare") is False and "--label" in entry.get("name", "")]
+    # Vacuous once every label-scoped run matches, as it has since #103.
     check("a label-scoped command that does not match yet is a skip naming its bead",
-          gaps != [] and all("(vbx-" in entry.get("note", "") for entry in gaps),
+          all("(vbx-" in entry.get("note", "") for entry in gaps),
           str([entry.get("note") for entry in gaps]))
+
+
+def test_bv_version_gate(parity) -> None:
+    print("\nbv's version against the engine's (vbx-1z7)")
+    engine = parity.engine_bv_version(ROOT / "Engine" / "bridge" / "go.mod")
+    check("the engine's beads_viewer version is read from go.mod",
+          engine is not None and engine.startswith("v"), str(engine))
+    with tempfile.TemporaryDirectory() as scratch:
+        go_mod = Path(scratch) / "go.mod"
+        go_mod.write_text("module x\n\nrequire (\n\tgithub.com/Dicklesworthstone/beads_viewer"
+                          " v0.25.3-0.20261001000000-abcdef123456 // indirect\n)\n")
+        check("a pseudo-version is read whole",
+              parity.engine_bv_version(go_mod) == "v0.25.3-0.20261001000000-abcdef123456",
+              str(parity.engine_bv_version(go_mod)))
+        check("an unreadable go.mod has no version",
+              parity.engine_bv_version(Path(scratch) / "absent") is None)
+
+    path = "/opt/homebrew/bin/bv"
+
+    state, message = parity.check_bv_version("v0.25.2", path, "bv v0.25.2\n")
+    check("equal versions match", state == "match", message)
+    check("equal versions compare and pass",
+          parity.bv_skip_reason(state, "v0.25.2", False) is None
+          and parity.bv_banner(state, message, False) is None
+          and parity.exit_status(0, 0, state, False) == 0)
+
+    state, message = parity.check_bv_version("v0.25.2", path, "bv v0.20.0")
+    check("a different version is a mismatch", state == "mismatch", message)
+    check("the mismatch names both versions and the path",
+          all(part in message for part in ("v0.20.0", "v0.25.2", path)), message)
+    check("the mismatch says how to get the matching bv",
+          "brew upgrade bv" in message and "releases/tag/v0.25.2" in message, message)
+    check("a mismatch compares nothing", parity.bv_skip_reason(state, "v0.25.2", False) is not None)
+    banner = parity.bv_banner(state, message, False) or ""
+    check("a mismatch prints a banner naming both versions",
+          "BV VERSION MISMATCH" in banner and "v0.20.0" in banner and "v0.25.2" in banner, banner)
+    check("a mismatch fails the run even with nothing differing",
+          parity.exit_status(0, 0, state, False) == 1)
+    check("--allow-bv-mismatch compares anyway",
+          parity.bv_skip_reason(state, "v0.25.2", True) is None)
+    check("--allow-bv-mismatch still warns",
+          "BV VERSION MISMATCH" in (parity.bv_banner(state, message, True) or ""))
+    check("--allow-bv-mismatch passes a clean run",
+          parity.exit_status(0, 0, state, True) == 0)
+    check("--allow-bv-mismatch does not hide a difference",
+          parity.exit_status(1, 0, state, True) == 1)
+
+    for output in ("", "beads viewer (devel)", "<[Errno 13] Permission denied>"):
+        state, message = parity.check_bv_version("v0.25.2", path, output)
+        check(f"an unparseable version ({output!r}) is a mismatch, not a match",
+              state == "mismatch" and "cannot read a version" in message and path in message,
+              f"{state}: {message}")
+    state, message = parity.check_bv_version(None, path, "bv v0.25.2")
+    check("an unreadable engine version is a mismatch too", state == "mismatch", message)
+
+    state, message = parity.check_bv_version("v0.25.2", None, None)
+    check("a missing bv is missing", state == "missing", message)
+    check("a missing bv skips every comparison",
+          parity.bv_skip_reason(state, "v0.25.2", False) == "bv is not installed")
+    check("a missing bv says skipped, not passed", "skipped rather than passed" in message, message)
+    check("a missing bv does not fail the run", parity.exit_status(0, 0, state, False) == 0)
+
+    check("`bv --version` output is parsed", parity.parse_bv_version("bv v0.25.2") == "v0.25.2")
+    check("a version without a v is parsed", parity.parse_bv_version("0.25.2") == "v0.25.2")
 
 
 def main() -> int:
     parity = load_parity()
+    test_bv_version_gate(parity)
     test_label_scoped_runs(parity)
     test_envelope_only_keys_are_one_list(parity)
     test_declared_differences_are_narrow(parity)

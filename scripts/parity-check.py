@@ -48,6 +48,17 @@ one.
 Each differing command reports its first difference and how many more there
 are; `--verbose` lists every one.
 
+*Which bv.* The comparison is only meaningful against the bv the engine is
+built on — the beads_viewer version in Engine/bridge/go.mod. A bv from another
+release disagrees wherever upstream changed its output between the two, and
+every such change reads as a vbx bug. So the run reads `bv --version` first
+and, when it does not match (or cannot be read), says so at the top and in the
+summary, naming both versions and the binary's path, and compares nothing:
+every command is reported as skipped and the run exits 1. A missing bv is
+skipped too, but exits 0 as before — nothing was claimed either way.
+`--allow-bv-mismatch` runs the comparisons anyway, still under the warning,
+for deliberately measuring what an upgrade would change.
+
 Exit status is 0 when every comparable command agrees, 1 when any differs.
 Commands bv does not have, and commands vbx has not implemented, are reported
 as coverage gaps rather than silently skipped — a harness that only checks the
@@ -60,6 +71,8 @@ import argparse
 import json
 import math
 import os
+import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -312,6 +325,68 @@ COMPARISONS = [
 ]
 
 
+BEADS_VIEWER_MODULE = "github.com/Dicklesworthstone/beads_viewer"
+GET_MATCHING_BV = (
+    "Install the matching bv: `brew upgrade bv`, or the release binary from "
+    "https://github.com/Dicklesworthstone/beads_viewer/releases/tag/{version} "
+    "first on PATH (or pass --bv). --allow-bv-mismatch compares anyway."
+)
+
+
+def engine_bv_version(go_mod: Path) -> str | None:
+    """The beads_viewer version the engine is built on, from go.mod."""
+    try:
+        text = go_mod.read_text()
+    except OSError:
+        return None
+    match = re.search(rf"^\s*(?:require\s+)?{re.escape(BEADS_VIEWER_MODULE)}\s+(v\S+)", text, re.M)
+    return match.group(1) if match else None
+
+
+def parse_bv_version(output: str) -> str | None:
+    """`bv --version` prints `bv v0.25.2`; returns `v0.25.2`, or None."""
+    match = re.search(r"\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?)", output)
+    return f"v{match.group(1)}" if match else None
+
+
+def read_bv_version(path: str) -> str:
+    """Whatever `bv --version` prints, or why it printed nothing usable."""
+    try:
+        result = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        return f"<{error}>"
+    return (result.stdout + result.stderr).strip()
+
+
+def check_bv_version(engine: str | None, bv_path: str | None,
+                     version_output: str | None) -> tuple[str, str]:
+    """Decides whether this bv can be compared with, returning (state, message).
+
+    state is `missing` (no bv: skip, as ever), `match`, or `mismatch` — which
+    covers an unreadable version on either side, because a comparison that
+    cannot be shown to be against the right bv is not one.
+    """
+    if bv_path is None:
+        return "missing", "bv is not installed; comparisons were skipped rather than passed."
+    if engine is None:
+        return "mismatch", (
+            f"cannot read the engine's {BEADS_VIEWER_MODULE} version from "
+            f"Engine/bridge/go.mod, so {bv_path} cannot be shown to match it.")
+    found = parse_bv_version(version_output or "")
+    if found is None:
+        shown = (version_output or "").strip()[:80] or "nothing"
+        return "mismatch", (
+            f"cannot read a version from `{bv_path} --version` (it printed {shown!r}); "
+            f"the engine is built on bv {engine}. "
+            + GET_MATCHING_BV.format(version=engine))
+    if found.lstrip("v") == engine.lstrip("v"):
+        return "match", f"bv {found} at {bv_path} matches the engine's beads_viewer {engine}."
+    return "mismatch", (
+        f"bv {found} at {bv_path} is not the engine's beads_viewer {engine}: every "
+        f"difference between those releases would read as a vbx bug. "
+        + GET_MATCHING_BV.format(version=engine))
+
+
 def run(binary: str, args: list[str], cwd: Path) -> tuple[int, str, str]:
     """Runs a binary, returning (status, stdout, stderr)."""
     environment = dict(os.environ, SOURCE_DATE_EPOCH=PINNED_CLOCK)
@@ -516,9 +591,13 @@ def implemented_commands(vbx: str, cwd: Path) -> set[str]:
     return {entry["flag"] for entry in json.loads(out)["commands"]}
 
 
-def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
+def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
                       label: str, verbose: bool) -> tuple[int, int]:
     """Runs every comparison over one workspace and prints the result.
+
+    bv_skip, when set, is why no command is compared against bv — it is not
+    installed, or it is not the engine's version — and every comparable
+    command is reported as skipped with it.
 
     Returns (differed, missing) so the caller can total them across
     workspaces.
@@ -550,8 +629,8 @@ def compare_workspace(vbx: str, bv: str, have_bv: bool, workspace: Path,
         if "only" in entry and label not in entry["only"]:
             skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
             continue
-        if not have_bv:
-            skipped.append((name, "bv is not installed"))
+        if bv_skip:
+            skipped.append((name, bv_skip))
             continue
 
         vbx_status, vbx_out, vbx_err = run(
@@ -637,6 +716,9 @@ def main() -> int:
                         help="compare this workspace only, instead of every one in FIXTURES")
     parser.add_argument("--vbx", default=".build/debug/vbx-cli")
     parser.add_argument("--bv", default="bv")
+    parser.add_argument("--allow-bv-mismatch", action="store_true",
+                        help="compare even when bv --version is not the engine's beads_viewer "
+                             "version (Engine/bridge/go.mod); the run still warns")
     parser.add_argument("--verbose", action="store_true",
                         help="list every difference, not just the first per command")
     args = parser.parse_args()
@@ -652,9 +734,18 @@ def main() -> int:
     if args.workspace:
         fixtures = [{"name": Path(args.workspace).name, "workspace": args.workspace}]
 
-    have_bv = subprocess.run(
-        ["which", args.bv], capture_output=True, text=True
-    ).returncode == 0
+    bv_path = shutil.which(args.bv)
+    engine = engine_bv_version(root / "Engine" / "bridge" / "go.mod")
+    version_output = read_bv_version(bv_path) if bv_path else None
+    state, message = check_bv_version(engine, bv_path, version_output)
+    bv_skip = bv_skip_reason(state, engine, args.allow_bv_mismatch)
+    banner = bv_banner(state, message, args.allow_bv_mismatch)
+    if banner:
+        print(banner)
+        print()
+    else:
+        print(message)
+        print()
 
     differed = missing = 0
     with tempfile.TemporaryDirectory(prefix="vbx-parity-") as scratch:
@@ -667,16 +758,50 @@ def main() -> int:
                 workspace = build_sqlite_workspace(
                     workspace / ".beads" / "issues.jsonl",
                     Path(scratch) / fixture["workspace"].replace("/", "-"))
-            d, m = compare_workspace(vbx, args.bv, have_bv, workspace,
+            d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
                                      fixture["name"], args.verbose)
             differed += d
             missing += m
 
     print(f"{len(fixtures)} workspaces: {differed} differing commands, {missing} missing")
-    if not have_bv:
-        print("bv is not installed; comparisons were skipped rather than passed.")
+    if banner:
+        print()
+        print(banner)
 
-    return 1 if differed or missing else 0
+    return exit_status(differed, missing, state, args.allow_bv_mismatch)
+
+
+def bv_skip_reason(state: str, engine: str | None, allow_mismatch: bool) -> str | None:
+    """Why no command is compared against bv, or None when they all are."""
+    if state == "missing":
+        return "bv is not installed"
+    if state == "mismatch" and not allow_mismatch:
+        return f"bv is not the engine's {engine or 'beads_viewer version'}"
+    return None
+
+
+def bv_banner(state: str, message: str, allow_mismatch: bool) -> str | None:
+    """The block printed at the top and again under the summary, if any."""
+    if state == "missing":
+        return message
+    if state != "mismatch":
+        return None
+    rule = "!" * 78
+    verdict = ("--allow-bv-mismatch: compared anyway, so differences may be upstream's, not vbx's."
+               if allow_mismatch else
+               "Nothing was compared, and the run fails.")
+    return f"{rule}\nBV VERSION MISMATCH: {message}\n{verdict}\n{rule}"
+
+
+def exit_status(differed: int, missing: int, state: str, allow_mismatch: bool) -> int:
+    """1 for any difference, unimplemented command, or unaccepted bv mismatch.
+
+    A missing bv is not a failure — every comparison says skipped — but a
+    mismatched one is: it is installed, so the run looks like a comparison.
+    """
+    if differed or missing:
+        return 1
+    return 1 if state == "mismatch" and not allow_mismatch else 0
 
 
 if __name__ == "__main__":

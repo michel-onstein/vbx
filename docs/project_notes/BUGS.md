@@ -4,6 +4,27 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — The parity harness's own tests failed after capacity landed
+
+**Symptom:** `python3 scripts/test-parity-check.py`, in the verify block,
+failed three checks on `main` after vbx-ko1: `--robot-capacity --agents 3`
+"does not name a compared command", and "a label-scoped command that does not
+match yet is a skip naming its bead" found no such command. (Found under
+vbx-1z7.)
+
+**Cause:** both checks were stale, not the harness. Declarations in
+`DECLARED_DIFFERENCES` are keyed by a run's `name`, but the test collected
+only `entry["vbx"]`, so a named second run of a command never counted as
+compared. And the label check required at least one unmatched label-scoped
+run; vbx-ko1 made the last one match.
+
+**Fix:** the test collects `name`, defaulting to `vbx`, as the report does;
+the label check asserts only that any unmatched run names its bead.
+
+**Regression test:** `test_declared_differences_are_narrow` and
+`test_label_scoped_runs` in `scripts/test-parity-check.py`, which now pass with
+the `--agents 3` declarations in place.
+
 ## 2026-10-01 — Capacity disagreed with bv, scoped or not
 
 **Symptom:** on `Fixtures/demo`, unscoped, `vbx-cli --robot-capacity` called 5

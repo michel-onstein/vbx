@@ -5,6 +5,18 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Parity check refuses a bv that is not the engine's (vbx-1z7)
+
+`scripts/parity-check.py` reads the beads_viewer version from
+`Engine/bridge/go.mod` and `bv --version` from the binary it will run. When
+they differ, or either cannot be read, it prints a banner naming both versions
+and the bv's path at the top and under the summary, skips every comparison and
+exits 1; `--allow-bv-mismatch` compares anyway under the same banner. A missing
+bv is still skipped and exits 0. Homebrew's bv 0.20.0 against the v0.25.2
+engine had produced a page of differences that looked like vbx bugs. Also fixed
+two harness tests left stale by vbx-ko1 (see BUGS.md). Parity with bv 0.25.2:
+0 differing commands before and after.
+
 ## 2026-10-01 — Capacity matches bv, with `--capacity-label` (vbx-ko1)
 
 `vbx-cli --robot-capacity` is now bv 0.25.2's capacity simulation: readiness

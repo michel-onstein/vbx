@@ -281,9 +281,15 @@ python3 scripts/test-parity-check.py  # the parity harness itself (no binaries)
 python3 scripts/parity-check.py     # vbx-cli vs bv, command by command, every fixture
 ```
 
-The parity check needs `bv` on the PATH. Without it every comparison is
-reported as *skipped* rather than passing, so a missing `bv` cannot look like
-agreement. It exits non-zero when any comparable command differs, or when a
+The parity check needs `bv` on the PATH, **at the engine's beads_viewer version**
+— the one in `Engine/bridge/go.mod`, compared against `bv --version`. Without
+`bv` every comparison is reported as *skipped* rather than passing, so a missing
+`bv` cannot look like agreement. A `bv` of another version (Homebrew's lags
+behind) is worse than none — every upstream change between the two reads as a
+vbx bug — so the check names both versions and the binary's path in a banner,
+compares nothing, and **fails**; `--allow-bv-mismatch` compares anyway, under
+the same banner. Get the matching `bv` with `brew upgrade bv`, or put the
+release binary for the go.mod tag first on the PATH (or pass `--bv <path>`). It exits non-zero when any comparable command differs, or when a
 command it declares is not implemented. It covers every workspace in its
 `FIXTURES` (`--workspace` narrows it to one), and prints the first difference
 per command with a count of the rest — `--verbose` lists them all.
