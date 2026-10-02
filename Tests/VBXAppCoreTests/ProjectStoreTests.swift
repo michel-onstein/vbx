@@ -35,6 +35,31 @@ func storeLoads() async {
 }
 
 @MainActor
+@Test("A multi-repository session reports the workspace kind and its root's name")
+func storeReportsWorkspaceKind() async {
+    // vbx-j7r: the kind decoded as JSONL, so the status bar said "JSONL" and
+    // the window was titled ".bv". The configuration is opened explicitly
+    // (ADR-026): inside this checkout, discovery from the fixture's root
+    // would reach the repository's own .beads.
+    let config = URL(fileURLWithPath: fixturePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("dropped-workspace/.bv/workspace.yaml")
+        .path
+    let store = ProjectStore()
+    store.skipPhase2 = true
+    await store.open(path: config)
+
+    #expect(store.loadError == nil)
+    #expect(store.info?.kind == .workspace)
+    #expect(store.info?.displayName == "dropped-workspace")
+    await store.close()
+
+    await store.open(path: fixturePath)
+    #expect(store.info?.kind == .jsonl)
+    await store.close()
+}
+
+@MainActor
 @Test("A failed open reports the error and clears stale state")
 func storeHandlesFailure() async {
     let store = ProjectStore()

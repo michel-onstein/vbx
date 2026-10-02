@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — A workspace session reports the workspace kind (vbx-j7r)
+
+Swift's `SourceKind` gains a `workspace` case and becomes an open enum
+(`unknown(String)`), so a multi-repository session no longer decodes as JSONL:
+the status bar badge reads **Workspace**, and the window and the export
+wizard's default title name the workspace root rather than `.bv`. bv's
+`jsonl_local` decodes to `.jsonl` alongside the engine's `jsonl`. Decode tests
+for every kind and an unknown one, and a store test over
+`Fixtures/dropped-workspace`. semver:patch. Parity: unchanged (Swift model
+only), 0 differing commands before and after.
+
 ## 2026-10-02 — A min-score threshold in the app's search scope bar (vbx-c1j)
 
 The scope bar gains a **Min score** menu in hybrid mode: off by default (no

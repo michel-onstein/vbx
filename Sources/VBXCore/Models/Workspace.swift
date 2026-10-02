@@ -1,14 +1,46 @@
 import Foundation
 
 /// Where a workspace's bead data actually came from.
-public enum SourceKind: String, Codable, Sendable {
+///
+/// **Open, like every enum the engine fills.** The engine's load info names
+/// the source `jsonl`, `sqlite` or `workspace`; its robot envelopes use bv's
+/// `source_kind` vocabulary, where the local JSONL is `jsonl_local`, and both
+/// spellings decode to ``jsonl``. Anything else is kept as ``unknown(_:)``
+/// rather than read as JSONL — a multi-repository session once decoded as
+/// `jsonl` for want of a case, and showed "JSONL" and the `.bv` folder as its
+/// name (vbx-j7r).
+public enum SourceKind: RawRepresentable, Codable, Sendable, Hashable {
     case jsonl
     case sqlite
+    /// A multi-repository workspace: the source is its `workspace.yaml`.
+    case workspace
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "jsonl", "jsonl_local": self = .jsonl
+        case "sqlite": self = .sqlite
+        case "workspace": self = .workspace
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    /// The engine's own name for the kind.
+    public var rawValue: String {
+        switch self {
+        case .jsonl: "jsonl"
+        case .sqlite: "sqlite"
+        case .workspace: "workspace"
+        case .unknown(let raw): raw
+        }
+    }
 
     public var displayName: String {
         switch self {
         case .jsonl: "JSONL"
         case .sqlite: "SQLite"
+        case .workspace: "Workspace"
+        case .unknown(let raw): raw
         }
     }
 }
@@ -93,7 +125,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         source = try c.decodeIfPresent(String.self, forKey: .source) ?? ""
-        kind = SourceKind(rawValue: try c.decodeIfPresent(String.self, forKey: .kind) ?? "jsonl") ?? .jsonl
+        kind = SourceKind(rawValue: try c.decodeIfPresent(String.self, forKey: .kind) ?? "jsonl")
         issueCount = try c.decodeIfPresent(Int.self, forKey: .issueCount) ?? 0
         dataHash = try c.decodeIfPresent(String.self, forKey: .dataHash) ?? ""
         warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
@@ -144,12 +176,14 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     /// Directory shown in the window title.
     public var displayName: String {
         let url = URL(fileURLWithPath: source)
-        // .../<project>/.beads/issues.jsonl -> <project>
-        let beadsDir = url.deletingLastPathComponent()
-        if beadsDir.lastPathComponent == ".beads" {
-            return beadsDir.deletingLastPathComponent().lastPathComponent
+        // .../<project>/.beads/issues.jsonl -> <project>, and a workspace's
+        // .../<root>/.bv/workspace.yaml -> <root>, not ".bv" (vbx-j7r).
+        let dataDir = url.deletingLastPathComponent()
+        let marker = kind == .workspace ? ".bv" : ".beads"
+        if dataDir.lastPathComponent == marker {
+            return dataDir.deletingLastPathComponent().lastPathComponent
         }
-        return beadsDir.lastPathComponent
+        return dataDir.lastPathComponent
     }
 
     /// Short form of the data hash for the status bar.
