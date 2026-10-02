@@ -199,10 +199,13 @@ public struct SearchResults: Codable, Sendable, Hashable {
     public var totalBeads: Int
     public var preset: String
     public var weights: SearchWeights?
+    /// The threshold the engine applied, echoed. Nil when none was asked for.
+    public var minScore: Double?
     public var results: [SearchHit]
 
     private enum CodingKeys: String, CodingKey {
         case query, mode, provider, dim, preset, weights, results
+        case minScore = "min_score"
         case indexSize = "index_size"
         case totalBeads = "total_beads"
     }
@@ -218,6 +221,7 @@ public struct SearchResults: Codable, Sendable, Hashable {
         totalBeads = try c.decodeIfPresent(Int.self, forKey: .totalBeads) ?? 0
         preset = try c.decodeIfPresent(String.self, forKey: .preset) ?? ""
         weights = try? c.decodeIfPresent(SearchWeights.self, forKey: .weights)
+        minScore = try c.decodeIfPresent(Double.self, forKey: .minScore)
         results = try c.decodeIfPresent([SearchHit].self, forKey: .results) ?? []
     }
 

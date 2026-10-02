@@ -209,7 +209,15 @@ struct IssueListView: View {
             store.query.sort = store.query.sort.whenColumnsHidden(hiddenColumns)
         }
         .overlay {
-            if store.visibleIssues.isEmpty {
+            if store.visibleIssues.isEmpty, let threshold = store.searchThresholdExcludedAll {
+                // Not "no matching beads": beads match, and the threshold is
+                // what hid them — so name it, and how to undo it.
+                EmptyStateView(
+                    symbol: "slider.horizontal.below.rectangle",
+                    title: SearchThresholdText.emptyTitle(threshold),
+                    message: SearchThresholdText.emptyMessage
+                )
+            } else if store.visibleIssues.isEmpty {
                 EmptyStateView(
                     symbol: "line.3.horizontal.decrease.circle",
                     title: "No matching beads",

@@ -437,11 +437,16 @@ public actor BeadsEngine {
     /// embedder gives better results and *different* ones, so choosing it is
     /// the caller's decision — the default keeps vbx's ranking identical to
     /// the CLI's.
+    ///
+    /// `minScore` is bv's `--search-min-score`: an inclusive threshold, -1 to
+    /// 1, on the raw text similarity, applied before hybrid re-ranking. Nil is
+    /// no threshold, and is not sent — bv echoes `min_score` only when given.
     public func search(
         _ query: String, mode: SearchMode = .text, limit: Int = 20,
-        preset: String? = nil, weights: SearchWeights? = nil
+        preset: String? = nil, weights: SearchWeights? = nil, minScore: Double? = nil
     ) throws -> SearchResults {
         var req: [String: Any] = ["query": query, "mode": mode.rawValue, "limit": limit]
+        if let minScore { req["min_score"] = minScore }
         if let weights {
             req["weights"] = weights.asDictionary
         } else if let preset, !preset.isEmpty {

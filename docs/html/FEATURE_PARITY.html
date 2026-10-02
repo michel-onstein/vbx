@@ -257,14 +257,14 @@ state. Built: the six new alert types with <code>suggested_action</code> and <co
 and in the app (vbx-upz), <code>.beads/recipes/*.yaml</code> recipe files — edited and
 deleted in their own file (vbx-7d5) — the multi-repository loader, triage
 feedback, <code>--export</code> reports in four formats (vbx-im9), <code>--search-min-score</code>
-with bv's guaranteed exact-ID hit (vbx-52c), <code>--recipe</code> as a robot scope,
+with bv's guaranteed exact-ID hit (vbx-52c) and its threshold control in the
+app's search scope bar (vbx-c1j), <code>--recipe</code> as a robot scope,
 by name or path (vbx-7d5), <code>.bv/hooks.yaml</code> export hooks with <code>--no-hooks</code>
 in <code>vbx-cli</code> (vbx-uos), and <code>load_stats</code> in the robot envelope, counted in the
 app's warnings badge (vbx-dv5), and bv's <code>.beads</code>-first workspace discovery
 with <code>--workspace</code> (vbx-1y5), and the loader's warnings on <code>vbx-cli</code>'s
-stderr where bv prints them (vbx-1l6). Not yet built, with a child bead of epic
-vbx-htg: the app's search threshold control (vbx-c1j). A row naming a bead is
-not built until that bead closes.</p>
+stderr where bv prints them (vbx-1l6). Nothing in epic vbx-htg is left unbuilt.
+A row naming a bead is not built until that bead closes.</p>
 <p><strong>Verified rather than asserted.</strong> <code>scripts/parity-check.py</code> runs <code>vbx-cli</code> and
 <code>bv</code> over the same workspace and diffs them command by command, stripping only
 an enumerated list of volatile fields — timestamps, wall-clock durations,
@@ -1273,8 +1273,8 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--search-min-score</code>, guaranteed exact-ID hit (bv 0.25)</td>
-<td>✓ through bv's <code>SearchTopKWithOptions</code>; <code>vbx-cli --search-min-score</code> with bv's validation and <code>min_score</code> echo (vbx-52c). No threshold control in the app yet (vbx-c1j)</td>
-<td>Search field (hybrid mode gets the exact-ID hit)</td>
+<td>✓ through bv's <code>SearchTopKWithOptions</code>; <code>vbx-cli --search-min-score</code> with bv's validation and <code>min_score</code> echo (vbx-52c). In the app, a Min score menu in the search scope bar, hybrid mode only, off by default; a threshold that excludes everything says so in the empty list (vbx-c1j)</td>
+<td>Search field (hybrid mode gets the exact-ID hit) + scope bar</td>
 <td>6</td>
 </tr>
 <tr>

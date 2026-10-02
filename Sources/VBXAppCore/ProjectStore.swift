@@ -384,6 +384,11 @@ public final class ProjectStore: ObservableObject {
     @Published public var searchMode: SearchMode = .text
     @Published public var searchPreset: String = "default"
     @Published public var searchWeights: SearchWeights?
+    /// bv's `--search-min-score` for hybrid search: hits whose raw text
+    /// similarity is below it are dropped before re-ranking. Nil — the
+    /// default — is no threshold, which is what search did before it existed.
+    /// Per window, like the mode and the preset beside it in the scope bar.
+    @Published public var searchMinScore: Double?
     @Published public private(set) var searchPresets: SearchPresetList = .empty
     @Published public private(set) var searchResults: SearchResults = .empty
     @Published public private(set) var searchInFlight = false
@@ -1193,15 +1198,34 @@ public final class ProjectStore: ObservableObject {
                 try await engine.search(
                     text, mode: searchMode, limit: 50,
                     preset: searchWeights == nil ? searchPreset : nil,
-                    weights: searchWeights)
+                    weights: searchWeights, minScore: searchMinScore)
             } ?? .empty
     }
 
     /// True when the list should show engine-ranked results.
+    ///
+    /// Including an *empty* ranking when a threshold emptied it: that is the
+    /// answer to what was asked, and falling back to the fuzzy ranking would
+    /// show beads the threshold just excluded.
     public var isUsingEngineSearch: Bool {
         searchMode == .hybrid && !query.searchText.trimmingCharacters(
             in: .whitespacesAndNewlines
-        ).isEmpty && !searchResults.isEmpty
+        ).isEmpty && (!searchResults.isEmpty || searchThresholdExcludedAll != nil)
+    }
+
+    /// The threshold, when it is the reason hybrid search found nothing.
+    ///
+    /// Only for an answer the engine actually gave to the current query and
+    /// threshold. A failed search leaves `.empty`, whose echoed threshold is
+    /// nil, so a failure is never mistaken for "nothing scored high enough" —
+    /// that case is the scope bar's unavailable report.
+    public var searchThresholdExcludedAll: Double? {
+        let text = query.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard searchMode == .hybrid, !text.isEmpty, searchResults.isEmpty,
+            let echoed = searchResults.minScore, echoed == searchMinScore,
+            searchResults.query == text
+        else { return nil }
+        return echoed
     }
 
     // MARK: - Sprints

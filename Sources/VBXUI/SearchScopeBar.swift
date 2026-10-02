@@ -67,6 +67,13 @@ struct SearchScopeBar: View {
                     }
                 }
 
+                // Hybrid only: the threshold is on the engine's text
+                // similarity, and the text mode is IssueQuery's fuzzy ranking,
+                // which has no such score to compare against.
+                if store.searchMode == .hybrid {
+                    SearchThresholdPicker()
+                }
+
                 if store.searchInFlight {
                     ProgressView().controlSize(.small)
                 }
@@ -96,6 +103,7 @@ struct SearchScopeBar: View {
             .onChange(of: store.query.searchText) { Task { await store.runEngineSearch() } }
             .onChange(of: store.searchMode) { Task { await store.runEngineSearch() } }
             .onChange(of: store.searchPreset) { Task { await store.runEngineSearch() } }
+            .onChange(of: store.searchMinScore) { Task { await store.runEngineSearch() } }
         }
     }
 
@@ -112,6 +120,52 @@ struct SearchScopeBar: View {
         }
         .help(EngineReportText.unavailable(report, reason))
     }
+}
+
+/// The minimum text similarity a hybrid result needs — bv's
+/// `--search-min-score`.
+///
+/// A menu of fixed steps rather than a slider: each step is a round trip, and
+/// a slider dragged across the range would fire one per pixel. Off is the
+/// default and sends no threshold at all.
+struct SearchThresholdPicker: View {
+    @EnvironmentObject var store: ProjectStore
+
+    var body: some View {
+        Picker(selection: $store.searchMinScore) {
+            Text("No minimum").tag(Double?.none)
+            Divider()
+            ForEach(SearchThresholdText.steps, id: \.self) { step in
+                Text("≥ " + SearchThresholdText.format(step)).tag(Double?.some(step))
+            }
+        } label: {
+            Text("Min score")
+        }
+        .pickerStyle(.menu)
+        .fixedSize()
+        .help(
+            "Drop results whose text similarity is below this, before ranking. "
+                + "A bead whose id is the query obeys it too.")
+    }
+}
+
+/// The threshold's wording, shared by the scope bar and the list's empty state
+/// so the two cannot spell the number differently.
+enum SearchThresholdText {
+    /// The offered thresholds. bv accepts -1…1, but a hash-embedder similarity
+    /// below zero is noise, so the menu offers the useful half.
+    static let steps: [Double] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+
+    static func format(_ score: Double) -> String {
+        String(format: "%.2f", score)
+    }
+
+    /// The empty list's title when the threshold excluded every result.
+    static func emptyTitle(_ score: Double) -> String {
+        "No results above \(format(score))"
+    }
+
+    static let emptyMessage = "Lower the threshold — Min score, in the search bar — to see more."
 }
 
 /// Live weight sliders for hybrid ranking.
