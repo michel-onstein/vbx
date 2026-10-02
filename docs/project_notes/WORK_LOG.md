@@ -5,6 +5,24 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — vbx-cli records triage feedback, as bv does (vbx-rt3)
+
+`vbx-cli --feedback-accept ID`, `--feedback-ignore ID`, `--feedback-reset` and
+`--feedback-show` write and read `.beads/feedback.json` through three new
+engine methods (`triage_feedback_record`, `triage_feedback_reset`,
+`triage_feedback`) that call bv's exported `FeedbackData` — `LoadFeedback`,
+`RecordFeedback`, `Reset`, `Save`, `ToJSON`, `Summary` — so no weight
+arithmetic is vbx's. Each returns bv's stdout as `message`, which the CLI
+prints; errors are bv's stderr lines. Matching bv where it does *not* pin: the
+verdict's score is computed at the wall clock, never `SOURCE_DATE_EPOCH`,
+because bv's `--feedback-accept` scores an analyzer it never pins. A write
+leaves the session's copy alone, so the file watch's reload reports `changed`
+and re-ranks triage. Parity gains five feedback sequences run on a fresh copy
+of `.beads` per binary, comparing output, stderr and the resulting file
+(timestamps dropped; show's JSON parsed, since bv's effective weights differ
+in the last bit run to run). App UI filed as vbx-442. Parity with bv 0.25.2:
+0 differing commands after (6 workspaces), as vbx-zot left it.
+
 ## 2026-10-01 — Live reload follows every member of a workspace (vbx-zot)
 
 A multi-repository workspace now reloads when any member's beads change, when

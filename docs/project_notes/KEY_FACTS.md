@@ -121,6 +121,13 @@ view snapshots for inspection.
   re-renders the palettes that were considered. See ADR-008.
 - **This repo's own `.beads` store is empty** (0 issues). Point vbx at
   `Fixtures/demo` for anything with a real dependency graph.
+- **bv's `--feedback-*` flags are not pinned by `SOURCE_DATE_EPOCH`.** The
+  verdict's score is computed at the wall clock and every stamp in
+  `feedback.json` is `time.Now`, so vbx does the same (vbx-rt3), and a test
+  that wants a fixed score sets `feedbackScoreClock`. `--feedback-show`'s
+  `effective_weights` also differ in the last bit between two runs of bv
+  itself — normalised by summing a Go map — so compare them parsed, with a
+  tolerance, never as text.
 - **Swift Testing exports its own `Issue` type**, which collides with the model.
   Test files alias it: `private typealias Bead = VBXCore.Issue`.
 - **The remote is `origin` (github.com/michel-onstein/vbx)**; work lands on a

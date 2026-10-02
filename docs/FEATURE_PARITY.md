@@ -150,7 +150,7 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 | What-if analysis | Graph "what if this closes" mode | Engine + Native | 4 |
 | Risk scoring | List column + insights | Engine + Native | 4 |
 | Blocker chain | Inspector chain walk + graph path highlight | Engine + Native | 3 |
-| Feedback system (adaptive recommendation weights) | **Applied:** `.beads/feedback.json` reweights triage, `--robot-next` and `--robot-priority` from 3 verdicts, and triage reports the `feedback` block; an edit to the file alone reloads (vbx-5ba). **Recording** (`--feedback-accept` / `-ignore` / `-reset` / `-show`, thumbs up/down) is not built — vbx-htg | Engine + Native | 4 |
+| Feedback system (adaptive recommendation weights) | **Applied:** `.beads/feedback.json` reweights triage, `--robot-next` and `--robot-priority` from 3 verdicts, and triage reports the `feedback` block; an edit to the file alone reloads (vbx-5ba). **Recording, CLI:** `vbx-cli --feedback-accept` / `-ignore` / `-reset` / `-show`, through bv's own `FeedbackData`, output as bv's; parity-checked (vbx-rt3). **Recording, app** (accept / ignore on a triage recommendation) is not built — vbx-442 | Engine + Native | 4 |
 
 ---
 
@@ -255,6 +255,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-by-label`, `--robot-by-assignee` | ✓ | Grouping controls | 6 |
 | `--robot-capabilities`, `--robot-schema`, `--robot-docs`, `--robot-help` | ✓ | Help menu → "Robot protocol reference" | 6 |
 | `--robot-not-ready-labels` (+ `BV_ROBOT_NOT_READY_LABELS`), `--robot-max-results`, `--robot-min-confidence` | ✓ (not-ready labels on triage and `--robot-next`, as in bv) | Corresponding UI controls | 6 |
+| `--feedback-accept ID`, `--feedback-ignore ID`, `--feedback-reset`, `--feedback-show` (not robot commands: bv prints prose and writes `.beads/feedback.json`) | ✓ (vbx-rt3; two at once is a usage error where bv picks one) | Not built — triage panel accept / ignore, vbx-442 | 6 |
 | TOON token-optimised encoding | ✓ | — | 6 |
 | Data hash + config echoed in every payload | ✓ | Status bar shows the hash | 6 |
 | — | App Intents / Shortcuts actions | **New** | 6 |
