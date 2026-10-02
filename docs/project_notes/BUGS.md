@@ -4,6 +4,49 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — `--robot-orphans` failed on this repository, and the app's Orphans tab showed the failure as an empty list
+
+**Symptom:** `vbx-cli --robot-orphans` at this repository's root failed with
+`analyzing orphan commit b367a32…: get files changed: git show --name-status
+failed: exit status 129: vbx objgit: unsupported git invocation`. bv 0.25.2
+answers it. In the app the History view's Orphans tab was empty, with the
+header claiming 0 orphans: the store swallowed the error with `try?` and
+published `.empty`. The app's own history fixture failed the same way, and
+no test looked. (vbx-lh0, found in vbx-znj.)
+
+**Cause:** the orphan detector takes each orphan's files from the walk. When
+the walk lists none outside the excluded directories, as for an empty commit
+like this repository's root or one touching only `vendor/` or `.bv/`, it asks
+git per commit, with `show --name-status --format= <sha> -- . <excludes>`.
+`objgit` (ADR-027) knew only `show -s`, so it refused. The differential tests
+never saw that command line because no fixture history held such a commit.
+The parity fixture had none either, so parity stayed green.
+
+**Fix:** `objgit` answers `show --name-status` and `show --numstat` under an
+empty format with git's bytes. That covers a root against the empty tree, a
+non-merge against its parent with renames, and a merge as git shows it:
+combine-diff's raw form for `--name-status` (the paths that differ from every
+parent, one status letter per parent) and the first-parent diff for
+`--numstat`. The store publishes an orphan failure as `orphansError`, and the
+Orphans tab shows it as "Orphans unavailable" with a Try Again button. The
+header count is a dash, never a zero. The correlator's other `git` command
+lines were audited against `objgit`'s set. `--grep`, `-p`, `--author`,
+`rev-list` and `show --name-only` are on paths vbx never calls (the legacy
+patch extractor, the incremental and streaming extractors, the
+time-window search), and the new repository-wide test proves it.
+
+**Regression tests:** `TestShowDiffMatchesGit` in `objgit_test.go` compares
+both forms with real git on an empty root, an empty commit, renames, binary
+and quoted paths, a merge with its own edits, a clean merge and an octopus.
+`bvLogs` compares them for every commit of every other scenario.
+`TestFilelessOrphanMatchesBV` runs the detector beside bv's on a history with
+empty and vendor-only commits. `TestThisRepositoryMatchesBV` does the same
+over this repository's whole history and fails on any command line outside
+`supportedShapes`. In the app, `A history holding an empty commit has an
+orphan report` and `A failed orphan report is unavailable, never empty`
+(`HistoryViewTests`) cover the store and the view. Parity's `history`
+fixture gains a vendor-only commit, which its orphan runs now reach.
+
 ## 2026-10-02 — Triage's staleness ignored a commit naming the bead, where bv 0.25.2 counts it
 
 **Symptom:** in a repository whose beads were long untouched, a recent code

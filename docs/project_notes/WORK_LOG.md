@@ -5,6 +5,26 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Orphans work on every history, and a failure shows as one (vbx-lh0)
+
+`vbx-cli --robot-orphans` failed on this repository, and the app's Orphans tab
+was silently empty. The detector asks for a commit's files with `git show
+--name-status` when the walk lists none, and `objgit` refused that. It now
+answers `show --name-status` and `show --numstat` under an empty format, merges
+included (combined name-status, first-parent numstat), byte for byte against
+real git. The store publishes an orphan failure as `orphansError`, and the
+tab shows "Orphans unavailable" with the reason rather than an empty list.
+
+The correlator's other git command lines were audited against `objgit`'s
+set. The ones it refuses are on paths vbx never calls.
+`TestThisRepositoryMatchesBV` runs the correlator over this repository's
+whole history with every call checked against git, and it fails on a command
+line outside the set. On this repository vbx-cli's orphan report now equals
+bv 0.25.2's: 147 orphans of 212 commits, the same candidates. Parity: 0
+differing commands before and after (533 matched, 24 declared). The `history`
+fixture gains a vendor-only commit, so its orphan runs reach the fallback.
+Details in BUGS.md.
+
 ## 2026-10-02 — A commit naming a br-minted id links to it, in vbx-cli and the app (vbx-znj)
 
 bv's explicit-id patterns need a numeric suffix, so since vbx-k7j a commit

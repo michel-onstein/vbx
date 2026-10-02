@@ -20,6 +20,12 @@ struct HistoryView: View {
     @State private var filePath: String = ""
     @State private var fileBeads: FileBeadLookup?
 
+    /// Opens on `tab`: the Commits tab in the app, and whichever a snapshot
+    /// is about in a test, where nothing can click the picker.
+    init(tab: Tab = .commits) {
+        _tab = State(initialValue: tab)
+    }
+
     enum Tab: String, CaseIterable, Identifiable {
         case commits, timeline, files, hotspots, orphans
         var id: String { rawValue }
@@ -99,7 +105,9 @@ struct HistoryView: View {
                 stat("commits", "\(store.history.stats.totalCommits)")
                 stat("linked beads", "\(store.history.stats.beadsWithCommits)")
                 stat("authors", "\(store.history.stats.uniqueAuthors)")
-                stat("orphans", "\(store.orphans.stats.orphanCount)")
+                // An unavailable count is a dash, not a zero: zero orphans is
+                // a claim about the history the failed report never made.
+                stat("orphans", store.orphansError == nil ? "\(store.orphans.stats.orphanCount)" : "—")
                 if store.feedback.stats.totalFeedback > 0 {
                     stat(
                         "reviewed",
@@ -443,7 +451,22 @@ struct HistoryView: View {
 
     // MARK: - Orphans
 
+    @ViewBuilder
     private var orphansTab: some View {
+        if let error = store.orphansError {
+            EmptyStateView(
+                symbol: "exclamationmark.triangle",
+                title: "Orphans unavailable",
+                message: error,
+                actionTitle: "Try Again",
+                action: { Task { await store.loadHistory(refresh: true) } }
+            )
+        } else {
+            orphansList
+        }
+    }
+
+    private var orphansList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Text(

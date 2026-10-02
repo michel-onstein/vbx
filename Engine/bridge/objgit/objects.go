@@ -23,47 +23,6 @@ func (r *repo) revParse(args []string, stdout io.Writer) error {
 	return err
 }
 
-// show answers `git show -s --format=<fmt> <rev>`: one commit's header,
-// without its diff.
-func (r *repo) show(ctx context.Context, args []string, stdout io.Writer) error {
-	var format, rev string
-	quiet := false
-	for _, arg := range args {
-		switch {
-		case arg == "-s":
-			quiet = true
-		case strings.HasPrefix(arg, "--format="):
-			format = strings.TrimPrefix(arg, "--format=")
-		case strings.HasPrefix(arg, "-"):
-			return unsupported("show %s", arg)
-		case rev == "":
-			rev = arg
-		default:
-			return unsupported("show with more than one revision")
-		}
-	}
-	if !quiet || format == "" || rev == "" {
-		return unsupported("show %s", strings.Join(args, " "))
-	}
-	if err := validateFormat(format); err != nil {
-		return err
-	}
-	h, err := r.resolveCommit(rev)
-	if err != nil {
-		return err
-	}
-	c, err := r.git.CommitObject(h)
-	if err != nil {
-		return fatal("bad object %s", h)
-	}
-	header, err := expand(format, c)
-	if err != nil {
-		return err
-	}
-	_, err = io.WriteString(stdout, header+"\n")
-	return err
-}
-
 // catFile answers `git cat-file -s <object>` and `git cat-file --batch`.
 func (r *repo) catFile(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
 	switch {

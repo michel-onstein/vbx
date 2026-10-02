@@ -363,3 +363,126 @@ func TestRenamedBeadsFileMatchesBV(t *testing.T) {
 	dir, issues := buildRepo(t, ids, commits, ".beads/beads.jsonl")
 	compareWithBV(t, dir, filepath.Join(dir, ".beads", "issues.jsonl"), issues, "r-1")
 }
+
+// An orphan the walk lists no files for — an empty commit, or one touching
+// only excluded directories such as vendor/ — is one the detector asks git
+// about per commit, with `git show --name-status`, which objgit refused until
+// vbx-lh0. --robot-orphans then failed on any repository whose window held
+// one, this repository's own empty root commit among them.
+func TestFilelessOrphanMatchesBV(t *testing.T) {
+	isolate(t)
+	rr := recordGit(t)
+	ids := []string{"e-1", "e-2", "e-3", "e-4", "e-5"}
+	commits := []fixtureCommit{
+		{1, 0, "Initial import", nil, map[string]int{"main.go": 1}, nil, [2]string{}},
+		{2, 1, "An empty commit", nil, nil, nil, [2]string{}},
+		{3, 0, "e-1: start", map[string]string{"e-1": "in_progress"}, map[string]int{"main.go": 2}, nil, [2]string{}},
+		{4, 1, "Another empty commit, for e-1", nil, nil, nil, [2]string{}},
+		{5, 1, "Vendor only", nil, map[string]int{"vendor/x.go": 1, "node_modules/y.js": 1}, nil, [2]string{}},
+		{6, 0, "Close e-1", map[string]string{"e-1": "closed"}, map[string]int{"lib/a.go": 1}, nil, [2]string{}},
+	}
+	dir, issues := buildRepo(t, ids, commits, ".beads/issues.jsonl")
+	compareWithBV(t, dir, filepath.Join(dir, ".beads", "issues.jsonl"), issues, "e-1")
+
+	if rr.seen["show --name-status"] == 0 {
+		t.Errorf("the orphan detector never asked for an empty commit's files; seen: %v", rr.seen)
+	}
+}
+
+// supportedShapes are the command lines objgit answers. A shape outside the
+// set is one objgit refuses, so a run that issues one fails where bv's
+// succeeds — what vbx-lh0 was.
+var supportedShapes = map[string]bool{
+	"log --no-merges --name-only":                                              true,
+	"log --no-walk=unsorted --name-status":                                     true,
+	"log --no-walk=unsorted --numstat":                                         true,
+	"log --raw --no-abbrev --follow":                                           true,
+	"log --first-parent --diff-merges=first-parent --raw --no-abbrev --follow": true,
+	"cat-file --batch":                                                         true,
+	"cat-file -s":                                                              true,
+	"rev-parse":                                                                true,
+	"show -s":                                                                  true,
+	"show --name-status":                                                       true,
+	"show --numstat":                                                           true,
+}
+
+// This repository's own history, through the reports vbx builds from it,
+// with every git command line answered by objgit and checked against real
+// git. The fixtures above are small, and a command line only a larger or
+// more varied history reaches is exactly what they cannot prove covered. The
+// window is the whole history, so the empty root commit vbx-lh0 failed on
+// stays in it however long the history grows.
+func TestThisRepositoryMatchesBV(t *testing.T) {
+	if testing.Short() {
+		t.Skip("walks the repository's whole history")
+	}
+	isolate(t)
+	top, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		t.Skip("not inside a git checkout")
+	}
+	dir := strings.TrimSpace(string(top))
+	shallow, _ := exec.Command("git", "-C", dir, "rev-parse", "--is-shallow-repository").Output()
+	if strings.TrimSpace(string(shallow)) == "true" {
+		t.Skip("a shallow clone has no root commit to reach")
+	}
+	beads, err := exec.Command("git", "-C", dir, "show", "HEAD:.beads/issues.jsonl").Output()
+	if err != nil {
+		t.Skipf("no committed beads file: %v", err)
+	}
+	var issues []model.Issue
+	focus := ""
+	for _, line := range strings.Split(string(beads), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var issue model.Issue
+		if err := json.Unmarshal([]byte(line), &issue); err != nil {
+			t.Fatalf("reading the beads file: %v", err)
+		}
+		if issue.Status == model.StatusTombstone {
+			continue
+		}
+		if focus == "" && issue.Status == model.StatusClosed {
+			focus = issue.ID
+		}
+		issues = append(issues, issue)
+	}
+
+	rr := recordGit(t)
+	ours, theirs := beadInfos(issues)
+	now := time.Now().UTC()
+	beadsPath := filepath.Join(dir, ".beads", "issues.jsonl")
+	for _, opts := range []CorrelatorOptions{{}, {CausalityBeadID: focus}} {
+		name := fmt.Sprintf("%+v", opts)
+		report, err := NewCorrelator(dir, beadsPath).GenerateReport(ours, opts)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		want, err := bv.NewCorrelator(dir, beadsPath).GenerateReport(theirs,
+			bv.CorrelatorOptions{CausalityBeadID: opts.CausalityBeadID})
+		if err != nil {
+			t.Fatalf("%s: bv: %v", name, err)
+		}
+		requireSame(t, "report "+name, report, want)
+
+		orphans, err := NewOrphanDetectorAt(report, dir, now).DetectOrphans(ExtractOptions{})
+		if err != nil {
+			t.Fatalf("%s: orphans: %v", name, err)
+		}
+		wantOrphans, err := bv.NewOrphanDetectorAt(want, dir, now).DetectOrphans(bv.ExtractOptions{})
+		if err != nil {
+			t.Fatalf("%s: bv orphans: %v", name, err)
+		}
+		requireSame(t, "orphans "+name, orphans, wantOrphans)
+	}
+
+	for shape := range rr.seen {
+		if !supportedShapes[shape] {
+			t.Errorf("the correlator issued %q, which objgit does not answer", shape)
+		}
+	}
+	if rr.seen["show --name-status"] == 0 {
+		t.Errorf("the empty root commit was never asked about; seen: %v", rr.seen)
+	}
+}

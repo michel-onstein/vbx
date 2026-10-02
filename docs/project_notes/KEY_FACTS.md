@@ -139,7 +139,9 @@ view snapshots for inspection.
   `python3 scripts/vendor-correlation.py`, then `go test ./...`: a git command
   line the new correlator runs that `objgit` does not know is refused, and the
   differential tests (`objgit_test.go`, `correlation/vbx_differential_test.go`)
-  fail on it. They compare against real git and real bv, so they need `git` on
+  fail on it — when a test history reaches it. `TestThisRepositoryMatchesBV`
+  runs the correlator over this repository's whole history for that reason
+  (vbx-lh0). They compare against real git and real bv, so they need `git` on
   PATH; the package itself never runs it.
 - **This repo's own `.beads` store is empty** (0 issues). Point vbx at
   `Fixtures/demo` for anything with a real dependency graph.

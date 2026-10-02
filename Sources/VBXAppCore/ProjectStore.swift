@@ -248,6 +248,12 @@ public final class ProjectStore: ObservableObject {
     // sessions never open the History view at all.
     @Published public private(set) var history: HistoryReport = .empty
     @Published public private(set) var orphans: OrphanReport = .empty
+    /// Why the orphan report could not be built, while the rest of the
+    /// history could. **An unavailable report is shown as unavailable, never
+    /// as an empty one**: an empty list says "every commit belongs to a bead",
+    /// which is a claim, and the Orphans tab once made it on every repository
+    /// whose detector failed (vbx-lh0).
+    @Published public private(set) var orphansError: String?
     @Published public private(set) var hotspots: FileHotspots = .empty
     @Published public private(set) var feedback: CorrelationFeedbackReport = .empty
     @Published public private(set) var historyLoaded = false
@@ -1715,6 +1721,7 @@ public final class ProjectStore: ObservableObject {
     private func resetHistory() {
         history = .empty
         orphans = .empty
+        orphansError = nil
         hotspots = .empty
         feedback = .empty
         historyLoaded = false
@@ -1774,7 +1781,7 @@ public final class ProjectStore: ObservableObject {
             history = report
             // These read the same cached report, so they are cheap once the
             // walk is done.
-            orphans = (try? await engine.orphanCommits()) ?? .empty
+            publishOrphans(await orphanResult())
             hotspots = (try? await engine.fileHotspots()) ?? .empty
             feedback = (try? await engine.correlationFeedback()) ?? .empty
             guard generation == historyGeneration else { return }
@@ -1787,7 +1794,33 @@ public final class ProjectStore: ObservableObject {
             historyLoaded = false
             history = .empty
             orphans = .empty
+            orphansError = nil
             hotspots = .empty
+        }
+    }
+
+    /// The orphan report, or why the engine could not build it.
+    private func orphanResult() async -> Result<OrphanReport, any Error> {
+        do {
+            return .success(try await engine.orphanCommits())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// Publishes an orphan report, or its failure in place of it.
+    ///
+    /// A failure clears the report rather than keeping the last one: after a
+    /// verdict or a refresh the old list describes a history that has moved
+    /// on, so it is as wrong as an empty one.
+    func publishOrphans(_ result: Result<OrphanReport, any Error>) {
+        switch result {
+        case .success(let report):
+            orphans = report
+            orphansError = nil
+        case .failure(let error):
+            orphans = .empty
+            orphansError = error.localizedDescription
         }
     }
 
@@ -1832,7 +1865,7 @@ public final class ProjectStore: ObservableObject {
                 try await engine.rejectCorrelation(sha: sha, beadID: beadID, reason: reason)
             }
             history = try await engine.history()
-            orphans = (try? await engine.orphanCommits()) ?? orphans
+            publishOrphans(await orphanResult())
             feedback = (try? await engine.correlationFeedback()) ?? feedback
         } catch {
             historyError = error.localizedDescription

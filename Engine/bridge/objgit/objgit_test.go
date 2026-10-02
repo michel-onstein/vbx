@@ -194,6 +194,7 @@ func bvLogs(t *testing.T, r *testRepo, beadsPath string) {
 	compare(t, r.dir, "", "cat-file", "-s", "HEAD:"+beadsPath)
 	for _, sha := range shas {
 		compare(t, r.dir, "", "show", "-s", "--format=%aI%x00%cI", sha)
+		showDiffs(t, r, sha)
 	}
 
 	// Every blob any commit's beads file had, a tree, a commit, and a name
@@ -212,6 +213,17 @@ func bvLogs(t *testing.T, r *testRepo, beadsPath string) {
 	batch.WriteString(strings.TrimSpace(r.git("rev-parse", "HEAD^{tree}")) + "\n")
 	batch.WriteString("0123456789012345678901234567890123456789\n")
 	compare(t, r.dir, batch.String(), "cat-file", "--batch")
+}
+
+// showDiffs compares the co-commit extractor's per-commit fallback — `git
+// show --name-status|--numstat --format= <sha> -- . <excludes>` — for one
+// commit, with and without the pathspec (vbx-lh0).
+func showDiffs(t *testing.T, r *testRepo, rev string) {
+	t.Helper()
+	for _, diff := range []string{"--name-status", "--numstat"} {
+		compare(t, r.dir, "", append([]string{"show", diff, "--format=", rev}, excludes...)...)
+		compare(t, r.dir, "", "-c", "color.ui=false", "show", diff, "--format=", rev)
+	}
 }
 
 func beadsLine(id, status string) string {
@@ -371,6 +383,116 @@ func TestMergesAndEqualDatesMatchGit(t *testing.T) {
 	bvLogs(t, r, ".beads/issues.jsonl")
 }
 
+// merge runs `git merge` with a pinned identity and date, leaving the
+// result uncommitted when the arguments ask for --no-commit.
+func (r *testRepo) merge(args ...string) {
+	r.t.Helper()
+	cmd := exec.Command("git", append([]string{"merge", "-q"}, args...)...)
+	cmd.Dir = r.dir
+	at := fmt.Sprintf("2026-07-%02dT12:00:00Z", r.day)
+	cmd.Env = append(gitEnv(),
+		"GIT_AUTHOR_NAME=Ada", "GIT_AUTHOR_EMAIL=ada@example.com", "GIT_AUTHOR_DATE="+at,
+		"GIT_COMMITTER_NAME=Ada", "GIT_COMMITTER_EMAIL=ada@example.com", "GIT_COMMITTER_DATE="+at)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		r.t.Fatalf("merge %v: %v\n%s", args, err, out)
+	}
+}
+
+// The orphan detector asks `git show --name-status` for a commit its walk
+// listed no files for — an empty commit, such as this repository's own root
+// — and objgit refused it, so --robot-orphans failed outright (vbx-lh0).
+// Every shape of commit show can be asked about: an empty root, a root with
+// files, an empty commit later on, renames, binary and quoted paths, and
+// merges, where show prints a combined diff for --name-status and the
+// first-parent diff for --numstat.
+func TestShowDiffMatchesGit(t *testing.T) {
+	r := newRepo(t)
+	r.commit("ada", "Initial empty commit\n", "")
+	showDiffs(t, r, "HEAD")
+
+	body := strings.Repeat("a line that the rename keeps\n", 20)
+	r.write(".beads/issues.jsonl", beadsLine("s-1", "open"))
+	r.write("a.txt", "one\ntwo\nthree\nfour\nfive\n")
+	r.write("b.txt", "b\n")
+	r.write("bin.dat", "a\x00b\n")
+	r.write("sp ace é.txt", "x\n")
+	r.write("lib/x.go", "package lib\n"+body)
+	r.write("node_modules/m.js", "m\n")
+	r.write("shared.txt", "shared\n")
+	r.commit("ada", "Files\n", "")
+	r.commit("alan", "Empty in the middle\n", "")
+
+	r.git("checkout", "-q", "-b", "side")
+	r.write("a.txt", "ONE\ntwo\nthree\nfour\nfive\n")
+	r.mv("lib/x.go", "pkg/x.go")
+	if err := os.Remove(filepath.Join(r.dir, "b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	r.write("side.txt", "side\n")
+	r.write("shared.txt", "shared, from the side\n")
+	r.commit("alan", "Side\n", "")
+
+	r.git("checkout", "-q", "main")
+	r.write("a.txt", "one\ntwo\nthree\nfour\nFIVE\n")
+	r.write("main.txt", "main\n")
+	r.write("bin.dat", "a\x00c\n")
+	r.write("node_modules/m.js", "m2\n")
+	r.commit("ada", "Main\n", "")
+	mainWork := strings.TrimSpace(r.git("rev-parse", "HEAD"))
+
+	// A merge that edits beyond both sides: a.txt carries both edits and a
+	// line of its own, evil.txt is new, the quoted path changes, and main's
+	// main.txt is deleted. shared.txt is taken from the side wholesale.
+	r.merge("--no-ff", "--no-commit", "side")
+	r.write("a.txt", "ONE\ntwo\nthree\nfour\nFIVE\nsix\n")
+	r.write("evil.txt", "evil\n")
+	r.write("sp ace é.txt", "y\n")
+	if err := os.Remove(filepath.Join(r.dir, "main.txt")); err != nil {
+		t.Fatal(err)
+	}
+	r.commit("ada", "Merge side, with edits\n", "")
+	evil := strings.TrimSpace(r.git("rev-parse", "HEAD"))
+
+	// A clean merge of disjoint work: its combined diff is empty.
+	r.git("checkout", "-q", "-b", "clean")
+	r.write("clean.txt", "clean\n")
+	r.commit("alan", "Clean side\n", "")
+	r.git("checkout", "-q", "main")
+	r.write("other.txt", "other\n")
+	r.commit("ada", "Other\n", "")
+	r.merge("--no-ff", "-m", "Clean merge", "clean")
+	r.day++
+
+	// An octopus with an edit of its own.
+	for _, arm := range [][2]string{{"o1", "a.txt"}, {"o2", "side.txt"}} {
+		b, edit := arm[0], arm[1]
+		r.git("checkout", "-q", "-b", b, "main")
+		r.write(b+".txt", b+"\n")
+		r.write(edit, "edited on "+b+"\n")
+		r.commit("alan", "Octopus arm "+b+"\n", "")
+		r.git("checkout", "-q", "main")
+	}
+	r.merge("--no-ff", "--no-commit", "-s", "octopus", "o1", "o2")
+	r.write("octo.txt", "octo\n")
+	r.commit("ada", "Octopus\n", "")
+
+	gitShows(t, r, "MM\ta.txt", "show", "--name-status", "--format=", evil)
+	gitShows(t, r, "AA\tevil.txt", "show", "--name-status", "--format=", evil)
+	gitShows(t, r, "AAA\tocto.txt", "show", "--name-status", "--format=", "HEAD")
+	gitShows(t, r, `"sp ace \303\251.txt"`, "show", "--name-status", "--format=", evil)
+	gitShows(t, r, "-\t-\tbin.dat", "show", "--numstat", "--format=", mainWork)
+	gitShows(t, r, "R100\tlib/x.go\tpkg/x.go", "show", "--name-status", "--format=", "side")
+
+	for _, sha := range strings.Fields(r.git("rev-list", "--all")) {
+		showDiffs(t, r, sha)
+	}
+	r.git("config", "core.quotePath", "false")
+	showDiffs(t, r, evil)
+	r.git("config", "diff.renames", "false")
+	showDiffs(t, r, "side")
+	showDiffs(t, r, evil)
+}
+
 func TestQuotedPathsMatchGit(t *testing.T) {
 	r := newRepo(t)
 	r.write(".beads/issues.jsonl", beadsLine("q-1", "open"))
@@ -405,6 +527,12 @@ func TestRefusesWhatItDoesNotEmulate(t *testing.T) {
 		{"log", "--format=%H", "--since=yesterday"},
 		{"log", "--raw", "--format=%H"},
 		{"-c", "diff.renames=false", "log", "--format=%H"},
+		// show's diff only under the empty format, and only these two.
+		{"show", "--name-status", "--format=%H", "HEAD"},
+		{"show", "--name-status", "HEAD"},
+		{"show", "--name-only", "--format=", "HEAD"},
+		{"show", "-s", "--name-status", "--format=%H", "HEAD"},
+		{"show", "--format=", "HEAD"},
 	} {
 		var out bytes.Buffer
 		err := Run(context.Background(), r.dir, args, nil, &out)

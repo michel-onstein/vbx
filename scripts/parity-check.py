@@ -1575,6 +1575,10 @@ HISTORY_COMMITS = [
     (12, 1, "Fix view refresh for hist-3", {}, {"ui/view.swift": 2, "ui/model.swift": 2}),
     (13, 1, "Plan the build split", {}, {"scripts/build.sh": 1}),
     (14, 1, "Count the cache misses for hist-q7x", {}, {"src/cache.go": 3}),
+    # Touches only an excluded directory, so the walk lists no files for it
+    # and bv's orphan detector asks git per commit (`show --name-status`),
+    # which vbx's objgit refused until vbx-lh0.
+    (15, 0, "Vendor the YAML parser", {}, {"vendor/yaml/yaml.go": 1}),
 ]
 # The drift baseline is the beads as they stood after this commit's day.
 HISTORY_BASELINE_DAY = 4
