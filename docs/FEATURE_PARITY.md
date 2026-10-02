@@ -86,7 +86,9 @@ alerts and capacity all read it, so each is compared with a known label
 its `full_stats`, since bv shapes its top level differently. So do the label
 commands, the blocker chain, search and the sprint commands (vbx-shz): the
 label commands and the blocker chain lift bv's envelope keys into the subtree
-they compare, so `scope` and `scope_hash` are checked beside the data, and the
+they compare, so `scope` and `scope_hash` are checked beside the data — as
+triage and plan do since vbx-6su, and alerts and metrics compare them by key —
+and the
 sprint commands are compared over the sprints fixture with `at-risk`, an
 unknown label, `actionable`, and `actionable` within `burndown`.
 `test-parity-check.py` reads vbx-cli's command table and fails when a command
@@ -138,7 +140,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.
 | `bd` workspace layout detection | Document open | Engine | 0 |
 | `BEADS_DIR` override | Settings + env | Engine | 0 |
 | BOM stripping, 10 MB line cap, malformed-line skip with warnings | Warnings banner in the window, expandable to a list | Engine + Native | 0 |
-| `load_stats` (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records | `vbx-cli`: in every envelope vbx carries, JSONL, `beads.db` and workspace alike, compared against bv over `Fixtures/dropped` (vbx-dv5, ADR-023); triage, plan, alerts and metrics carry no envelope yet (vbx-6su). App: the warnings badge states how many records were dropped | Engine + Native | — |
+| `load_stats` (bv 0.25): valid / dropped / skipped record counts in every robot envelope when a load dropped records | `vbx-cli`: in every envelope vbx carries, JSONL, `beads.db` and workspace alike, compared against bv over `Fixtures/dropped` (vbx-dv5, ADR-023), triage, plan, alerts and metrics included (vbx-6su). App: the warnings badge states how many records were dropped | Engine + Native | — |
 | Loader warnings on stderr outside robot mode (`Warning: skipping …`, a discovered workspace's notice, `N repos failed to load`) | `vbx-cli --export`, `--export-md`, `--feedback-accept` and `--feedback-ignore` print them before their own output, as bv does; robot commands, `--feedback-show`, `--feedback-reset` and `BV_ROBOT=1` stay quiet. The engine's `info.load_stderr` holds the lines. Compared against bv over `Fixtures/dropped` as JSONL, `beads.db` and workspace (vbx-1l6) | Engine + Native | — |
 | `source_authority` / `authority_hash` (bv 0.25 multi-source ranking) | Deliberately not ported — vbx resolves one source and ranks none; declared envelope-only in the parity harness (ADR-023, ADR-024) | — | — |
 | Legacy field aliases (`depends_on`, `target_id`) | Transparent | Engine | 0 |

@@ -155,7 +155,9 @@ func (s *Session) alerts(req []byte) ([]byte, error) {
 	filtered := filterAlerts(result.Alerts, r)
 	critical, warning, info := countSeverities(filtered)
 
-	return json.Marshal(map[string]any{
+	// bv's robot envelope sits at the top level beside the alerts, as it does
+	// in bv's own payload (vbx-6su).
+	return s.withEnvelope(map[string]any{
 		"alerts":       filtered,
 		"has_baseline": hasBaseline,
 		"baseline":     baselineInfo,
@@ -165,7 +167,7 @@ func (s *Session) alerts(req []byte) ([]byte, error) {
 			"warning":  warning,
 			"info":     info,
 		},
-	})
+	}, v.dataHash, v.scope)
 }
 
 // computeDrift runs the drift calculator over an analysis set against the saved

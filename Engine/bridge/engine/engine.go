@@ -686,8 +686,15 @@ type metricsPayload struct {
 	BetweennessRank map[string]int `json:"betweenness_rank,omitempty"`
 }
 
+// metrics is the session's GraphStats over the whole load.
+//
+// The payload carries bv's robot envelope at its top level, as every robot
+// payload does (vbx-6su). bv's --robot-metrics reports runtime timings rather
+// than graph statistics, but it carries the same envelope over the whole,
+// unscoped load, and so does this.
 func (s *Session) metrics() ([]byte, error) {
-	_, _, st := s.snapshot()
+	v := s.wholeView()
+	st := v.stats
 	if st == nil {
 		return nil, fmt.Errorf("session has no analysis")
 	}
@@ -729,7 +736,7 @@ func (s *Session) metrics() ([]byte, error) {
 		p.PageRankRank = st.PageRankRank()
 		p.BetweennessRank = st.BetweennessRank()
 	}
-	return json.Marshal(p)
+	return s.withEnvelope(p, v.dataHash, v.scope)
 }
 
 // reload re-reads the source and re-analyses only when the data actually
@@ -908,11 +915,12 @@ func (s *Session) triage(req []byte) ([]byte, error) {
 		suppressUnprovenTriageClaims(&result)
 	}
 	// bv reports the feedback beside the triage, not inside it; vbx's triage
-	// payload is the result itself, so the block sits at its top level.
-	return json.Marshal(struct {
+	// payload is the result itself, so the block sits at its top level, and
+	// so does bv's robot envelope, which bv puts beside `triage` (vbx-6su).
+	return s.withEnvelope(struct {
 		analysis.TriageResult
 		Feedback *analysis.FeedbackJSON `json:"feedback,omitempty"`
-	}{result, s.feedbackBlock()})
+	}{result, s.feedbackBlock()}, v.dataHash, v.scope)
 }
 
 // historyForTriage narrows a report to the activity signal bv's triage sees.
@@ -1048,7 +1056,9 @@ func (s *Session) triageHistory() (*correlation.HistoryReport, string) {
 
 // plan is the execution plan; a `label` in the request plans the label's
 // subgraph, offering only its labelled beads as work, and a `recipe` plans
-// what the recipe selects (scope.go).
+// what the recipe selects (scope.go). bv nests the plan under `plan` beside
+// its robot envelope; vbx returns the plan itself with the envelope at its
+// top level (vbx-6su).
 func (s *Session) plan(req []byte) ([]byte, error) {
 	sc, err := parseScopeRequest(req)
 	if err != nil {
@@ -1063,7 +1073,7 @@ func (s *Session) plan(req []byte) ([]byte, error) {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
 	defer s.pinClock(an)()
-	return json.Marshal(an.GetExecutionPlan())
+	return s.withEnvelope(an.GetExecutionPlan(), v.dataHash, v.scope)
 }
 
 func (s *Session) impact() ([]byte, error) {
