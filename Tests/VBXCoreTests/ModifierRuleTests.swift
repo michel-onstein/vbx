@@ -92,6 +92,75 @@ func rulesAreWellFormed() {
     #expect(ModifierRules.all.filter { $0.section != nil }.allSatisfy { !$0.help.isEmpty })
 }
 
+// vbx-pfy: vbx-cli spelled four of bv's modifiers its own way, so bv's rules
+// for them could not apply. They take bv's names and bv's rules now.
+@Test("bv's search, suggest and graph modifiers have bv's rules")
+func renamedModifierRules() {
+    #expect(ModifierRules.rule("search-limit")?.message == "--search-limit requires --search")
+    #expect(ModifierRules.rule("suggest-bead")?.message
+        == "--suggest-bead requires --robot-suggest")
+    #expect(ModifierRules.rule("graph-depth")?.message == "--graph-depth requires --robot-graph")
+    #expect(ModifierRules.rule("graph-root")?.message
+        == "--graph-root requires one of --robot-graph, --robot-triage, --robot-triage-by-track,"
+        + " --robot-triage-by-label or --robot-next")
+    // vbx-cli's own spellings are gone, with no rule left behind for them.
+    for old in ["limit", "depth", "root", "threshold"] {
+        #expect(ModifierRules.rule(old) == nil)
+    }
+}
+
+@Test(
+    "--graph-root modifies the graph, triage and next, and nothing else",
+    arguments: [
+        ("robot-graph", true), ("robot-triage", true), ("robot-next", true),
+        ("robot-plan", false), ("robot-insights", false), ("robot-suggest", false),
+    ])
+func graphRootCommands(command: String, accepted: Bool) {
+    let message = ModifierRules.violation(
+        given: ["graph-root", command], isActive: active(command: command))
+    #expect((message == nil) == accepted)
+}
+
+@Test("--search-limit needs a query, not just --robot-search")
+func searchLimitNeedsQuery() {
+    #expect(ModifierRules.violation(
+        given: ["search-limit", "robot-search"], isActive: active(command: "robot-search"))
+        == "--robot-search requires --search")
+    #expect(ModifierRules.violation(
+        given: ["search-limit"], isActive: active(command: "robot-triage"))
+        == "--search-limit requires --search")
+    #expect(ModifierRules.violation(
+        given: ["search-limit", "robot-search", "search"],
+        isActive: active(command: "robot-search", also: ["search"])) == nil)
+}
+
+@Test(
+    "--graph-format is refused outside bv's values, with bv's message",
+    arguments: [
+        ("svg", #"invalid --graph-format "svg" (expected one of json, dot, mermaid)"#),
+        ("dott",
+         #"invalid --graph-format "dott" (expected one of json, dot, mermaid); did you mean "dot"?"#),
+        ("", #"invalid --graph-format "" (expected one of json, dot, mermaid)"#),
+        ("mermiad",
+         #"invalid --graph-format "mermiad" (expected one of json, dot, mermaid); did you mean "mermaid"?"#),
+        ("js",
+         #"invalid --graph-format "js" (expected one of json, dot, mermaid); did you mean "json"?"#),
+        ("graphviz", #"invalid --graph-format "graphviz" (expected one of json, dot, mermaid)"#),
+        (#"a"b"#, #"invalid --graph-format "a\"b" (expected one of json, dot, mermaid)"#),
+    ])
+func graphFormatRefused(value: String, message: String) {
+    #expect(EnumRules.violation { $0 == "graph-format" ? value : nil } == message)
+}
+
+@Test("--graph-format accepts bv's values whatever their case and padding")
+func graphFormatAccepted() {
+    for value in ["json", "dot", "mermaid", "DOT", " json ", "Mermaid"] {
+        #expect(EnumRules.violation { $0 == "graph-format" ? value : nil } == nil, "\(value)")
+    }
+    // A flag that was not given is never checked.
+    #expect(EnumRules.violation { _ in nil } == nil)
+}
+
 @Test("--help lists a modifier with what it needs, in vbx-cli's spelling")
 func helpLinesFollowTheRule() {
     let lines = ModifierRules.helpLines(.history) { flag in

@@ -223,6 +223,39 @@ func TestNotReadyLabelsLeaveTheTopPicks(t *testing.T) {
 	}
 }
 
+// TestGraphRootScopesTriageAndNext: bv's --graph-root modifies triage and
+// next as well as the graph export (vbx-pfy) — only the root and what
+// transitively depends on it are ranked.
+func TestGraphRootScopesTriageAndNext(t *testing.T) {
+	s := openFeedback(t, feedbackFixturePath(t, "feedback"))
+
+	rooted := call[feedbackTriageShape](t, s, "triage", map[string]any{"graph_root": "fb-1"})
+	// bv 0.25.2: --robot-triage --graph-root fb-1.
+	if want := []string{"fb-1", "fb-2", "fb-3"}; !slices.Equal(rooted.order(), want) {
+		t.Errorf("rooted ranking = %v, want %v", rooted.order(), want)
+	}
+	if want := []string{"fb-1"}; !slices.Equal(rooted.picks(), want) {
+		t.Errorf("rooted picks = %v, want %v", rooted.picks(), want)
+	}
+
+	next := call[struct {
+		Diagnostic *struct {
+			ID       string `json:"id"`
+			Unblocks int    `json:"unblocks"`
+		} `json:"diagnostic_top_pick"`
+	}](t, s, "next", map[string]any{"graph_root": "fb-1"})
+	// bv 0.25.2: --robot-next --graph-root fb-1, where the unrooted pick is fb-5.
+	if next.Diagnostic == nil || next.Diagnostic.ID != "fb-1" || next.Diagnostic.Unblocks != 2 {
+		t.Errorf("rooted next = %+v, want bv's fb-1 unblocking 2", next.Diagnostic)
+	}
+
+	// Without a root the whole workspace is ranked, as before.
+	plain := call[feedbackTriageShape](t, s, "triage", nil)
+	if len(plain.order()) <= 3 {
+		t.Errorf("unrooted ranking = %v, want every open bead", plain.order())
+	}
+}
+
 func TestNotReadyLabelsParse(t *testing.T) {
 	for raw, want := range map[string][]string{
 		"":                  nil,

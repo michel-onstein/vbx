@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — vbx-cli takes bv's spellings for search, suggest and graph modifiers (vbx-pfy)
+
+`--limit`, `--depth`, `--root` and suggest's `--id` are now bv's
+`--search-limit`, `--graph-depth`, `--graph-root` and `--suggest-bead`, each
+under bv's modifier rule; `--graph-root` also roots `--robot-triage` and
+`--robot-next`, as in bv. `--graph-format` is held to json, dot and mermaid by
+bv's enum rule (`EnumRules`), with bv's "did you mean". The unread
+`--threshold` is gone. A user-visible CLI rename, so semver:minor. Parity: 0
+differing commands before and after; the harness compares 12 more refusals and
+10 more accepted runs. Details in BUGS.md.
+
 ## 2026-10-02 — vbx-cli refuses a modifier without the command it modifies, as bv does (vbx-uao)
 
 `--history-limit` beside `--robot-orphans`, `--network-depth` beside triage and

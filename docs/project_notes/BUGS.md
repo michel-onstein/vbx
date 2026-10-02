@@ -4,6 +4,39 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — vbx-cli spelled four bv modifiers its own way, so bv's rules for them never applied
+
+**Symptom:** `vbx-cli --robot-triage --limit 3` and `--robot-plan --depth 2`
+answered where bv refuses the same flags under its names (`--search-limit
+requires --search`, `--graph-depth requires --robot-graph`, exit 1), and
+`--robot-graph --graph-format svg` exported JSON where bv exits 1 with
+`invalid --graph-format "svg" (expected one of json, dot, mermaid)`. bv's
+`--graph-root` beside triage or `--robot-next` was refused as an unknown flag,
+and `--threshold` was parsed and never read. (vbx-pfy, found in vbx-uao.)
+
+**Cause:** vbx-cli predates matching bv flag for flag: it took `--limit`,
+`--depth`, `--root` and suggest's bead as `--id`, so `ModifierRules` — keyed by
+bv's names — had nothing to hold them to, and the harness could not compare
+them refused. bv's `enumRules` were never ported. The engine's triage and next
+had no root, because nothing could ask for one.
+
+**Fix:** vbx-cli takes `--search-limit`, `--graph-root`, `--graph-depth` and
+`--suggest-bead`, each with bv's rule in `ModifierRules`; the old spellings and
+`--threshold` are gone outright (not in production — no aliases).
+`--robot-insights` has no limit flag, as in bv. `EnumRules` is bv's
+`enumFlagRule` table (`--graph-format`), checked right after the modifiers with
+bv's message, `suggestClosest`'s "did you mean" included, and exit 1. The
+engine's triage and next take `graph_root`, bv's `RootIssueID`.
+
+**Regression tests:** `ModifierRuleTests` (the four rules' messages,
+`--graph-root` accepted beside graph, triage and next only, each
+`--graph-format` refusal word for word, case and padding accepted). Go
+`TestGraphRootScopesTriageAndNext` (bv's ranking and pick under `--graph-root
+fb-1`). `test-parity-check.py` `test_enum_rules_and_bv_spellings` holds the enum
+table to bv's source and asserts the old spellings are not parsed;
+`parity-check.py` compares each new rule and four bad formats refused, and ten
+accepted runs, against bv.
+
 ## 2026-10-02 — vbx-cli answered modifiers bv refuses, such as --history-limit beside --robot-orphans
 
 **Symptom:** `vbx-cli --robot-orphans --history-limit 3` exited 0 with a report,
