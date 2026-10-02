@@ -86,8 +86,10 @@ def test_every_difference_is_reported(parity) -> None:
 def test_default_run_covers_every_fixture(parity) -> None:
     print("\nFixtures")
     names = [fixture["name"] for fixture in parity.FIXTURES]
-    check("the demo, the readiness fixture, its beads.db form and the sprints are all compared",
-          names == ["demo", "readiness", "readiness (beads.db)", "sprints"], str(names))
+    check("the demo, the readiness fixture, its beads.db form, the sprints and both feedback"
+          " fixtures are all compared",
+          names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
+                    "feedback-few"], str(names))
     for fixture in parity.FIXTURES:
         path = ROOT / fixture["workspace"] / ".beads" / "issues.jsonl"
         check(f"{fixture['workspace']} exists", path.exists(), str(path))
@@ -288,8 +290,44 @@ def test_bv_version_gate(parity) -> None:
     check("a version without a v is parsed", parity.parse_bv_version("0.25.2") == "v0.25.2")
 
 
+def test_triage_feedback_and_not_ready(parity) -> None:
+    print("\nTriage feedback and not-ready labels (vbx-5ba)")
+    for fixture in ("feedback", "feedback-few"):
+        path = ROOT / "Fixtures" / fixture / ".beads" / "feedback.json"
+        check(f"{fixture} has a feedback file", path.exists(), str(path))
+
+    whole = {"triage": {"recommendations": []}, "feedback": {"applied": True}}
+    lifted = parity.lift(whole, whole["triage"], ("feedback",))
+    check("bv's feedback block is lifted into the triage it sits beside",
+          lifted == {"recommendations": [], "feedback": {"applied": True}}, str(lifted))
+    check("lifting copies rather than editing bv's payload", "feedback" not in whole["triage"])
+    bare = {"triage": {"recommendations": []}}
+    check("a block bv omits stays omitted, so one vbx adds still differs",
+          parity.lift(bare, bare["triage"], ("feedback",)) == {"recommendations": []})
+
+    triage = [entry for entry in parity.COMPARISONS
+              if entry["vbx"] == "robot-triage" and entry.get("compare") is not False]
+    check("every triage run compares bv's feedback block",
+          all("feedback" in entry.get("bv_lift", ()) for entry in triage),
+          str([entry.get("name", entry["vbx"]) for entry in triage]))
+
+    gated = [entry for entry in parity.COMPARISONS
+             if "not-ready" in entry.get("name", "").lower()
+             or "NOT_READY" in entry.get("name", "")]
+    for command in ("robot-triage", "robot-next"):
+        runs = [entry for entry in gated if entry["vbx"] == command]
+        check(f"--{command} is compared under the flag, the environment and both",
+              {bool(entry.get("vbx_args")) for entry in runs} == {True, False}
+              and any(entry.get("env") and entry.get("vbx_args") for entry in runs),
+              str(runs))
+    for entry in gated:
+        check(f"--{entry['name']} gives bv what it gives vbx",
+              entry.get("bv_args") == entry.get("vbx_args"), str(entry))
+
+
 def main() -> int:
     parity = load_parity()
+    test_triage_feedback_and_not_ready(parity)
     test_bv_version_gate(parity)
     test_label_scoped_runs(parity)
     test_envelope_only_keys_are_one_list(parity)

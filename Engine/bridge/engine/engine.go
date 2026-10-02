@@ -70,6 +70,13 @@ type Session struct {
 	analyzer *analysis.Analyzer
 	stats    *analysis.GraphStats
 
+	// feedback is the workspace's triage feedback, `.beads/feedback.json`,
+	// as bv reads it: nil when the file is absent or unreadable. Its
+	// fingerprint is what the reload gate compares, so an edit to the file
+	// alone still reloads. See feedback.go.
+	feedback            *analysis.FeedbackData
+	feedbackFingerprint string
+
 	loadedAt time.Time
 
 	// Multi-repository state. Empty workspacePath means the ordinary
@@ -217,6 +224,7 @@ func (s *Session) load() error {
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, nil)
 	an, stats := s.analyse(issues, readiness, nil)
+	s.refreshFeedback(src, kind)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -666,12 +674,16 @@ func (s *Session) reload() ([]byte, error) {
 	}
 	s.mu.RUnlock()
 
+	// Feedback is not bead data, so the hash above cannot see it change; an
+	// edit to feedback.json alone still reorders triage, and has to reach the
+	// app as a change.
+	feedbackChanged := s.refreshFeedback(src, kind)
 	if newHash == oldHash && oldHash != "" {
 		payload, err := s.info()
 		if err != nil {
 			return nil, err
 		}
-		return withChangedFlag(payload, false)
+		return withChangedFlag(payload, feedbackChanged)
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, nil)
@@ -757,19 +769,21 @@ const triageHistoryTimeout = 10 * time.Second
 // ranking is computed over the subgraph and recommends only the labelled
 // beads, as bv's --robot-triage --label does.
 func (s *Session) triage(req []byte) ([]byte, error) {
-	label, err := labelRequest(req)
+	r, err := parseTriageRequest(req)
 	if err != nil {
 		return nil, err
 	}
-	v := s.view(label)
+	v := s.view(r.Label)
 	issues := v.issues
 
 	opts := analysis.TriageOptions{
-		WaitForPhase2: true,
-		UseFastConfig: true,
-		Readiness:     s.readinessIndex(),
-		CandidateIDs:  v.candidates,
-		SeedDataHash:  v.seedHash(),
+		WaitForPhase2:  true,
+		UseFastConfig:  true,
+		Readiness:      s.readinessIndex(),
+		CandidateIDs:   v.candidates,
+		SeedDataHash:   v.seedHash(),
+		NotReadyLabels: notReadyLabels(r.NotReadyLabels),
+		Weights:        s.feedbackWeights(),
 	}
 
 	historyStatus := "skipped"
@@ -788,7 +802,12 @@ func (s *Session) triage(req []byte) ([]byte, error) {
 	if !s.claimsProven() {
 		suppressUnprovenTriageClaims(&result)
 	}
-	return json.Marshal(result)
+	// bv reports the feedback beside the triage, not inside it; vbx's triage
+	// payload is the result itself, so the block sits at its top level.
+	return json.Marshal(struct {
+		analysis.TriageResult
+		Feedback *analysis.FeedbackJSON `json:"feedback,omitempty"`
+	}{result, s.feedbackBlock()})
 }
 
 // historyForTriage narrows a report to the activity signal bv's triage sees.

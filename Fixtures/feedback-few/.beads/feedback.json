@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "created_at": "2026-07-01T12:00:00Z",
+  "updated_at": "2026-08-19T09:00:00Z",
+  "events": [
+    {"issue_id": "fb-5", "action": "accept", "score": 0.41, "timestamp": "2026-08-18T09:00:00Z"},
+    {"issue_id": "fb-1", "action": "ignore", "score": 0.62, "timestamp": "2026-08-19T09:00:00Z"}
+  ],
+  "adjustments": [
+    {"name": "PageRank", "adjustment": 0.5, "samples": 2, "last_updated": "2026-08-19T09:00:00Z"},
+    {"name": "Betweenness", "adjustment": 0.5, "samples": 2, "last_updated": "2026-08-19T09:00:00Z"},
+    {"name": "BlockerRatio", "adjustment": 0.5, "samples": 2, "last_updated": "2026-08-19T09:00:00Z"},
+    {"name": "Staleness", "adjustment": 1, "samples": 2, "last_updated": "2026-08-19T09:00:00Z"},
+    {"name": "PriorityBoost", "adjustment": 2, "samples": 2, "last_updated": "2026-08-19T09:00:00Z"},
+    {"name": "TimeToImpact", "adjustment": 1, "samples": 2, "last_updated": "2026-08-19T09:00:00Z"},
+    {"name": "Urgency", "adjustment": 1, "samples": 2, "last_updated": "2026-08-19T09:00:00Z"},
+    {"name": "Risk", "adjustment": 1, "samples": 2, "last_updated": "2026-08-19T09:00:00Z"}
+  ],
+  "stats": {"total_accepted": 1, "total_ignored": 1, "avg_accept_score": 0.41, "avg_ignore_score": 0.62}
+}

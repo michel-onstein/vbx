@@ -111,8 +111,18 @@ func (s *Session) priority(req []byte) ([]byte, error) {
 		byID[issue.ID] = issue
 	}
 
+	// bv's --robot-priority scores with the feedback weights too. The
+	// analyzer is the session's, shared with every other call, so the weights
+	// hold only for this computation: set under the clock lock, which already
+	// serialises the analyzer's scoring state, and restored before it is
+	// released.
 	release := s.pinClock(analyzer)
+	scoring := analyzer.CaptureScoring()
+	if w := s.feedbackWeights(); w != nil {
+		analyzer.SetWeights(*w)
+	}
 	recommendations := analyzer.GenerateEnhancedRecommendations()
+	analyzer.RestoreScoring(scoring)
 	release()
 
 	// The filters are applied in bv's order, and each one drops a
@@ -258,13 +268,15 @@ func diagnosticFromPick(pick analysis.TopPick) *nextDiagnosticPick {
 // tracker advertises it gets one.
 //
 // A `label` in the request picks from the label's subgraph (scope.go), and
-// only a labelled bead can be the pick.
+// only a labelled bead can be the pick. `not_ready_labels` and the
+// workspace's triage feedback reach the ranking exactly as in triage
+// (feedback.go).
 func (s *Session) next(req []byte) ([]byte, error) {
-	label, err := labelRequest(req)
+	r, err := parseTriageRequest(req)
 	if err != nil {
 		return nil, err
 	}
-	v := s.view(label)
+	v := s.view(r.Label)
 	issues, stats := v.issues, v.stats
 	if stats != nil {
 		stats.WaitForPhase2()
@@ -276,11 +288,13 @@ func (s *Session) next(req []byte) ([]byte, error) {
 	// as missing and withhold its dependents.
 	readiness := s.readinessIndex()
 	opts := analysis.TriageOptions{
-		WaitForPhase2: true,
-		Readiness:     readiness,
-		CandidateIDs:  v.candidates,
-		UseFastConfig: true,
-		SeedDataHash:  v.seedHash(),
+		WaitForPhase2:  true,
+		Readiness:      readiness,
+		CandidateIDs:   v.candidates,
+		UseFastConfig:  true,
+		SeedDataHash:   v.seedHash(),
+		NotReadyLabels: notReadyLabels(r.NotReadyLabels),
+		Weights:        s.feedbackWeights(),
 	}
 	triage := analysis.ComputeTriageWithOptionsAndTime(issues, opts, now)
 

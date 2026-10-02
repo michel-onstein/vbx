@@ -72,14 +72,36 @@ func requireID(_ options: Options, for flag: String) throws -> String {
     return id
 }
 
+/// The commands bv lets `--robot-not-ready-labels` modify. Any other is a
+/// usage error, as it is in bv.
+let notReadyCommands: Set<String> = ["robot-triage", "robot-next"]
+
+/// bv's opt-in not-ready label-class for triage and --robot-next: the flag when
+/// it is set, else `BV_ROBOT_NOT_READY_LABELS`. Passed as written — the engine
+/// splits and trims it, as bv's `resolveNotReadyLabels` does.
+func notReadyRequest(_ options: Options) -> [String: Any]? {
+    options.notReadyLabels.map { ["not_ready_labels": $0] }
+}
+
+/// Resolves the flag against the environment variable bv falls back to.
+func resolvedNotReadyLabels(flag: String?, environment: [String: String]) -> String? {
+    if let flag, !flag.trimmingCharacters(in: .whitespaces).isEmpty { return flag }
+    if let value = environment["BV_ROBOT_NOT_READY_LABELS"],
+        !value.trimmingCharacters(in: .whitespaces).isEmpty
+    {
+        return value
+    }
+    return nil
+}
+
 let robotCommands: [RobotCommand] = [
     // Triage and planning
     RobotCommand(
         "robot-triage", method: "triage", summary: "Ranked recommendations",
-        waitsForPhase2: true, labelScoped: true),
+        waitsForPhase2: true, labelScoped: true, request: notReadyRequest),
     RobotCommand(
         "robot-next", method: "next", summary: "The single claim-safe next bead",
-        waitsForPhase2: true, labelScoped: true),
+        waitsForPhase2: true, labelScoped: true, request: notReadyRequest),
     RobotCommand(
         "robot-plan", method: "plan", summary: "Parallel execution tracks",
         labelScoped: true),
@@ -314,6 +336,7 @@ struct Options {
     var threshold: Double?
     var byLabel: String?
     var byAssignee: String?
+    var notReadyLabels: String?
     var pretty = false
     var listCommands = false
     var showHelp = false
@@ -364,6 +387,9 @@ func parseArguments() throws -> Options {
         case "--threshold": options.threshold = Double(try next(arg))
         case "--by-label": options.byLabel = try next(arg)
         case "--by-assignee": options.byAssignee = try next(arg)
+        // A modifier spelled like a command, so it is matched before the
+        // `--robot-` prefix below would take it for one.
+        case "--robot-not-ready-labels": options.notReadyLabels = try next(arg)
         case "--pretty": options.pretty = true
         case "--list-commands": options.listCommands = true
         case "--help", "-h": options.showHelp = true
@@ -391,6 +417,18 @@ func parseArguments() throws -> Options {
 
     guard ["json", "toon"].contains(options.format) else {
         throw UsageError(message: "invalid --format \(options.format) (expected json or toon)")
+    }
+    if options.notReadyLabels != nil, let command = options.command,
+        !notReadyCommands.contains(command)
+    {
+        throw UsageError(
+            message: "--robot-not-ready-labels requires one of --robot-triage or --robot-next")
+    }
+    // The environment applies only where the flag would, so an exported
+    // variable never makes another command a usage error.
+    if let command = options.command, notReadyCommands.contains(command) {
+        options.notReadyLabels = resolvedNotReadyLabels(
+            flag: options.notReadyLabels, environment: ProcessInfo.processInfo.environment)
     }
     return options
 }
@@ -437,6 +475,11 @@ func usageText() -> String {
         "  --format json|toon   Output format (default json)",
         "  --pretty             Indent JSON output",
         "  --list-commands      Print the command list as JSON",
+        "",
+        "TRIAGE AND --robot-next:",
+        "  --robot-not-ready-labels A,B",
+        "                       Labels whose beads are never a claimable top pick",
+        "                       (env: BV_ROBOT_NOT_READY_LABELS)",
         "",
         "EXIT CODES:",
         "  0  Success",
