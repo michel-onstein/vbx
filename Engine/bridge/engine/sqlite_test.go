@@ -76,7 +76,7 @@ func makeBeadsDB(t *testing.T, dir string) string {
 func TestLoadSQLite(t *testing.T) {
 	path := makeBeadsDB(t, t.TempDir())
 
-	issues, err := LoadSQLite(path)
+	issues, _, _, err := LoadSQLite(path)
 	if err != nil {
 		t.Fatalf("LoadSQLite: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestLoadSQLite(t *testing.T) {
 }
 
 func TestLoadSQLiteMissingFile(t *testing.T) {
-	if _, err := LoadSQLite(filepath.Join(t.TempDir(), "nope.db")); err == nil {
+	if _, _, _, err := LoadSQLite(filepath.Join(t.TempDir(), "nope.db")); err == nil {
 		t.Error("expected an error for a missing database")
 	}
 }
@@ -198,7 +198,7 @@ func TestLoadSQLiteHonoursTheTombstoneColumn(t *testing.T) {
 	}
 	db.Close()
 
-	issues, err := LoadSQLite(path)
+	issues, _, _, err := LoadSQLite(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestLoadSQLiteOrdersAsBvDoes(t *testing.T) {
 	}
 	ids := func(t *testing.T, path string) []string {
 		t.Helper()
-		issues, err := LoadSQLite(path)
+		issues, _, _, err := LoadSQLite(path)
 		if err != nil {
 			t.Fatal(err)
 		}

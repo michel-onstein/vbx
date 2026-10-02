@@ -13,6 +13,36 @@ public enum SourceKind: String, Codable, Sendable {
     }
 }
 
+/// How many records a load kept and dropped: bv's `load_stats`, as the engine
+/// reports it. Present only when the load dropped a record — a malformed line,
+/// or one that failed validation — so its absence means nothing was dropped,
+/// never that nothing was counted (vbx-dv5).
+public struct LoadStats: Codable, Sendable, Hashable {
+    /// Records that parsed and validated.
+    public var valid: Int
+    /// Records the loader dropped.
+    public var errors: Int
+    /// Non-issue records, recognised and passed over.
+    public var skipped: Int
+    /// The loader's reasons, first ten.
+    public var warnings: [String]
+
+    public init(valid: Int, errors: Int, skipped: Int = 0, warnings: [String] = []) {
+        self.valid = valid
+        self.errors = errors
+        self.skipped = skipped
+        self.warnings = warnings
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        valid = try c.decodeIfPresent(Int.self, forKey: .valid) ?? 0
+        errors = try c.decodeIfPresent(Int.self, forKey: .errors) ?? 0
+        skipped = try c.decodeIfPresent(Int.self, forKey: .skipped) ?? 0
+        warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
+    }
+}
+
 /// What the engine reports after opening a workspace.
 public struct WorkspaceInfo: Codable, Sendable, Hashable {
     /// The file actually read, after discovery.
@@ -24,6 +54,8 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
     public var dataHash: String
     /// Non-fatal loader complaints: malformed lines, empty files, and so on.
     public var warnings: [String]
+    /// The records the load dropped, when it dropped any.
+    public var loadStats: LoadStats?
     public var loadedAt: Date?
     /// Set by `reload`: false means the data hash was unchanged and nothing was
     /// re-analysed, so the UI can skip republishing.
@@ -48,6 +80,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
         case issueCount = "issue_count"
         case dataHash = "data_hash"
         case loadedAt = "loaded_at"
+        case loadStats = "load_stats"
         case watchPaths = "watch_paths"
         case gitWatchPaths = "git_watch_paths"
     }
@@ -59,6 +92,7 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
         issueCount = try c.decodeIfPresent(Int.self, forKey: .issueCount) ?? 0
         dataHash = try c.decodeIfPresent(String.self, forKey: .dataHash) ?? ""
         warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
+        loadStats = try c.decodeIfPresent(LoadStats.self, forKey: .loadStats)
         // Absent on a plain open; only reload reports it.
         changed = try c.decodeIfPresent(Bool.self, forKey: .changed) ?? true
         watchPaths = try c.decodeIfPresent([String].self, forKey: .watchPaths) ?? []
@@ -70,9 +104,11 @@ public struct WorkspaceInfo: Codable, Sendable, Hashable {
 
     public init(
         source: String, kind: SourceKind, issueCount: Int,
-        dataHash: String, warnings: [String] = [], loadedAt: Date? = nil,
-        changed: Bool = true, watchPaths: [String] = [], gitWatchPaths: [String] = []
+        dataHash: String, warnings: [String] = [], loadStats: LoadStats? = nil,
+        loadedAt: Date? = nil, changed: Bool = true, watchPaths: [String] = [],
+        gitWatchPaths: [String] = []
     ) {
+        self.loadStats = loadStats
         self.gitWatchPaths = gitWatchPaths
         self.source = source
         self.kind = kind

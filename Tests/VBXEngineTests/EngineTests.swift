@@ -30,6 +30,30 @@ func openReportsInfo() async throws {
     #expect(info.displayName == "demo")
 }
 
+@Test("Dropped records cross the bridge as load stats, and a clean load has none")
+func loadStatsCrossTheBridge() async throws {
+    let dropped = URL(fileURLWithPath: fixturePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("dropped")
+        .path
+    let engine = BeadsEngine()
+    let info = try await engine.open(path: dropped, skipPhase2: true)
+    // bv 0.25.2's load_stats over Fixtures/dropped: four kept, the malformed
+    // line and the invalid record dropped (vbx-dv5).
+    let stats = try #require(info.loadStats)
+    #expect(stats.valid == 4)
+    #expect(stats.errors == 2)
+    #expect(stats.skipped == 0)
+    #expect(stats.warnings.count == 2)
+    #expect(info.issueCount == 4)
+    await engine.close()
+
+    let clean = BeadsEngine()
+    let demo = try await clean.open(path: fixturePath, skipPhase2: true)
+    #expect(demo.loadStats == nil)
+    await clean.close()
+}
+
 @Test("Issues cross the bridge with their fields intact")
 func issuesDecode() async throws {
     let engine = BeadsEngine()

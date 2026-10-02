@@ -67,6 +67,10 @@ type Session struct {
 	// gate both include them.
 	tombstoneIDs []string
 	warnings     []string
+	// sourceLoads is each source's parse accounting — one for a single
+	// repository, one per member for a workspace — from which the robot
+	// envelope's load_stats is built. See loadstats.go.
+	sourceLoads []sourceLoad
 	// complete is bv's claim-safety verdict on the load: every record parsed
 	// and every repository loaded. A partial load can make a blocked bead
 	// look ready, so no claim command is ever emitted from one.
@@ -228,7 +232,7 @@ func (s *Session) load() error {
 		return err
 	}
 
-	records, complete, err := s.readSource(src, kind, &warnings)
+	records, read, complete, err := s.readSource(src, kind, &warnings)
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", src, err)
 	}
@@ -240,6 +244,7 @@ func (s *Session) load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.source, s.kind, s.warnings = src, kind, warnings
+	s.sourceLoads = []sourceLoad{read}
 	s.workspacePath, s.repoLoads = "", nil
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = nil
@@ -252,29 +257,41 @@ func (s *Session) load() error {
 // readSource parses one resolved source and binds every bead to its origin.
 //
 // complete is false when any record failed to parse: bv's datasource treats
-// that as incomplete source authority, and so does this.
-func (s *Session) readSource(src, kind string, warnings *[]string) ([]model.Issue, bool, error) {
+// that as incomplete source authority, and so does this. The returned
+// sourceLoad is the read's parse accounting, for load_stats: bv's own
+// loader's for a JSONL, and vbx's SQLite reader's for a beads.db, which drops
+// and counts rows by bv's SQLite rule.
+func (s *Session) readSource(src, kind string, warnings *[]string) ([]model.Issue, sourceLoad, bool, error) {
 	var (
 		issues []model.Issue
 		err    error
 		parsed loader.ParseStats
+		kept   warningRecorder
 	)
 	switch kind {
 	case "sqlite":
-		issues, err = LoadSQLite(src)
+		var dropped []string
+		issues, parsed, dropped, err = LoadSQLite(src)
+		for _, msg := range dropped {
+			*warnings = append(*warnings, msg)
+			kept.add(msg)
+		}
 	default:
 		opts := loader.ParseOptions{
-			WarningHandler: func(msg string) { *warnings = append(*warnings, msg) },
-			Stats:          &parsed,
+			WarningHandler: func(msg string) {
+				*warnings = append(*warnings, msg)
+				kept.add(msg)
+			},
+			Stats: &parsed,
 		}
 		issues, err = loader.LoadIssuesFromFileWithOptions(src, opts)
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, sourceLoad{}, false, err
 	}
 	complete := parsed.Errors == 0
 	s.bindOrigins(issues, src, complete)
-	return issues, complete, nil
+	return issues, sourceLoad{sourcePath: src, stats: parsed, warnings: kept.kept}, complete, nil
 }
 
 // analyse builds the analyzer and starts the metrics for one issue set.
@@ -547,7 +564,11 @@ type infoPayload struct {
 	IssueCoun int      `json:"issue_count"`
 	DataHash  string   `json:"data_hash"`
 	Warnings  []string `json:"warnings"`
-	LoadedAt  string   `json:"loaded_at"`
+	// LoadStats is the robot envelope's load_stats — how many records the
+	// load kept and dropped — present only when it dropped one. The app's
+	// warnings badge states the counts from it (vbx-dv5).
+	LoadStats *loadStats `json:"load_stats,omitempty"`
+	LoadedAt  string     `json:"loaded_at"`
 	// WatchPaths is the directories the app's file watch follows: what was
 	// read, and what is read alongside it. One for a single repository; for a
 	// workspace, every member's beads directory as well (vbx-zot).
@@ -577,6 +598,7 @@ func (s *Session) info() ([]byte, error) {
 		IssueCoun:     len(s.records),
 		DataHash:      hash,
 		Warnings:      w,
+		LoadStats:     robotLoadStats(s.sourceLoads),
 		LoadedAt:      s.loadedAt.Format(time.RFC3339),
 		WatchPaths:    s.watchPathsLocked(),
 		GitWatchPaths: s.gitWatchPathsLocked(),
@@ -705,7 +727,7 @@ func (s *Session) reload() ([]byte, error) {
 		return nil, err
 	}
 
-	records, complete, err := s.readSource(src, kind, &warnings)
+	records, read, complete, err := s.readSource(src, kind, &warnings)
 	if err != nil {
 		return nil, fmt.Errorf("reloading %s: %w", src, err)
 	}
@@ -727,11 +749,16 @@ func (s *Session) reload() ([]byte, error) {
 	// app as a change.
 	feedbackChanged := s.refreshFeedback(src, kind)
 	if newHash == oldHash && oldHash != "" {
+		// A dropped record changes no record that survived, so the hash
+		// cannot see one appear: a malformed line appended to the file
+		// leaves the bead set as it was. The load's accounting is still kept
+		// current — and reported as a change, so the app's badge follows it.
+		accountingChanged := s.refreshAccounting([]sourceLoad{read}, warnings, complete)
 		payload, err := s.info()
 		if err != nil {
 			return nil, err
 		}
-		return withChangedFlag(payload, feedbackChanged)
+		return withChangedFlag(payload, feedbackChanged || accountingChanged)
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, nil)
@@ -739,6 +766,7 @@ func (s *Session) reload() ([]byte, error) {
 
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = src, kind, warnings
+	s.sourceLoads = []sourceLoad{read}
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = nil
 	s.analyzer, s.stats = an, stats

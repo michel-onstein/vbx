@@ -47,7 +47,8 @@ for the burndown and sprint commands to read, and `Fixtures/feedback` and
 enough verdicts for bv to apply its weights and one without, and
 `Fixtures/search`, whose text buries a bead below a query for its own id — the
 case bv's guaranteed exact-id hit exists for — and which runs only the search
-comparisons. `--workspace` narrows the run to one.
+comparisons, and `Fixtures/dropped`, as JSONL and as a beads.db, whose
+malformed line and invalid record make every envelope carry `load_stats`. `--workspace` narrows the run to one.
 
 Each differing command reports its first difference and how many more there
 are; `--verbose` lists every one.
@@ -83,6 +84,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Why the dropped-records fixtures skip the feedback comparisons.
+_NO_LOAD_WARNINGS = "vbx-cli prints no loader warnings to stderr where bv does (vbx-1l6)"
+
 # The workspaces every default run covers. A `sqlite` entry is the named
 # fixture's JSONL rebuilt as a beads.db in a temporary directory, so the run
 # reaches the SQLite loader too: vbx carries its own (Engine/bridge/engine/
@@ -114,6 +118,17 @@ FIXTURES = [
     # because a recipe in the demo would change what the app lists there.
     # `only_named`: only the recipe-scope comparisons run over it (vbx-7d5).
     {"name": "recipes", "workspace": "Fixtures/demo", "recipes": True, "only_named": True},
+    # Dropped records (vbx-dv5): four valid beads, a line cut off mid-record
+    # and a record whose updated_at precedes its created_at. Every command
+    # runs over it, so each envelope bv gives `load_stats` is compared — the
+    # clean fixtures above prove the key stays absent when nothing dropped.
+    # As a beads.db the malformed line never becomes a row, and the invalid
+    # one is dropped by the SQLite loaders instead. `skip_feedback`: bv's
+    # feedback commands print the loader's warnings to stderr and vbx-cli's do
+    # not (vbx-1l6), which is not what this fixture is for.
+    {"name": "dropped", "workspace": "Fixtures/dropped", "skip_feedback": _NO_LOAD_WARNINGS},
+    {"name": "dropped (beads.db)", "workspace": "Fixtures/dropped", "sqlite": True,
+     "skip_feedback": _NO_LOAD_WARNINGS},
 ]
 
 # The recipe files of the `recipes` fixture, by path relative to the
@@ -233,6 +248,16 @@ DECLARED_DIFFERENCES = {
         ("robot-capacity --agents 3", ".data_hash"): _LOSSY_HASH,
         ("robot-capacity --agents 3", ".scope_hash"): _LOSSY_SCOPE,
     },
+    # The dropped-records beads as a beads.db (vbx-dv5) are there for
+    # load_stats, which matches; their fingerprint differs as every beads.db's
+    # does. Its beads have no closed one, so no velocity differs as well.
+    "dropped (beads.db)": {
+        (command, path): reason
+        for command in ("robot-label-flow", "robot-label-health", "robot-label-attention",
+                        "robot-suggest", "robot-graph", "robot-next", "robot-capacity",
+                        "robot-capacity --agents 3")
+        for path, reason in ((".data_hash", _LOSSY_HASH), (".scope_hash", _LOSSY_SCOPE))
+    } | {("robot-suggest", ".suggestions.data_hash"): _LOSSY_HASH},
 }
 
 
@@ -296,7 +321,7 @@ NOT_READY = "needs-design"
 # at its top level, lifts these from bv's top level into the subtree it
 # compares, so the scope and its hash are checked beside the data.
 ENVELOPE_KEYS = ("data_hash", "scope", "scope_hash", "output_format", "source_path",
-                 "source_kind")
+                 "source_kind", "load_stats")
 LABEL_HEALTH_PATHS = {"bv_path": "results", "bv_lift": ENVELOPE_KEYS}
 LABEL_FLOW_PATHS = {"bv_path": "flow", "bv_lift": ENVELOPE_KEYS}
 # bv projects a ranked subset of the attention scores, cut at
@@ -536,6 +561,22 @@ COMPARISONS = [
         ("recipes", "graph", "5", ["--recipe", "hub-first.yml", "--label", "ui"]),
         ("search", "tax-7", "3", ["--label", "tax"]),
         ("search", "tax-7", "3", ["--label", "finance"]),
+    )
+] + [
+    # load_stats on the envelope-carrying commands whose usual comparison
+    # takes a subtree that leaves it out (vbx-dv5). The rest — label health,
+    # flow and attention, suggest, graph, next, capacity — compare it already,
+    # whole or lifted.
+    {"vbx": command, "bv": command, "name": f"{command} load_stats",
+     "vbx_args": vbx_args, "bv_args": bv_args,
+     "keys": ("load_stats", "source_path", "source_kind"),
+     "only": {"dropped", "dropped (beads.db)"}}
+    for command, vbx_args, bv_args in (
+        ("robot-priority", [], []),
+        ("robot-insights", [], []),
+        ("robot-sprint-list", [], []),
+        ("robot-search", ["--search", "import"], ["--search", "import"]),
+        ("robot-blocker-chain", ["--id", "drop-2"], ["drop-2"]),
     )
 ] + [
     # bv's opt-in not-ready label-class keeps a bead out of the claimable top
@@ -1074,7 +1115,14 @@ def build_sqlite_workspace(jsonl: Path, destination: Path) -> Path:
         for line in jsonl.read_text().splitlines():
             if not line.strip():
                 continue
-            record = json.loads(line)
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                # A malformed line (Fixtures/dropped) is a JSONL failure: it
+                # never becomes a row, as br could never have written it. Its
+                # record-level problems — a failed validation — do become
+                # rows, so the SQLite loader's own drop is still exercised.
+                continue
             row = {column: record.get(column) for column in BR_ISSUE_COLUMNS}
             for column, default in (("description", ""), ("design", ""),
                                     ("acceptance_criteria", ""), ("notes", ""),
@@ -1223,11 +1271,14 @@ def implemented_commands(vbx: str, cwd: Path) -> set[str]:
 
 
 def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
-                      label: str, verbose: bool, only_named: bool = False) -> tuple[int, int]:
+                      label: str, verbose: bool, only_named: bool = False,
+                      skip_feedback: str | None = None) -> tuple[int, int]:
     """Runs every comparison over one workspace and prints the result.
 
     only_named, for a fixture built for a few commands, runs only the
     comparisons whose `only` names it; the rest are reported skipped.
+    skip_feedback, when set, is why the feedback sequences are reported
+    skipped over this workspace.
 
     bv_skip, when set, is why no command is compared against bv — it is not
     installed, or it is not the engine's version — and every comparable
@@ -1333,6 +1384,9 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
             continue
         if "only" in entry and label not in entry["only"]:
             skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
+            continue
+        if skip_feedback:
+            skipped.append((name, skip_feedback))
             continue
         if bv_skip:
             skipped.append((name, bv_skip))
@@ -1489,7 +1543,8 @@ def main() -> int:
                     workspace, Path(scratch) / f"{fixture['name']}-recipes")
             d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
                                      fixture["name"], args.verbose,
-                                     fixture.get("only_named", False))
+                                     fixture.get("only_named", False),
+                                     fixture.get("skip_feedback"))
             differed += d
             missing += m
 

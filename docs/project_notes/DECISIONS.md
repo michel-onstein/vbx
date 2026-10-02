@@ -1246,6 +1246,20 @@ holds *and* it means what it means in bv; otherwise declare it envelope-only.
     `data_hash` follows bv per command: the unscoped hash for the label
     commands and search (`ctx.Envelope()`), the scoped issues' hash for the
     blocker chain and the sprint commands (`ComputeDataHash(ctx.Issues)`).
+  - `load_stats` (vbx-dv5, `loadstats.go`) — bv's `robotLoadStats`, present
+    only when the load dropped a record. bv derives it from
+    `source_authority`, but only from each source's parse accounting, which
+    vbx's loads already hold: `loader.ParseStats` for a JSONL, each member's
+    `workspace.LoadResult` for a workspace, and vbx's SQLite reader, which
+    now drops and counts rows by bv's SQLite rule (failed validation, a
+    repeated id). Counts sum every source that is not disabled; `source_path`
+    is named for exactly one source; warnings are bv's, in its source order,
+    capped at ten. bv's source-selection warnings — which only join the
+    warning list — are the one part vbx cannot reproduce, because it ranks no
+    sources. It rides the same shared helper, so it reaches exactly the
+    payloads that carry vbx's envelope; triage, plan, alerts and metrics carry
+    none yet (vbx-6su). `Fixtures/dropped`, as JSONL and as a `beads.db`,
+    compares it on every other command.
 - **Envelope-only**, in `parity-check.py`'s single `ENVELOPE_ONLY_KEYS`, each
   with its reason:
   - `source_authority` — bv's report of its multi-source selection: candidates

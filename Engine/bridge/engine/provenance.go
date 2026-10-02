@@ -16,6 +16,9 @@ import (
 //   - output_format, source_path, source_kind and scope_hash are ported here.
 //     Each is computable from what the session already holds and means what
 //     it means in bv.
+//   - load_stats is too (vbx-dv5): bv derives it from the source authority,
+//     but only from each source's parse accounting, which vbx's loads keep.
+//     Present only when a record was dropped. See loadstats.go.
 //   - source_authority and authority_hash are not. They report bv's
 //     multi-source selection — candidates ranked by freshness, a stale
 //     fallback, per-source authority warnings — and vbx resolves one source
@@ -92,7 +95,7 @@ func scopeIDs(issues []model.Issue, scope provenanceScope) []string {
 // when it re-encodes the payload as TOON.
 func (s *Session) provenance(dataHash string, scope provenanceScope) map[string]any {
 	s.mu.RLock()
-	source, kind, issues := s.source, s.kind, s.issues
+	source, kind, issues, sources := s.source, s.kind, s.issues, s.sourceLoads
 	s.mu.RUnlock()
 
 	envelope := map[string]any{
@@ -104,6 +107,9 @@ func (s *Session) provenance(dataHash string, scope provenanceScope) map[string]
 	}
 	if kind != "" {
 		envelope["source_kind"] = sourceKindForEnvelope(kind)
+	}
+	if stats := robotLoadStats(sources); stats != nil {
+		envelope["load_stats"] = stats
 	}
 	// bv's RobotScope: each flag only when it was given.
 	if scope.label != "" || scope.recipe != "" {

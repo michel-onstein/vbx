@@ -62,14 +62,15 @@ func findWorkspaceConfig(path string) string {
 // namespaced ids instead; those come back as tombstoneIDs so a deleted blocker
 // still counts as resolved, exactly as bv's own workspace mode treats it. The
 // loader is vbx's port of bv's, because bv's spawns trackers — see
-// workspace_loader.go.
+// workspace_loader.go. sources is each member's parse accounting, for the
+// robot envelope's load_stats.
 func loadWorkspace(configPath string, reader workspaceReader) (
 	issues []model.Issue, loads []repoLoad, warnings []string, tombstoneIDs []string,
-	watchDirs []string, err error,
+	watchDirs []string, sources []sourceLoad, err error,
 ) {
 	issues, results, err := loadAllFromConfig(configPath, reader)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("loading workspace %s: %w", configPath, err)
 	}
 
 	loads = make([]repoLoad, 0, len(results))
@@ -96,7 +97,8 @@ func loadWorkspace(configPath string, reader workspaceReader) (
 	}
 
 	sort.SliceStable(loads, func(i, j int) bool { return loads[i].Name < loads[j].Name })
-	return issues, loads, warnings, tombstoneIDs, workspaceWatchDirs(configPath, results), nil
+	return issues, loads, warnings, tombstoneIDs, workspaceWatchDirs(configPath, results),
+		workspaceSourceLoads(results), nil
 }
 
 // workspaceWatchDirs lists every directory whose contents feed a workspace
@@ -166,7 +168,7 @@ func workspaceWatchDirs(configPath string, results []workspace.LoadResult) []str
 // loadWorkspaceSession loads every repository the configuration names and
 // analyses them as one graph.
 func (s *Session) loadWorkspaceSession(configPath string) error {
-	records, loads, warnings, tombstoneIDs, watchDirs, err := loadWorkspace(configPath, s.workspaceReader())
+	records, loads, warnings, tombstoneIDs, watchDirs, sources, err := loadWorkspace(configPath, s.workspaceReader())
 	if err != nil {
 		return err
 	}
@@ -180,6 +182,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 	// The configuration file stands in for the source: it is what was read,
 	// and it is what the watcher should follow.
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings
+	s.sourceLoads = sources
 	s.workspacePath, s.repoLoads, s.watchDirs = configPath, loads, watchDirs
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = tombstoneIDs
@@ -192,7 +195,7 @@ func (s *Session) loadWorkspaceSession(configPath string) error {
 // reloadWorkspace re-aggregates every repository, gated on the content hash
 // exactly as the single-repository path is.
 func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
-	records, loads, warnings, tombstoneIDs, watchDirs, err := loadWorkspace(configPath, s.workspaceReader())
+	records, loads, warnings, tombstoneIDs, watchDirs, sources, err := loadWorkspace(configPath, s.workspaceReader())
 	if err != nil {
 		return nil, err
 	}
@@ -214,11 +217,14 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 		s.mu.Lock()
 		s.repoLoads, s.watchDirs = loads, watchDirs
 		s.mu.Unlock()
+		// And the load's accounting, which a dropped record changes without
+		// changing the bead set — as in the single-repository reload.
+		accountingChanged := s.refreshAccounting(sources, warnings, len(warnings) == 0)
 		payload, err := s.info()
 		if err != nil {
 			return nil, err
 		}
-		return withChangedFlag(payload, feedbackChanged)
+		return withChangedFlag(payload, feedbackChanged || accountingChanged)
 	}
 
 	issues, readiness := visibleIssues(records), readinessAuthority(records, tombstoneIDs)
@@ -226,6 +232,7 @@ func (s *Session) reloadWorkspace(configPath string) ([]byte, error) {
 
 	s.mu.Lock()
 	s.source, s.kind, s.warnings = configPath, "workspace", warnings
+	s.sourceLoads = sources
 	s.workspacePath, s.repoLoads, s.watchDirs = configPath, loads, watchDirs
 	s.issues, s.records, s.readiness = issues, records, readiness
 	s.tombstoneIDs = tombstoneIDs
