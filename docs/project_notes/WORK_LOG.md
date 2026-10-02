@@ -5,6 +5,16 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — The Swift suite is green again: the empty-commit orphan test counts what bv counts (vbx-n86)
+
+The test vbx-lh0 added expected 4 orphan-report commits; bv and the engine both
+count 3, because the history fixture's root commit is beads-only. It passed in
+#131's worktree only because a stray `.bv/semantic` index in `Fixtures/demo`
+was committed into that root. `Fixture.copy` now drops bv's local state as it
+already dropped `br`'s, the test asserts 3 and the empty commit's presence, and
+`historyStore` fails on a git step that fails. No engine or app change. Details
+in BUGS.md.
+
 ## 2026-10-02 — Every report the engine fails to build shows as unavailable, never empty (vbx-twy)
 
 vbx-lh0 fixed the Orphans tab; the same `(try? …) ?? .empty` swallowed a

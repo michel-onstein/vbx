@@ -4,6 +4,42 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — The empty-commit orphan test passed in one checkout and failed in every clean one
+
+**Symptom:** `HistoryViewTests` "A history holding an empty commit has an
+orphan report", added by vbx-lh0 in #131, failed on `main` from the moment it
+merged: `store.orphans.stats.totalCommits` was 3, the test expected 4. It
+failed in isolation and in the full suite, on a fresh worktree, and with the
+engine archive rebuilt from the same sources. #131's own verify run reported it
+passing. (vbx-n86, found in vbx-twy.)
+
+**Cause:** the test, not the engine. `Fixture.historyStore` commits a copy of
+`Fixtures/demo`, so its root commit holds whatever the copy holds. In a clean
+checkout that is `.beads/issues.jsonl` alone — a beads-only commit, which bv's
+orphan detector leaves out of `total_commits`. So four commits count three, and
+`vbx-cli --robot-orphans` and bv 0.25.2 agree on 3 for the same history built
+by hand. #131's worktree had a `Fixtures/demo/.bv/semantic/` index in it,
+written at 07:59 by `scripts/parity-check.py`, whose search commands run
+against `Fixtures/demo` in place (it is gitignored, so nothing showed it). Any
+checkout that runs the parity check before `swift test` therefore passes the
+old test, and any that runs the suite first fails it. `Fixture.copy` dropped `br`'s local state
+but not bv's, the index went into the root commit, the root was no longer
+beads-only, and the count was 4. The commit-time dependency was invisible
+because the count is a property of the files, not of the clock or git config:
+the dates, `init.defaultBranch`, signing and test order were all ruled out.
+
+**Fix:** `Fixture.copy` also drops `.bv/semantic` and `.bv/baseline.json` —
+what `.gitignore` keeps out of the repository — and keeps `.bv/recipes.yaml`,
+which is shared configuration. The test asserts 3 with the reason, and that the
+empty commit is among the candidates, which is what actually proves the
+fileless fallback answered. `historyStore`'s git steps now fail the fixture
+when one exits non-zero, rather than leaving a history a commit short.
+
+**Regression tests:** `FixtureCopyTests` "A copy leaves bv's local state
+behind and keeps its configuration". With the copy change reverted and a `.bv`
+index placed in `Fixtures/demo`, it and the empty-commit test both fail (the
+latter reading 4); with the change, both pass.
+
 ## 2026-10-02 — Every report the app reads from the engine showed a failure as an empty report
 
 **Symptom:** after vbx-lh0 fixed the Orphans tab, History's Hotspots tab and

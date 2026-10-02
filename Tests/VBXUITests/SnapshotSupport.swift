@@ -477,6 +477,14 @@ enum Fixture {
             process.standardError = Pipe()
             try process.run()
             process.waitUntilExit()
+            // A step that failed would leave a history short of a commit, and
+            // every count asserted over it would fail somewhere far from here.
+            guard process.terminationStatus == 0 else {
+                throw CocoaError(.executableLoad, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "git \(arguments.joined(separator: " ")) exited \(process.terminationStatus)",
+                ])
+            }
         }
         func write(_ relative: String, _ text: String) throws {
             let url = directory.appendingPathComponent(relative)
@@ -548,6 +556,21 @@ enum Fixture {
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: beads.path)) ?? []
         for entry in entries where entry != "issues.jsonl" {
             try FileManager.default.removeItem(at: beads.appendingPathComponent(entry))
+        }
+        // bv's local state, which vbx writes too: the semantic search index
+        // and a saved baseline — exactly what `.gitignore` keeps out of the
+        // repository. Searching or saving a baseline with `Fixtures/demo` open
+        // leaves them in a checkout, and the copy then differs from what was
+        // committed. `historyStore` commits the whole copy, so a stray index
+        // made its root commit touch more than `.beads/`: no longer beads-only,
+        // it counted as a fourth commit, and a test asserting four passed in
+        // that one checkout and failed in every clean one (vbx-n86).
+        // `.bv/recipes.yaml` is shared configuration and stays.
+        for relative in [".bv/semantic", ".bv/baseline.json"] {
+            let url = directory.appendingPathComponent(relative)
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
         }
         return directory
     }
