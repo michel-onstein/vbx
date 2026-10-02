@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.24.1 — 2026-10-02
+
+### Fixes
+
+- vbx-cli prints the loader's warnings on stderr where bv does: --export, --export-md and the feedback verdicts ([#123](https://github.com/michel-onstein/vbx/pull/123))
+
 ## 0.24.0 — 2026-10-02
 
 ### Features
