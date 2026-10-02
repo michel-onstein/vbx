@@ -5,6 +5,27 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — Diff, drift and forecast answer over --label and --recipe, in bv's shapes (vbx-9gl)
+
+`vbx-cli --robot-diff`, `--robot-drift` and `--robot-forecast` used to refuse
+`--label` and `--recipe` (exit 2). They now answer over bv 0.25.2's scope,
+through `Session.view`. The diff compares the whole revision with the
+scope's beads, with tombstones dropped on both sides. Drift is bv's
+`--check-drift --robot-drift`: a fresh analysis of the scope against the
+saved baseline, no envelope, and the verdict as the exit code. The forecast
+is bv's `ForecastOutput`, a new `forecast` engine method that takes `all` or
+an id, `--forecast-label`, `--forecast-sprint` and `--forecast-agents`. The
+app's single-bead `eta` is unchanged. The parity harness gains a `history`
+fixture, a git repository with deterministic commits built at run time,
+and a drift baseline bv saves into it. It also gains an `exits` comparison
+for drift's exit code. The run went from 0 to 0 differing commands, with 37
+more comparisons matched: diff 12, drift 8 (two of them refusals without a
+baseline), forecast 17. The nine history correlation commands still refuse
+the scope. Their unscoped output does not match bv 0.25.2's correlator,
+which vbx-k7j tracks. Filed vbx-6s8: `baseline_save` runs `git` in the
+process's working directory. Tests: `forecast_diff_drift_test.go`,
+`test-parity-check.py`.
+
 ## 2026-10-02 — Triage, next and priority read feedback from the working directory, as bv's do (vbx-15s)
 
 bv 0.25.2 reads `feedback.json` for triage, next and priority from the

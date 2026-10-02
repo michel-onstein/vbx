@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
+	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
 
 // Time travel: the bead set as of an arbitrary revision, and what changed
@@ -21,6 +23,9 @@ type revisionRequest struct {
 	// or a tag. Empty means HEAD.
 	Revision string `json:"revision"`
 	Limit    int    `json:"limit"`
+	// The scope is bv's --label and --recipe (scope.go), which only the diff
+	// reads: bv compares the historical beads with its scoped current ones.
+	scopeRequest
 }
 
 func (s *Session) decodeRevision(req []byte) (revisionRequest, error) {
@@ -106,7 +111,24 @@ func (s *Session) snapshotAt(req []byte) ([]byte, error) {
 	})
 }
 
-// diffSince compares the current bead set against an earlier revision.
+// diffSince compares the current bead set against an earlier revision, as
+// bv 0.25.2's --diff-since --robot-diff does (cmd/bv/main.go and the
+// robot-diff handler in robot_registry.go):
+//
+//   - Both sides are the visible beads. bv's history loader drops tombstones
+//     from a historical read exactly as its live load does, so a bead deleted
+//     since the revision is removed rather than modified, and one deleted
+//     before it is on neither side.
+//   - The historical side is the whole revision; the current side is the
+//     scope's issues — under --label the label's subgraph, under --recipe its
+//     selection. A bead outside the scope therefore reads as removed.
+//   - The from-snapshot carries no timestamp (bv passes the zero time) and
+//     the to-snapshot is stamped with the pinned clock.
+//   - to_data_hash and the envelope's data_hash are the unscoped hash, and
+//     the envelope names the scope and hashes it.
+//
+// requested_revision, short_revision and badges are vbx's own additions for
+// the time-travel view; bv has no counterpart.
 func (s *Session) diffSince(req []byte) ([]byte, error) {
 	r, err := s.decodeRevision(req)
 	if err != nil {
@@ -114,6 +136,10 @@ func (s *Session) diffSince(req []byte) ([]byte, error) {
 	}
 	if r.Revision == "" {
 		return nil, fmt.Errorf("diff requires a \"revision\"")
+	}
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
 	}
 
 	extractor, err := s.extractor()
@@ -124,28 +150,38 @@ func (s *Session) diffSince(req []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	historical, when, err := extractor.issuesAt(hash)
+	records, _, err := extractor.issuesAt(hash)
 	if err != nil {
 		return nil, err
 	}
+	historical := withoutTombstones(records)
 
-	// Every record, tombstones included, because the historical side is read
-	// the same way: comparing it with the analysis set would report every
-	// tombstone as removed.
-	current := s.recordSet()
-	from := analysis.NewSnapshotAt(historical, when, hash.String())
-	to := analysis.NewSnapshot(current)
+	from := analysis.NewSnapshotAt(historical, time.Time{}, hash.String())
+	to := analysis.NewSnapshot(v.issues)
 	diff := analysis.CompareSnapshots(from, to)
+	diff.ToTimestamp = robotNow()
 
-	return json.Marshal(map[string]any{
+	return s.withEnvelope(map[string]any{
 		"requested_revision": r.Revision,
 		"resolved_revision":  hash.String(),
 		"short_revision":     shortHash(hash.String()),
 		"from_data_hash":     analysis.ComputeDataHash(historical),
-		"to_data_hash":       analysis.ComputeDataHash(current),
+		"to_data_hash":       v.dataHash,
 		"diff":               diff,
 		"badges":             diffBadges(diff),
-	})
+	}, v.dataHash, v.scope)
+}
+
+// withoutTombstones is the visible part of a record set, as bv's loaders
+// return it.
+func withoutTombstones(records []model.Issue) []model.Issue {
+	visible := make([]model.Issue, 0, len(records))
+	for _, issue := range records {
+		if !issue.Status.IsTombstone() {
+			visible = append(visible, issue)
+		}
+	}
+	return visible
 }
 
 // diffBadges reduces a snapshot diff to one label per changed bead.

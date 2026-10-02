@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/baseline"
@@ -289,25 +290,114 @@ func countSeverities(alerts []drift.Alert) (critical, warning, info int) {
 	return
 }
 
-// driftPayload is the drift check on its own, with bv's exit code echoed.
-func (s *Session) driftPayload() ([]byte, error) {
-	result, hasBaseline, info, err := s.computeDrift(s.wholeView())
+// noBaselineError is bv's stderr when --check-drift finds no baseline, both
+// lines of it.
+const noBaselineError = "Error: No baseline found.\n" +
+	"Create one with: bv --save-baseline \"description\""
+
+// driftPayload is bv 0.25.2's --check-drift --robot-drift (cmd/bv/main.go),
+// over the request's scope.
+//
+// It is not the alerts computation, and differs from it in three ways that
+// are bv's, not vbx's:
+//
+//   - The analysis is a fresh analyzer over the scope's issues, with no
+//     candidate set and no source-wide readiness: bv builds one with
+//     analysis.NewAnalyzer(issues) rather than borrowing its dispatch
+//     analyzer, so under --label the label's neighbours count as actionable
+//     too.
+//   - No issues are attached to the calculator, so only the baseline
+//     comparisons run — cycles, density, size, blocked, actionable and
+//     PageRank — and none of the issue-derived checks (staleness, cascades,
+//     abandoned claims) that --robot-alerts adds.
+//   - The output has no robot envelope: generated_at, the verdict, the exit
+//     code bv exits with, and the baseline's creation time and commit.
+//
+// A missing baseline is bv's error text, which vbx-cli prints as bv does.
+func (s *Session) driftPayload(req []byte) ([]byte, error) {
+	sc, err := parseScopeRequest(req)
 	if err != nil {
 		return nil, err
 	}
-	if !hasBaseline {
-		return nil, fmt.Errorf("no baseline saved; save one before checking drift")
+	v, err := s.view(sc)
+	if err != nil {
+		return nil, err
+	}
+	dir := s.projectDir()
+	if dir == "" {
+		return nil, fmt.Errorf("session has no source")
+	}
+	path := baseline.DefaultPath(dir)
+	if !baseline.Exists(path) {
+		return nil, fmt.Errorf("%s", noBaselineError)
+	}
+	saved, err := baseline.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("Error loading baseline: %v", err)
+	}
+
+	now := robotNow()
+	analyzer := analysis.NewAnalyzer(v.issues)
+	analyzer.SetNow(now)
+	stats := analyzer.Analyze()
+
+	var open, closed, blocked int
+	for _, issue := range v.issues {
+		switch issue.Status {
+		case model.StatusOpen, model.StatusInProgress:
+			open++
+		case model.StatusClosed:
+			closed++
+		case model.StatusBlocked:
+			blocked++
+		}
+	}
+	cycles := stats.Cycles()
+	current := &baseline.Baseline{
+		Stats: baseline.GraphStats{
+			NodeCount:       stats.NodeCount,
+			EdgeCount:       stats.EdgeCount,
+			Density:         stats.Density,
+			OpenCount:       open,
+			ClosedCount:     closed,
+			BlockedCount:    blocked,
+			CycleCount:      len(cycles),
+			ActionableCount: len(analyzer.GetActionableIssues()),
+		},
+		TopMetrics: baseline.TopMetrics{
+			PageRank:     topMetricItems(stats.PageRank(), 10),
+			Betweenness:  topMetricItems(stats.Betweenness(), 10),
+			CriticalPath: topMetricItems(stats.CriticalPathScore(), 10),
+			Hubs:         topMetricItems(stats.Hubs(), 10),
+			Authorities:  topMetricItems(stats.Authorities(), 10),
+		},
+		Cycles: cycles,
+	}
+
+	config, err := drift.LoadConfig(dir)
+	if err != nil || config == nil {
+		// bv warns outside robot mode and carries on with the defaults.
+		config = drift.DefaultConfig()
+	}
+	calculator := drift.NewCalculator(saved, current, config)
+	calculator.SetNow(now)
+	result := calculator.Calculate()
+
+	baselineInfo := map[string]any{"created_at": saved.CreatedAt.Format(time.RFC3339)}
+	if saved.CommitSHA != "" {
+		baselineInfo["commit_sha"] = saved.CommitSHA
 	}
 	return json.Marshal(map[string]any{
-		"has_drift": result.HasDrift,
-		"exit_code": result.ExitCode(),
+		"generated_at": now.Format(time.RFC3339),
+		"has_drift":    result.HasDrift,
+		"exit_code":    result.ExitCode(),
 		"summary": map[string]any{
 			"critical": result.CriticalCount,
 			"warning":  result.WarningCount,
 			"info":     result.InfoCount,
 		},
 		"alerts":   result.Alerts,
-		"baseline": info,
+		"baseline": baselineInfo,
 	})
 }
 
@@ -331,6 +421,12 @@ func (s *Session) saveBaseline(req []byte) ([]byte, error) {
 	}
 
 	whole := s.wholeView()
+	// The top metrics are Phase 2's. Saved before it finishes, the baseline
+	// records none, and every later drift check reports each bead as having
+	// entered the PageRank top — bv's --save-baseline analyses synchronously.
+	if whole.stats != nil {
+		whole.stats.WaitForPhase2()
+	}
 	stats, cycles, err := s.currentBaselineStats(whole)
 	if err != nil {
 		return nil, err

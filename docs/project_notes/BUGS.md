@@ -4,6 +4,50 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — A baseline saved during Phase 2 recorded no top metrics
+
+**Symptom:** a drift check against a baseline saved over identical beads
+sometimes reported a `pagerank_change` warning (exit 2), with every bead
+listed as having entered or dropped from the top.
+`TestDriftAgainstAnUnchangedBaselineIsClean` flaked on it when other tests
+kept the CPUs busy. (Found in vbx-9gl.)
+
+**Cause:** `baseline_save` read the session's PageRank, betweenness and
+other leaders without waiting for Phase 2. A save that arrived while Phase 2
+was still running wrote empty top metrics. bv's `--save-baseline` analyses
+synchronously.
+
+**Fix:** `saveBaseline` waits for the session's Phase 2 first.
+
+**Regression test:** `TestBaselineSaveWaitsForPhase2` in
+`forecast_diff_drift_test.go`. It keeps every CPU busy and saves on fresh
+sessions. The race belongs to the scheduler, so the test catches the
+unfixed code on some runs, mostly the first save in a cold process. With the
+fix it always passes.
+
+## 2026-10-02 — `--robot-diff` and `--robot-drift` disagreed with bv once compared
+
+**Symptom:** the new `history` parity fixture showed two differences.
+`vbx-cli --robot-drift` reported staleness, cascade and other issue-derived
+alerts that bv's `--check-drift --robot-drift` never reports. It also wrapped
+them in a different shape. `--robot-diff` reported a bead tombstoned since
+the revision as modified, where bv reports it as removed. Its from-snapshot
+carried the commit time where bv's carries none. It also had no envelope.
+(vbx-9gl)
+
+**Cause:** drift reused the alerts computation, which attaches the issues to
+the drift calculator. bv's `--check-drift` attaches none and analyses afresh.
+The diff compared every record, tombstones included. bv's history loader
+drops tombstones from both sides, as its live load does.
+
+**Fix:** `driftPayload` and `diffSince` follow bv's code paths, over the
+request's scope. See the vbx-9gl work-log entry.
+
+**Regression test:** `TestDriftIsBvsCheckDrift` and
+`TestDiffComparesTheWholeRevisionWithTheScope` in
+`forecast_diff_drift_test.go`. Also the `history` fixture's diff and drift
+comparisons in `parity-check.py`.
+
 ## 2026-10-02 — `vbx-cli` triage applied the workspace root's feedback from a folder below it
 
 **Symptom:** in a folder below a workspace root whose `.beads` holds a

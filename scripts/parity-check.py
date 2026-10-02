@@ -54,8 +54,10 @@ and `Fixtures/dropped-workspace`, two repositories under one
 workspace claim-gate comparisons, and the same workspace with a `.beads` at
 its root, for which graph discovery takes from the root, a member and a plain
 folder below it (vbx-1y5). Both are copied out of this repository first, since
-inside it discovery reaches the repository's own `.beads`. `--workspace`
-narrows the run to one.
+inside it discovery reaches the repository's own `.beads`. Last, `history`, a
+git repository built at run time with deterministic commits and a drift
+baseline bv saves into it, for the diff and drift comparisons (vbx-9gl).
+`--workspace` narrows the run to one: a path, or a FIXTURES name.
 
 Each differing command reports its first difference and how many more there
 are; `--verbose` lists every one.
@@ -148,6 +150,10 @@ FIXTURES = [
     # over it from the root, from a member and from `notes/`.
     {"name": "discovery", "workspace": "Fixtures/dropped-workspace",
      "only_named": True, "discovery": True},
+    # A git repository built at run time by build_history_workspace, with a
+    # drift baseline bv saves into it (vbx-9gl): the fixture --robot-diff and
+    # --robot-drift need, unscoped and under each scope. `only_named`.
+    {"name": "history", "history": True, "only_named": True},
 ]
 
 # The recipe files of the `recipes` fixture, by path relative to the
@@ -392,6 +398,40 @@ RECIPE_SCOPES = (
     ["--recipe", "actionable", "--label", "engine"],
     ["--recipe", "hub-first.yml", "--label", "ui"],
     ["--recipe", "ui-open", "--label", "no-such-label"],
+)
+
+# The scopes --robot-diff and --robot-drift run under, over the history
+# fixture (vbx-9gl): none, two labels — one whose subgraph reaches
+# past it, one unknown — two built-in recipes, and both.
+HISTORY_SCOPES = (
+    [],
+    ["--label", "parser"],
+    ["--label", "no-such-label"],
+    ["--recipe", "actionable"],
+    ["--recipe", "high-impact"],
+    ["--recipe", "actionable", "--label", "parser"],
+)
+# What a diff comparison compares: bv's payload and envelope. vbx adds
+# requested_revision, short_revision and badges for the time-travel view.
+DIFF_KEYS = ("resolved_revision", "from_data_hash", "to_data_hash", "diff", *ENVELOPE_KEYS)
+# The forecast scopes over the demo and the recipes fixture: a label, the
+# unknown label, the --forecast-label filter beside and inside a scope, more
+# agents, and recipes.
+FORECAST_RUNS = (
+    ("demo", ["all"]),
+    ("demo", ["vbx-6"]),
+    ("demo", ["vbx-6", "--forecast-agents", "3"]),
+    ("demo", ["all", "--forecast-agents", "2"]),
+    ("demo", ["all", "--label", "engine"]),
+    ("demo", ["all", "--label", "no-such-label"]),
+    ("demo", ["all", "--forecast-label", "ui"]),
+    ("demo", ["all", "--label", "engine", "--forecast-label", "ui"]),
+    ("recipes", ["all", "--recipe", "actionable"]),
+    ("recipes", ["all", "--recipe", "hub-first.yml", "--label", "ui"]),
+    ("sprints", ["all", "--forecast-sprint", "spr-sprint-2"]),
+    ("sprints", ["all", "--forecast-sprint", "spr-sprint-2", "--label", "at-risk"]),
+    ("history", ["all", "--forecast-label", "parser"]),
+    ("history", ["hist-5", "--label", "parser"]),
 )
 
 COMPARISONS = [
@@ -668,6 +708,51 @@ COMPARISONS = [
          {"vbx_args": ["--robot-not-ready-labels", "control"],
           "bv_args": ["--robot-not-ready-labels", "control"],
           "env": {"BV_ROBOT_NOT_READY_LABELS": NOT_READY}}),
+    )
+] + [
+    # --robot-diff over the history fixture (vbx-9gl): bv compares the whole
+    # revision with its scoped current beads, so a bead outside the scope
+    # reads as removed; both sides drop tombstones. Across five commits, and
+    # across all but the first.
+    {"vbx": "robot-diff", "bv": "robot-diff",
+     "name": f"robot-diff --diff-since {revision} {' '.join(args)}".strip(),
+     "vbx_args": ["--diff-since", revision, *args], "bv_args": ["--diff-since", revision, *args],
+     "keys": DIFF_KEYS, "only": {"history"}}
+    for revision in ("HEAD~5", "HEAD~12")
+    for args in HISTORY_SCOPES
+] + [
+    # bv's --check-drift --robot-drift against the baseline bv saved into the
+    # history fixture: the scope's issues analysed afresh, no envelope, and
+    # the process exiting with the verdict — compared too (`exits`).
+    {"vbx": "robot-drift", "bv": "robot-drift",
+     "name": f"robot-drift {' '.join(args)}".strip(),
+     "vbx_args": args, "bv_args": ["--check-drift", *args], "exits": True,
+     "only": {"history"}}
+    for args in HISTORY_SCOPES
+] + [
+    # With no baseline, bv's error, under a scope or not.
+    {"vbx": "robot-drift", "bv": "robot-drift", "name": f"robot-drift no baseline {' '.join(args)}".strip(),
+     "vbx_args": args, "bv_args": ["--check-drift", *args], "rejects": True, "only": {"demo"}}
+    for args in ([], ["--label", "engine"])
+] + [
+    # bv's --robot-forecast takes the bead or `all` as its value; vbx-cli's
+    # takes --id. Forecasts over the scope's candidates, filtered by
+    # --forecast-label and --forecast-sprint.
+    {"vbx": "robot-forecast", "bv": "robot-forecast",
+     "name": f"robot-forecast {' '.join(args)}",
+     "vbx_args": ["--id", *args], "bv_args": args, "only": {fixture}}
+    for fixture, args in FORECAST_RUNS
+] + [
+    # A bead outside the forecast's targets, and a sprint that is not there,
+    # are bv's errors: vbx-12 is a neighbour of the ui label, not one of its
+    # beads.
+    {"vbx": "robot-forecast", "bv": "robot-forecast",
+     "name": f"robot-forecast {' '.join(args)}",
+     "vbx_args": ["--id", *args], "bv_args": args, "rejects": True, "only": {fixture}}
+    for fixture, args in (
+        ("demo", ["vbx-12", "--label", "ui"]),
+        ("demo", ["no-such-bead"]),
+        ("sprints", ["all", "--forecast-sprint", "no-such-sprint"]),
     )
 ]
 
@@ -1237,6 +1322,138 @@ def build_discovery_workspace(source: Path, demo: Path, destination: Path) -> Pa
     return destination
 
 
+# The history fixture (vbx-9gl): a git repository built at run time, whose
+# commits change beads and code together, so the commands that read a
+# revision — --robot-diff — and a saved baseline — --robot-drift — have
+# something real to read. Built rather than committed, because a repository
+# cannot be committed inside this one.
+#
+# Every commit is deterministic: fixed authors, fixed author and committer
+# dates, and an empty git configuration, so the SHAs are the same on every
+# machine and every run. The dates fall before PINNED_CLOCK.
+#
+# Each bead is (id, title, labels, priority, first day, [(blocker, from day)]).
+# hist-8 is tombstoned on day 11, so a diff across it shows bv's rule that a
+# deleted bead is removed; hist-7 appears on day 13 with a dependency cycle
+# through hist-6, so the drift against the day-4 baseline is critical.
+HISTORY_BEADS = [
+    ("hist-1", "Rewrite the parser", ["parser"], 1, 1, []),
+    ("hist-2", "Lexer error recovery", ["parser"], 1, 1, [("hist-1", 1)]),
+    ("hist-3", "Results view", ["ui"], 2, 1, [("hist-2", 1)]),
+    ("hist-4", "Refresh the guide", ["docs"], 3, 1, []),
+    ("hist-5", "Cache layer", ["engine", "parser"], 2, 1, [("hist-1", 1)]),
+    ("hist-6", "Tidy the build scripts", ["docs"], 3, 1, [("hist-7", 13)]),
+    ("hist-7", "Split the build script", ["build"], 2, 13, [("hist-6", 13)]),
+    ("hist-8", "Abandoned spike", ["engine"], 3, 1, []),
+]
+HISTORY_AUTHORS = [("Ada Lovelace", "ada@example.com"), ("Alan Turing", "alan@example.com")]
+# (day, author, message, {bead: new status}, {path: version}).
+HISTORY_COMMITS = [
+    (1, 0, "Initial import", {}, {"README.md": 1, "src/parser.go": 1}),
+    (2, 0, "hist-1: start the parser rewrite", {"hist-1": "in_progress"}, {"src/parser.go": 2}),
+    (3, 0, "Parse nested blocks (hist-1)", {}, {"src/parser.go": 3, "src/ast.go": 1}),
+    (4, 0, "Close hist-1", {"hist-1": "closed"}, {"src/parser.go": 4}),
+    (5, 1, "hist-2 lexer recovery", {"hist-2": "in_progress"},
+     {"src/lexer.go": 1, "src/parser.go": 5}),
+    (6, 1, "tweak lexer constants", {}, {"src/lexer.go": 2}),
+    (7, 0, "hist-3: results view", {"hist-3": "in_progress"},
+     {"ui/view.swift": 1, "ui/model.swift": 1}),
+    (8, 1, "close hist-2", {"hist-2": "closed"}, {"src/lexer.go": 3}),
+    (9, 1, "docs: update the guide", {"hist-4": "closed"}, {"README.md": 2, "docs/guide.md": 1}),
+    (10, 0, "cache: add an LRU (hist-5)", {"hist-5": "in_progress"},
+     {"src/cache.go": 1, "src/parser.go": 6}),
+    (11, 0, "Drop the spike", {"hist-8": "tombstone"}, {"src/cache.go": 2}),
+    (12, 1, "Fix view refresh for hist-3", {}, {"ui/view.swift": 2, "ui/model.swift": 2}),
+    (13, 1, "Plan the build split", {}, {"scripts/build.sh": 1}),
+]
+# The drift baseline is the beads as they stood after this commit's day.
+HISTORY_BASELINE_DAY = 4
+
+
+def history_stamp(day: int) -> str:
+    return f"2026-08-{day:02d}T10:00:00Z"
+
+
+def history_beads_jsonl(day: int, statuses: dict[str, tuple[str, int]]) -> str:
+    """The beads file as it stands on `day`; statuses maps an id to its
+    status and the day it last changed."""
+    lines = []
+    for bead_id, title, labels, priority, since, blockers in HISTORY_BEADS:
+        if since > day:
+            continue
+        status, changed = statuses.get(bead_id, ("open", since))
+        record = {"id": bead_id, "title": title, "status": status, "issue_type": "task",
+                  "priority": priority, "created_at": history_stamp(since),
+                  "updated_at": history_stamp(changed), "labels": labels}
+        if status == "closed":
+            record["closed_at"] = history_stamp(changed)
+        if status == "tombstone":
+            record |= {"deleted_at": history_stamp(changed), "deleted_by": "ada",
+                       "delete_reason": "abandoned", "original_type": "task"}
+        dependencies = [{"issue_id": bead_id, "depends_on_id": blocker, "type": "blocks",
+                         "created_at": history_stamp(start)}
+                        for blocker, start in blockers if start <= day]
+        if dependencies:
+            record["dependencies"] = dependencies
+        lines.append(json.dumps(record))
+    return "\n".join(lines) + "\n"
+
+
+def build_history_workspace(destination: Path, bv: str | None) -> Path:
+    """Builds the history repository at `destination`, and saves bv's drift
+    baseline into it from the beads as of HISTORY_BASELINE_DAY.
+
+    The baseline is bv's own `--save-baseline`, run over a copy of those beads
+    outside any repository, so it records no commit. Without a bv there is no
+    baseline, and nothing is compared against bv either. Returns the
+    workspace directory.
+    """
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True)
+    quiet = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+
+    def git(*args: str, env: dict[str, str] | None = None) -> None:
+        subprocess.run(["git", *args], cwd=destination, check=True, capture_output=True,
+                       env=dict(os.environ, **quiet, **(env or {})))
+
+    git("init", "-q", "-b", "main")
+    statuses: dict[str, tuple[str, int]] = {}
+    baseline_beads = None
+    for day, author, message, changes, files in HISTORY_COMMITS:
+        for bead_id, status in changes.items():
+            statuses[bead_id] = (status, day)
+        beads = history_beads_jsonl(day, statuses)
+        (destination / ".beads").mkdir(exist_ok=True)
+        (destination / ".beads" / "issues.jsonl").write_text(beads)
+        if day == HISTORY_BASELINE_DAY:
+            baseline_beads = beads
+        for relative, version in files.items():
+            path = destination / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{relative} version {version}\n")
+        git("add", "-A")
+        name, email = HISTORY_AUTHORS[author]
+        when = history_stamp(day)
+        git("commit", "-q", "-m", message, env={
+            "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": when,
+            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+            "GIT_COMMITTER_DATE": when})
+
+    if bv and baseline_beads is not None:
+        saved = destination.parent / f"{destination.name}-baseline"
+        if saved.exists():
+            shutil.rmtree(saved)
+        (saved / ".beads").mkdir(parents=True)
+        (saved / ".beads" / "issues.jsonl").write_text(baseline_beads)
+        status, _, err = run(bv, ["--save-baseline", "parity baseline"], saved)
+        if status != 0:
+            raise RuntimeError(f"bv could not save the history baseline: {err.strip()}")
+        (destination / ".bv").mkdir(exist_ok=True)
+        shutil.copy(saved / ".bv" / "baseline.json", destination / ".bv" / "baseline.json")
+    return destination
+
+
 def build_sqlite_workspace(jsonl: Path, destination: Path) -> Path:
     """Writes `destination/.beads/beads.db` holding the beads in `jsonl`.
 
@@ -1492,10 +1709,17 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
                 matched.append(name)
             continue
 
-        if vbx_status != 0:
+        if entry.get("exits"):
+            # The exit status is part of the answer — drift's verdict — so it
+            # is compared, and the output is compared whatever it is.
+            if vbx_status != bv_status:
+                differed.append((name, [f"exit {vbx_status} vs {bv_status}: "
+                                        f"{vbx_err.strip()!r} vs {bv_err.strip()!r}"]))
+                continue
+        elif vbx_status != 0:
             differed.append((name, [f"vbx-cli exited {vbx_status}: {vbx_err.strip()}"]))
             continue
-        if bv_status != 0:
+        elif bv_status != 0:
             skipped.append((name, f"bv exited {bv_status}: {bv_err.strip()[:80]}"))
             continue
 
@@ -1649,7 +1873,8 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace",
-                        help="compare this workspace only, instead of every one in FIXTURES")
+                        help="compare this workspace only, instead of every one in FIXTURES;"
+                             " a FIXTURES name selects that fixture, built as it would be")
     parser.add_argument("--vbx", default=".build/debug/vbx-cli")
     parser.add_argument("--bv", default="bv")
     parser.add_argument("--allow-bv-mismatch", action="store_true",
@@ -1668,7 +1893,8 @@ def main() -> int:
 
     fixtures = FIXTURES
     if args.workspace:
-        fixtures = [{"name": Path(args.workspace).name, "workspace": args.workspace}]
+        fixtures = ([fixture for fixture in FIXTURES if fixture["name"] == args.workspace]
+                    or [{"name": Path(args.workspace).name, "workspace": args.workspace}])
 
     bv_path = shutil.which(args.bv)
     engine = engine_bv_version(root / "Engine" / "bridge" / "go.mod")
@@ -1686,6 +1912,17 @@ def main() -> int:
     differed = missing = 0
     with tempfile.TemporaryDirectory(prefix="vbx-parity-") as scratch:
         for fixture in fixtures:
+            if fixture.get("history"):
+                # Compared against bv only when it is the engine's: an older
+                # bv would write an older baseline.
+                workspace = build_history_workspace(
+                    Path(scratch) / "history", None if bv_skip else bv_path)
+                d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
+                                         fixture["name"], args.verbose,
+                                         fixture.get("only_named", False))
+                differed += d
+                missing += m
+                continue
             workspace = (root / fixture["workspace"]).resolve()
             if not workspace.exists():
                 print(f"workspace not found at {workspace}", file=sys.stderr)
