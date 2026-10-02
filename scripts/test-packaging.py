@@ -1199,6 +1199,96 @@ def test_beads_source_repo_check() -> None:
               "some-topic-branch" in drifted.stderr, drifted.stderr.strip())
 
 
+def jsonl_field(path: Path, issue: str, key: str) -> object:
+    for line in path.read_text().splitlines():
+        if line.strip():
+            row = json.loads(line)
+            if row.get("id") == issue:
+                return row.get(key)
+    return None
+
+
+def test_br_worktree_writes_land_in_the_main_checkout() -> None:
+    """The `br` behaviour CLAUDE.md's beads rules rest on, measured, not recalled.
+
+    CLAUDE.md once said `br update --description-file` was a silent no-op. It
+    is not: run from a worktree, *every* unpinned `br` write resolves to the main
+    checkout's workspace, so the worktree's export is untouched and the write
+    looks lost. And `br update` takes `--source-repo`, which `beads-check.py
+    --fix` relies on, while `br create` does not. If a `br` release changes any
+    of that, this fails and the rules get rewritten — instead of going stale the
+    way the description-file one did.
+    """
+    print("\nbr writes from a worktree")
+    br = shutil.which("br")
+    if not br:
+        # Said out loud: a skip that printed nothing would read as a pass.
+        print("  skip  br is not on the PATH")
+        return
+
+    def run(args: list[str], cwd: Path, env: dict[str, str] | None = None
+            ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True,
+                              env={**os.environ, **GIT_ENV, **(env or {})})
+
+    update_help = run([br, "update", "--help"], ROOT).stdout
+    create_help = run([br, "create", "--help"], ROOT).stdout
+    check("br update takes --source-repo",
+          "--source-repo " in update_help and "--source-repo-path" in update_help)
+    check("...and br create does not", "--source-repo" not in create_help)
+
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw)
+        repo = base / "repo"
+        repo.mkdir()
+        run(["git", "init", "-q", "-b", "main"], repo)
+        run([br, "init", "--prefix", "tst"], repo)
+        created = run([br, "create", "--title", "probe", "-d", "old text " * 8, "--json"], repo)
+        payload = json.loads(created.stdout)
+        issue = (payload[0] if isinstance(payload, list) else payload)["id"]
+        run([br, "sync", "--flush-only"], repo)
+        run(["git", "add", "-A"], repo)
+        run(["git", "commit", "-q", "-m", "init"], repo)
+        main_jsonl = repo / ".beads" / "issues.jsonl"
+
+        body = base / "body.md"
+        body.write_text("written from a file, in the checkout " * 3)
+        result = run([br, "update", issue, "--description-file", str(body), "--json"], repo)
+        check("--description-file writes in a plain checkout",
+              result.returncode == 0
+              and jsonl_field(main_jsonl, issue, "description") == body.read_text(),
+              (result.stdout + result.stderr).strip()[-300:])
+
+        short = base / "short.md"
+        short.write_text("x")
+        result = run([br, "update", issue, "--description-file", str(short), "--json"], repo)
+        check("a shrink below half is refused, not lost",
+              result.returncode != 0 and "VALIDATION_FAILED" in result.stdout,
+              (result.stdout + result.stderr).strip()[-300:])
+
+        run(["git", "commit", "-q", "-am", "after"], repo)
+        topic = repo / ".claude" / "worktrees" / "topic"
+        run(["git", "worktree", "add", "-q", str(topic), "-b", "topic"], repo)
+        topic_jsonl = topic / ".beads" / "issues.jsonl"
+        before = topic_jsonl.read_text()
+
+        body.write_text("written from a file, in a worktree " * 3)
+        result = run([br, "update", issue, "--description-file", str(body), "--json"], topic)
+        check("an unpinned write from a worktree exits 0", result.returncode == 0,
+              (result.stdout + result.stderr).strip()[-300:])
+        check("...leaves the worktree's export untouched", topic_jsonl.read_text() == before)
+        check("...and lands in the main checkout",
+              jsonl_field(main_jsonl, issue, "description") == body.read_text())
+
+        pinned = {"BEADS_DB": str(topic / ".beads" / "beads.db")}
+        result = run([br, "update", issue, "--source-repo", "pinned", "--json"], topic, pinned)
+        check("BEADS_DB pins a worktree write to the worktree",
+              result.returncode == 0
+              and jsonl_field(topic_jsonl, issue, "source_repo") == "pinned"
+              and jsonl_field(main_jsonl, issue, "source_repo") != "pinned",
+              (result.stdout + result.stderr).strip()[-300:])
+
+
 # Every file `br` writes beside its database. Names are the ones observed on
 # disk — not paraphrased from a glob — so a rule that stops matching a real
 # name fails here.
@@ -1969,6 +2059,7 @@ def main() -> int:
     test_notices_check_catches_version_drift()
     test_docs_html_check()
     test_beads_source_repo_check()
+    test_br_worktree_writes_land_in_the_main_checkout()
     test_beads_side_files_are_ignored()
     test_bump_regenerates_the_html()
     test_no_v_prefix()

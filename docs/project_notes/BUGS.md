@@ -4,6 +4,38 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — "`br update --description-file` is a silent no-op" was a worktree write
+
+**Symptom:** CLAUDE.md carried a rule, measured on `vbx-g3q`, that
+`br update --description-file` printed the issue, exited 0 and left the
+description unchanged, and that only `-d` wrote. The 2026-10-01 upstream drift
+investigation could not reproduce it on br 0.6.0 or 0.7.4. (vbx-cd7)
+
+**Cause:** a misdiagnosis. `br` resolves its workspace through git's common
+dir, so a write run from `.claude/worktrees/<topic>` goes to the *main*
+checkout's `beads.db` and `.beads/issues.jsonl`. The worktree's export — the
+file being looked at — is untouched, which reads exactly like a no-op.
+Reproduced in temporary repositories on both versions: in a plain checkout the
+flag writes; from a worktree it lands in the primary checkout, and `-d` from a
+worktree misses in precisely the same way, so the rule's advice ("use `-d`")
+would not have helped. The same entry's neighbour said `br update` could not
+set `source_repo` at all by implication; it can (`--source-repo`,
+`--source-repo-path`), only `br create` cannot.
+
+**Fix:** the CLAUDE.md entry now describes the real symptom — an unpinned `br`
+write from a worktree lands in the main checkout — with `--db`/`BEADS_DB` as the
+answer, and records that a description shrink below half is refused (exit 4,
+`VALIDATION_FAILED`) rather than lost. The `source_repo` entry and the
+`beads-check.py` docstring name `br update`'s flags and say `--fix` must be run
+with `BEADS_DB` set from a worktree.
+
+**Regression test:** `test_br_worktree_writes_land_in_the_main_checkout` in
+`scripts/test-packaging.py` — `--description-file` writes in a plain checkout; a
+shrink is refused; an unpinned worktree write exits 0, leaves the worktree's
+export alone and lands in the main checkout; `BEADS_DB` pins it to the
+worktree; `br update --help` lists `--source-repo` and `br create --help` does
+not. Skips, saying so, when `br` is not on the PATH.
+
 ## 2026-10-01 — Uncommitted marks ignored a workspace's member repositories
 
 **Symptom:** in a `.bv/workspace.yaml` workspace whose members are repositories
