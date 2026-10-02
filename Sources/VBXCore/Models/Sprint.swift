@@ -351,7 +351,6 @@ public struct Capacity: Codable, Sendable, Hashable {
     public var serialMinutes: Int
     public var parallelMinutes: Int
     public var parallelizablePct: Double
-    public var effectiveMinutes: Int
     public var estimatedDays: Double
     public var criticalPath: [String]
     public var actionable: [String]
@@ -365,7 +364,6 @@ public struct Capacity: Codable, Sendable, Hashable {
         case serialMinutes = "serial_minutes"
         case parallelMinutes = "parallel_minutes"
         case parallelizablePct = "parallelizable_pct"
-        case effectiveMinutes = "effective_minutes"
         case estimatedDays = "estimated_days"
         case criticalPath = "critical_path"
     }
@@ -380,7 +378,6 @@ public struct Capacity: Codable, Sendable, Hashable {
         serialMinutes = try c.decodeIfPresent(Int.self, forKey: .serialMinutes) ?? 0
         parallelMinutes = try c.decodeIfPresent(Int.self, forKey: .parallelMinutes) ?? 0
         parallelizablePct = try c.decodeIfPresent(Double.self, forKey: .parallelizablePct) ?? 0
-        effectiveMinutes = try c.decodeIfPresent(Int.self, forKey: .effectiveMinutes) ?? 0
         estimatedDays = try c.decodeIfPresent(Double.self, forKey: .estimatedDays) ?? 0
         criticalPath = try c.decodeIfPresent([String].self, forKey: .criticalPath) ?? []
         actionable = try c.decodeIfPresent([String].self, forKey: .actionable) ?? []
@@ -397,7 +394,6 @@ public struct Capacity: Codable, Sendable, Hashable {
         serialMinutes = 0
         parallelMinutes = 0
         parallelizablePct = 0
-        effectiveMinutes = 0
         estimatedDays = 0
         criticalPath = []
         actionable = []

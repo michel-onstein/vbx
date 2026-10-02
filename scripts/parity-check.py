@@ -172,6 +172,10 @@ DECLARED_DIFFERENCES = {
         ("robot-graph", ".scope_hash"): _LOSSY_SCOPE,
         ("robot-next", ".data_hash"): _LOSSY_HASH,
         ("robot-next", ".scope_hash"): _LOSSY_SCOPE,
+        ("robot-capacity", ".data_hash"): _LOSSY_HASH,
+        ("robot-capacity", ".scope_hash"): _LOSSY_SCOPE,
+        ("robot-capacity --agents 3", ".data_hash"): _LOSSY_HASH,
+        ("robot-capacity --agents 3", ".scope_hash"): _LOSSY_SCOPE,
     },
 }
 
@@ -254,6 +258,9 @@ COMPARISONS = [
     {"vbx": "robot-priority", "bv": "robot-priority", "bv_path": "recommendations",
      "vbx_path": "recommendations"},
     {"vbx": "robot-next", "bv": "robot-next"},
+    {"vbx": "robot-capacity", "bv": "robot-capacity"},
+    {"vbx": "robot-capacity", "bv": "robot-capacity", "name": "robot-capacity --agents 3",
+     "vbx_args": ["--agents", "3"], "bv_args": ["--agents", "3"]},
 ] + [
     # Label-scoped runs. bv 0.25's --label is a global scope — the label's
     # subgraph, its beads plus their direct dependency neighbours — so every
@@ -276,6 +283,7 @@ COMPARISONS = [
         ("robot-suggest", {}),
         ("robot-insights", {"bv_path": "full_stats", "vbx_path": "full_stats"}),
         ("robot-alerts", {"bv_path": "alerts", "vbx_path": "alerts"}),
+        ("robot-capacity", {}),
     )
     for label in ("engine", "no-such-label")
 ] + [
@@ -288,12 +296,18 @@ COMPARISONS = [
      "only": {"demo"}, "bv_path": "alerts", "vbx_path": "alerts"}
     for label in ("engine", "ui", "no-such-label")
 ] + [
-    # Label-scoped commands that do not match yet, each a skip naming the bead
-    # that owns it — a coverage gap on the report, never a pass.
-    {"vbx": command, "bv": command, "name": f"{command} --label", "compare": False,
-     "note": note}
-    for command, note in (
-        ("robot-capacity", "differs from bv's --capacity-label, scoped or not (vbx-ko1)"),
+    # bv's --capacity-label is likewise a filter of its own: an exact match on
+    # a bead's labels over the scope's candidates, with readiness still read
+    # from the whole source (vbx-ko1). `engine` and `ui` simulate different
+    # beads, the unknown label is the empty selection, and the last pairs the
+    # filter with the --label scope it applies within.
+    {"vbx": "robot-capacity", "bv": "robot-capacity", "name": f"robot-capacity {' '.join(args)}",
+     "vbx_args": args, "bv_args": args, "only": {"demo"}}
+    for args in (
+        ["--capacity-label", "engine"],
+        ["--capacity-label", "ui"],
+        ["--capacity-label", "no-such-label"],
+        ["--label", "ui", "--capacity-label", "engine"],
     )
 ]
 

@@ -277,14 +277,15 @@ stops firing fails the run.</p>
 <p>bv's <code>--label</code> is a global scope — the label's subgraph, its beads plus their
 direct dependency neighbours — so the harness also runs label-scoped commands
 over the demo. The engine applies that scope in one place (<code>Session.view</code>,
-<code>scope.go</code>), and graph, triage, plan, priority, next, suggest, insights and
-alerts all read it, so each is compared with a known label (<code>engine</code>) and an
-unknown one (vbx-4cz, vbx-jnm); insights compares its <code>full_stats</code>, since bv
-shapes its top level differently. Alerts also take bv's separate
-<code>--alert-label</code> filter, which keeps only the alerts naming the label and is
-compared with <code>engine</code>, <code>ui</code> and an unknown label (vbx-jnm). The one that does
-not match yet is a label-scoped skip naming its bead: <code>--robot-capacity</code> is not
-compared at all yet (vbx-ko1).</p>
+<code>scope.go</code>), and graph, triage, plan, priority, next, suggest, insights,
+alerts and capacity all read it, so each is compared with a known label
+(<code>engine</code>) and an unknown one (vbx-4cz, vbx-jnm, vbx-ko1); insights compares
+its <code>full_stats</code>, since bv shapes its top level differently. Alerts also take
+bv's separate <code>--alert-label</code> filter, which keeps only the alerts naming the
+label and is compared with <code>engine</code>, <code>ui</code> and an unknown label (vbx-jnm), and
+capacity bv's <code>--capacity-label</code>, an exact-match filter on the beads simulated,
+compared with the same three labels and once within the <code>ui</code> scope (vbx-ko1).
+No label-scoped command is left unmatched.</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
 <p><strong>Mechanism legend</strong></p>
@@ -1132,7 +1133,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-forecast</code>, <code>--robot-capacity</code></td>
+<td><code>--robot-forecast</code>, <code>--robot-capacity</code> (+ agents, capacity-label, label scope)</td>
 <td>✓</td>
 <td>Inspector forecast, sprint scenarios</td>
 <td>6</td>

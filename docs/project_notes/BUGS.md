@@ -4,6 +4,43 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-01 — Capacity disagreed with bv, scoped or not
+
+**Symptom:** on `Fixtures/demo`, unscoped, `vbx-cli --robot-capacity` called 5
+beads actionable where bv 0.25.2 calls 3, chose the critical path
+vbx-12 → vbx-6 where bv chooses vbx-3 → vbx-4 → vbx-13, and so put
+parallelisable work at 72% against bv's 85%. With a label it was further off:
+`--label engine` gave 2 actionable against bv's 1 for `--capacity-label
+engine`, and `--label ui` 6 against 0. Nothing caught it, because
+`parity-check.py` did not compare capacity at all. (vbx-ko1)
+
+**Cause:** vbx's capacity was an older port that had drifted from bv's
+handler. A bead counted as actionable when no *open bead in the selection*
+blocked it, so a blocker outside the label — or one only readiness knows
+about — went unseen; bv asks the full-source `ReadinessIndex`. The critical
+path was the slowest chain in minutes, where bv's `longestCapacityChain` is
+the longest in steps, first in id order. And `--label` was read as capacity's
+own filter, where bv has two flags: `--capacity-label` filters, and the global
+`--label` scopes. The payload also carried `effective_minutes`, which bv has
+not, and lacked the robot envelope.
+
+**Fix:** `capacity.go` ports bv 0.25.2's `handleRobotCapacity` and
+`longestCapacityChain`, over `Session.view` for the scope and with the clock
+pinned (`robotNow()`). The request takes `capacity_label` for the filter and
+`label` for the scope; vbx-cli gains `--capacity-label` and `--robot-capacity`
+becomes label-scoped like the rest. `effective_minutes` is gone from the
+payload and from Swift's `Capacity`; `BeadsEngine.capacity(label:)` became
+`capacity(capacityLabel:)`. As in bv, the envelope's `data_hash` hashes the
+issues analysed, so it follows the scope.
+
+**Regression test:** `TestCapacityLabelFiltersWithoutForgettingBlockers`,
+`TestCapacityLabelIsTheGlobalScope`, `TestCapacityCriticalPathFollowsBlockingEdges`
+and `TestLongestCapacityChainCountsSteps` in `capacity_test.go`, and eight
+`--robot-capacity` runs in `parity-check.py` (unscoped, `--agents 3`, two
+scopes, three filters, and a filter within a scope).
+
+---
+
 ## 2026-10-01 — Alert label filtering kept every alert
 
 **Symptom:** on `Fixtures/demo`, `vbx-cli --robot-alerts --label X` returned
