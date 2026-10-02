@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.28.4 — 2026-10-02
+
+### Fixes
+
+- vbx-cli refuses a modifier without the command it modifies, as bv does ([#134](https://github.com/michel-onstein/vbx/pull/134))
+
 ## 0.28.3 — 2026-10-02
 
 ### Fixes
