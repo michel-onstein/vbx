@@ -93,6 +93,19 @@ struct InspectorView: View {
                     .font(.caption)
                     .foregroundStyle(.yellow)
             }
+
+            // Only while the engine says the deferral still withholds the
+            // bead: a date that has passed is no reason for anything, and
+            // whether it has passed is decided at the engine's clock.
+            if store.deferred.contains(issue.id) {
+                Label(
+                    DeferUntilCell.reason(issue.deferUntil),
+                    systemImage: DeferUntilCell.symbol
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

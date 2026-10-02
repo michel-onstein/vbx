@@ -19,6 +19,20 @@ public enum EngineError: Error, LocalizedError, Sendable {
     }
 }
 
+/// What the engine says about readiness, beyond the ready set itself.
+public struct Readiness: Sendable, Equatable {
+    /// Ids the engine reports as actionable.
+    public var actionable: Set<String>
+    /// Ids a `defer_until` still in the future withholds from Ready, at the
+    /// engine's pinned clock. Swift never compares the date itself.
+    public var deferred: Set<String>
+
+    public init(actionable: Set<String> = [], deferred: Set<String> = []) {
+        self.actionable = actionable
+        self.deferred = deferred
+    }
+}
+
 /// The envelope every C entry point returns.
 private struct Envelope: Decodable {
     var ok: Bool
@@ -152,7 +166,14 @@ public actor BeadsEngine {
     public func reload() throws -> WorkspaceInfo { try call("reload", as: WorkspaceInfo.self) }
 
     public func actionableIDs() throws -> Set<String> {
-        Set(try call("actionable", as: ActionableResponse.self).ids)
+        try readiness().actionable
+    }
+
+    /// The ready set and the beads a future `defer_until` withholds, read in
+    /// one call at one pinned instant so the two cannot disagree about "now".
+    public func readiness() throws -> Readiness {
+        let response = try call("actionable", as: ActionableResponse.self)
+        return Readiness(actionable: Set(response.ids), deferred: Set(response.deferred ?? []))
     }
 
     /// The execution plan. A `label` plans bv's label scope — the label's
@@ -568,7 +589,10 @@ public actor BeadsEngine {
     // MARK: - Plumbing
 
     private struct IssuesResponse: Decodable { var issues: [Issue] }
-    private struct ActionableResponse: Decodable { var ids: [String] }
+    private struct ActionableResponse: Decodable {
+        var ids: [String]
+        var deferred: [String]?
+    }
     private struct GraphResponse: Decodable { var edges: [GraphEdge] }
     private struct UnblocksResponse: Decodable { var unblocks: [String] }
 

@@ -86,6 +86,31 @@ private struct FilterRow: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(isActive ? Color.accentColor : .primary)
+        .help(filter.explanation(deferred: store.deferred.count))
+    }
+}
+
+extension IssueFilter {
+    /// What the filter selects, for its tooltip.
+    ///
+    /// Ready's names the deferral, because it is the one reason a bead with
+    /// nothing blocking it is still missing from Ready — and nothing else on
+    /// screen says so. `deferred` is the engine's count; this only words it.
+    func explanation(deferred: Int) -> String {
+        switch self {
+        case .open: return "Open and in-progress beads."
+        case .closed: return "Closed beads."
+        case .all: return "Every bead."
+        case .ready:
+            let base = "Beads the engine reports actionable: open, with nothing blocking them."
+            switch deferred {
+            case 0: return base
+            case 1: return base + " 1 bead is deferred until a later date and withheld until then."
+            default:
+                return base
+                    + " \(deferred) beads are deferred until a later date and withheld until then."
+            }
+        }
     }
 }
 

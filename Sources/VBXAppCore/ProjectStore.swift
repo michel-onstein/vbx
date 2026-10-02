@@ -124,6 +124,13 @@ public final class ProjectStore: ObservableObject {
     @Published public private(set) var issues: [Issue] = []
     @Published public private(set) var metrics: GraphMetrics = .empty
     @Published public private(set) var actionable: Set<String> = []
+    /// Beads a `defer_until` still in the future withholds from Ready.
+    ///
+    /// The engine's answer, read at its pinned clock in the same call as
+    /// ``actionable`` — so a bead's deferral is shown exactly when the engine
+    /// is the reason it is not ready, and never from a date compared against
+    /// this Mac's clock.
+    @Published public private(set) var deferred: Set<String> = []
     @Published public private(set) var plan: ExecutionPlan = .empty
     @Published public private(set) var edges: [GraphEdge] = []
     @Published public private(set) var labelAnalysis: LabelAnalysis = .empty
@@ -748,6 +755,7 @@ public final class ProjectStore: ObservableObject {
             self.issues = []
             self.metrics = .empty
             self.actionable = []
+            self.deferred = []
             self.plan = .empty
             self.edges = []
         }
@@ -1002,7 +1010,7 @@ public final class ProjectStore: ObservableObject {
     private func refreshAll() async throws {
         issues = try await engine.issues()
         metrics = try await engine.metrics()
-        actionable = try await engine.actionableIDs()
+        applyReadiness(try await engine.readiness())
         plan = try await engine.executionPlan()
         edges = try await engine.graphEdges()
         // Label analytics are advisory, so a failure here must not block the
@@ -1031,6 +1039,11 @@ public final class ProjectStore: ObservableObject {
         }
     }
 
+    private func applyReadiness(_ readiness: Readiness) {
+        actionable = readiness.actionable
+        deferred = readiness.deferred
+    }
+
     /// Waits for the expensive metrics off the main actor, then republishes.
     ///
     /// Gating on `hasPhase2Values` rather than `phase2Ready` matters: a session
@@ -1046,7 +1059,7 @@ public final class ProjectStore: ObservableObject {
                 metrics.phase2Ready
                 ? try await engine.computeFullMetrics()
                 : try await engine.waitForPhase2()
-            actionable = try await engine.actionableIDs()
+            applyReadiness(try await engine.readiness())
             // Recommendations are scored from PageRank and betweenness, so
             // they are only meaningful once Phase 2 has landed.
             if triageNeedsRefresh {

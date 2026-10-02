@@ -5,6 +5,28 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — A bead's `defer_until` shows in the list and the Inspector (vbx-upz)
+
+The engine already withheld a bead deferred into the future from Ready, but
+the app never said why: `Issue` did not decode `defer_until`. It now does —
+tolerantly, so an absent, empty or unparseable value is `nil` and the record
+still decodes. Whether a deferral is still in force is the engine's answer,
+not a date compared in Swift: the `actionable` call also returns `deferred`,
+the beads bv's `IsDeferredAt` withholds at the same pinned clock as the ready
+set, and the store publishes it beside `actionable`. The Inspector shows
+"Deferred until <date> — withheld from Ready until then" for those beads only
+(nothing for a passed deferral); the list gains a sortable *Deferred until*
+column, shown by default and last, orange with a marker while in force and
+dimmed once passed, plus the same marker in the title cell; the Ready filter's
+tooltip counts the deferred beads. The row fingerprint carries the date and the
+verdict, because the clock passing a deferral changes no field of the bead.
+Tests: `DeferUntilTests` (decode present/absent/malformed, ordering),
+`DeferUntilTests` in VBXUITests (Inspector snapshot over `Fixtures/readiness`,
+the column in a real table, cells, fingerprint, Ready tooltip),
+`readinessFixtureDeferredIsTheEngines`,
+`TestReadinessFixtureDeferredIsTheFutureDeferral` and the deferred half of
+`TestActionableReadsTheClockPerCall`.
+
 ## 2026-10-01 — Search: `--search-min-score` and bv's guaranteed exact-ID hit (vbx-52c)
 
 The engine's search now calls bv's `VectorIndex.SearchTopKWithOptions` with

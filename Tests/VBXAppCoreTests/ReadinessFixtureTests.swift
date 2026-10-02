@@ -82,6 +82,30 @@ func readinessFixtureActionableIsBvs() async {
     await store.close()
 }
 
+@MainActor
+@Test("The deferred set is the engine's: a future deferral, not a passed one")
+func readinessFixtureDeferredIsTheEngines() async throws {
+    let store = ProjectStore()
+    store.skipPhase2 = true
+    await store.open(path: readinessPath)
+    let byID = store.issuesByID
+
+    // Both dates decode — the record carries them whichever side of now.
+    let future = try #require(ISO8601DateFormatter().date(from: "2099-01-01T00:00:00Z"))
+    let past = try #require(ISO8601DateFormatter().date(from: "2026-06-01T00:00:00Z"))
+    #expect(byID["rdy-5"]?.deferUntil == future)
+    #expect(byID["rdy-6"]?.deferUntil == past)
+    // rdy-4 is deferred by status and has no date: absent, not zero.
+    #expect(byID["rdy-4"]?.deferUntil == nil)
+
+    // Only the deferral still in force is the engine's reason, and it agrees
+    // with Ready: deferred beads are never in the ready set.
+    #expect(store.deferred == ["rdy-5"])
+    #expect(store.deferred.isDisjoint(with: store.actionable))
+
+    await store.close()
+}
+
 /// bv 0.25.2's triage under `--recipe blocked`: rdy-14's own blocker, the
 /// subtree it gates, both newer blocking edge types, and the missing blocker.
 private let bvBlocked: Set<String> = ["rdy-7", "rdy-8", "rdy-9", "rdy-14", "rdy-16", "rdy-17"]

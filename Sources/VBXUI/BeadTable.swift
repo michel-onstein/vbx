@@ -168,10 +168,18 @@ struct BeadTable: NSViewRepresentable {
         /// and after, no reload happens, and the gutter keeps showing marks for
         /// changes that are now committed until something unrelated forces a
         /// redraw.
+        ///
+        /// **So is the deferral.** Whether a `defer_until` still withholds a
+        /// bead is the engine's verdict at its clock, and it changes when that
+        /// clock passes the date with no edit to the record at all — the same
+        /// shape as the commit above. The date is in too, because a `br defer`
+        /// from outside changes only that field.
         func fingerprint(of rows: [IssueRow]) -> [String] {
             rows.map {
                 let mark = parent.uncommittedReason($0.id) ?? ""
-                return "\($0.id)|\($0.issue.title)|\($0.issue.priority)|\($0.issue.status.rawValue)|\(mark)"
+                let deferral = "\($0.issue.deferUntil?.timeIntervalSince1970 ?? 0):\($0.isDeferred)"
+                return
+                    "\($0.id)|\($0.issue.title)|\($0.issue.priority)|\($0.issue.status.rawValue)|\(mark)|\(deferral)"
             }
         }
 

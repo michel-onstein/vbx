@@ -435,6 +435,7 @@ classDiagram
         +Date createdAt
         +Date updatedAt
         +Date dueDate
+        +Date deferUntil
         +Date closedAt
         +String externalRef
         +String[] labels

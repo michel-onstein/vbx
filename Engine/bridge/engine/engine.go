@@ -1015,19 +1015,35 @@ func (s *Session) recommendations() ([]byte, error) {
 	return json.Marshal(map[string]any{"recommendations": an.GenerateRecommendations()})
 }
 
+// actionable reports the ready set and, beside it, the beads a defer_until
+// still withholds at the same instant.
+//
+// `deferred` is the readiness reason the app shows on a bead: one that left
+// Ready because of a deferral otherwise has no visible cause. It is read inside
+// the same clock pin as the ready set, so the two cannot disagree about "now",
+// and the test is bv's own IsDeferredAt — Swift formats the date and never
+// decides whether it has passed. A closed bead is withheld by its status, not
+// its deferral, so it is not listed.
 func (s *Session) actionable() ([]byte, error) {
-	_, an, _ := s.snapshot()
+	issues, an, _ := s.snapshot()
 	if an == nil {
 		return nil, fmt.Errorf("session has no analyzer")
 	}
 	release := s.pinClock(an)
 	items := an.GetActionableIssues()
+	now := an.Now()
 	release()
 	ids := make([]string, 0, len(items))
 	for _, it := range items {
 		ids = append(ids, it.ID)
 	}
-	return json.Marshal(map[string]any{"issues": items, "ids": ids})
+	deferred := make([]string, 0)
+	for _, issue := range issues {
+		if issue.IsDeferredAt(now) && !issue.Status.IsClosed() && !issue.Status.IsTombstone() {
+			deferred = append(deferred, issue.ID)
+		}
+	}
+	return json.Marshal(map[string]any{"issues": items, "ids": ids, "deferred": deferred})
 }
 
 type idRequest struct {

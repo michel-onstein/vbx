@@ -412,6 +412,15 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
     /// conflict every time — so the string is kept as it arrived.
     public var updatedAtStamp: String?
     public var dueDate: Date?
+    /// When a deferral lifts: until this instant `br ready` and bv withhold
+    /// the bead from Ready, whatever its status and dependencies.
+    ///
+    /// Absent — never a zero date — when the record has none, or holds one
+    /// that does not parse; the record itself always decodes. This is the
+    /// date only. Whether it is still in the future is the engine's call,
+    /// made at its pinned clock (``ProjectStore/deferred``), not a comparison
+    /// against the Mac's clock here.
+    public var deferUntil: Date?
     public var closedAt: Date?
     public var externalRef: String?
     public var labels: [String]
@@ -439,6 +448,7 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case dueDate = "due_date"
+        case deferUntil = "defer_until"
         case closedAt = "closed_at"
         case externalRef = "external_ref"
         case labels, dependencies, comments
@@ -462,6 +472,7 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
         updatedAt = try? c.decodeIfPresent(Date.self, forKey: .updatedAt)
         updatedAtStamp = try? c.decodeIfPresent(String.self, forKey: .updatedAt)
         dueDate = try? c.decodeIfPresent(Date.self, forKey: .dueDate)
+        deferUntil = try? c.decodeIfPresent(Date.self, forKey: .deferUntil)
         closedAt = try? c.decodeIfPresent(Date.self, forKey: .closedAt)
         externalRef = try c.decodeIfPresent(String.self, forKey: .externalRef)
         labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? []
@@ -492,6 +503,7 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
             try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
         }
         try c.encodeIfPresent(dueDate, forKey: .dueDate)
+        try c.encodeIfPresent(deferUntil, forKey: .deferUntil)
         try c.encodeIfPresent(closedAt, forKey: .closedAt)
         try c.encodeIfPresent(externalRef, forKey: .externalRef)
         try c.encode(labels, forKey: .labels)
@@ -533,6 +545,7 @@ public struct Issue: Codable, Sendable, Hashable, Identifiable {
         self.acceptanceCriteria = nil
         self.notes = nil
         self.dueDate = nil
+        self.deferUntil = nil
         self.closedAt = nil
         self.externalRef = nil
         self.sourceRepo = nil
