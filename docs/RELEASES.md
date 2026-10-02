@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.13.0 — 2026-10-02
+
+### Features
+
+- Triage, robot-next and priority apply bv's feedback weights; vbx-cli gains --robot-not-ready-labels ([#105](https://github.com/michel-onstein/vbx/pull/105))
+
 ## 0.12.1 — 2026-10-02
 
 ### Fixes
