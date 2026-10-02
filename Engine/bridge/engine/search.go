@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -27,9 +27,11 @@ import (
 // embedder would give better results and *different* ones, so choosing it is
 // the caller's decision, never a default.
 
-// issueIDPattern matches a bare bead id, which bv promotes to the top of the
-// results when the query looks like one.
-var issueIDPattern = regexp.MustCompile(`^[A-Za-z]+-[A-Za-z0-9]+$`)
+// A query that is a bead id is guaranteed that bead, first, even when its text
+// similarity would not have put it among the fetched candidates. That rule is
+// bv's, applied by bv's own VectorIndex.SearchTopKWithOptions: an exact-case
+// match wins, and a case-folded one counts only when it is unambiguous. Ids are
+// opaque, so the query is not required to look like one.
 
 type searchRequest struct {
 	Query string `json:"query"`
@@ -44,6 +46,10 @@ type searchRequest struct {
 	// Embedder selects the vector provider. Empty means the environment's,
 	// which defaults to the deterministic hash embedder.
 	Embedder string `json:"embedder"`
+	// MinScore is bv's --search-min-score: an inclusive threshold on the raw
+	// text similarity, applied before the lexical boost and hybrid ranking.
+	// An exact-id hit obeys it too. Absent means no threshold.
+	MinScore *float64 `json:"min_score"`
 }
 
 // searchIssues runs one query.
@@ -70,12 +76,17 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 	if mode != "text" && mode != "hybrid" {
 		return nil, fmt.Errorf("invalid search mode %q (expected text or hybrid)", mode)
 	}
+	if err := validateMinScore(r.MinScore); err != nil {
+		return nil, err
+	}
 
 	issues, _, _ := s.snapshot()
 	if len(issues) == 0 {
-		return json.Marshal(map[string]any{
-			"query": r.Query, "mode": mode, "results": []any{},
-		})
+		payload := map[string]any{"query": r.Query, "mode": mode, "results": []any{}}
+		if r.MinScore != nil {
+			payload["min_score"] = *r.MinScore
+		}
+		return json.Marshal(payload)
 	}
 
 	embedConfig := search.EmbeddingConfigFromEnv()
@@ -110,12 +121,36 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 		fetch = search.HybridCandidateLimit(limit, len(issues), r.Query)
 	}
 
-	results, err := index.SearchTopK(vectors[0], fetch)
+	// bv's search, through bv's options: the short-query lexical boost is
+	// added before top-K, so a literal match cannot be cut before it is
+	// boosted; the threshold applies to the raw similarity, before the boost;
+	// and an exact id is guaranteed a place, first.
+	var boosts map[string]float64
+	if search.IsShortQuery(r.Query) {
+		boosts = make(map[string]float64)
+		for id, doc := range docs {
+			if boost := search.ShortQueryLexicalBoost(r.Query, doc); boost > 0 {
+				boosts[id] = boost
+			}
+		}
+	}
+	results, err := index.SearchTopKWithOptions(vectors[0], fetch, search.VectorSearchOptions{
+		ExactID: r.Query, MinScore: r.MinScore, ScoreBoosts: boosts,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("searching: %w", err)
 	}
-	results = search.ApplyShortQueryLexicalBoost(results, r.Query, docs)
-	results = promoteExactID(results, r.Query)
+	exactID := ""
+	for _, result := range results {
+		if result.ExactIDMatch {
+			exactID = result.IssueID
+			break
+		}
+	}
+	titles := make(map[string]string, len(issues))
+	for _, issue := range issues {
+		titles[issue.ID] = issue.Title
+	}
 
 	payload := map[string]any{
 		"query":       r.Query,
@@ -126,9 +161,13 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 		"limit":       limit,
 		"total_beads": len(issues),
 	}
+	if r.MinScore != nil {
+		// bv echoes the threshold only when one was given.
+		payload["min_score"] = *r.MinScore
+	}
 
 	if mode == "text" {
-		payload["results"] = textResults(results, limit)
+		payload["results"] = textResults(results, limit, titles)
 		return json.Marshal(payload)
 	}
 
@@ -136,7 +175,7 @@ func (s *Session) searchIssues(req []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	scored, err := hybridResults(results, issues, weights, r.Query, limit)
+	scored, err := hybridResults(results, issues, weights, exactID, limit, titles)
 	if err != nil {
 		return nil, err
 	}
@@ -199,25 +238,28 @@ func resolveWeights(r searchRequest) (search.Weights, string, error) {
 	return search.AdjustWeightsForQuery(weights.Normalize(), r.Query), name, nil
 }
 
-// textResults trims to the limit and shapes the payload.
-func textResults(results []search.SearchResult, limit int) []map[string]any {
+// textResults trims to the limit and shapes the payload, carrying each bead's
+// title as bv's does.
+func textResults(results []search.SearchResult, limit int, titles map[string]string) []map[string]any {
 	if len(results) > limit {
 		results = results[:limit]
 	}
 	out := make([]map[string]any, 0, len(results))
 	for _, result := range results {
-		out = append(out, map[string]any{
-			"issue_id": result.IssueID,
-			"score":    result.Score,
-		})
+		entry := map[string]any{"issue_id": result.IssueID, "score": result.Score}
+		if title := titles[result.IssueID]; title != "" {
+			entry["title"] = title
+		}
+		out = append(out, entry)
 	}
 	return out
 }
 
-// hybridResults re-scores candidates with graph metrics.
+// hybridResults re-scores candidates with graph metrics. exactID is the bead
+// the index marked as the query's exact-id match, or empty.
 func hybridResults(
 	candidates []search.SearchResult, issues []model.Issue,
-	weights search.Weights, query string, limit int,
+	weights search.Weights, exactID string, limit int, titles map[string]string,
 ) ([]map[string]any, error) {
 	cache := search.NewMetricsCache(search.NewAnalyzerMetricsLoader(issues))
 	if err := cache.Refresh(); err != nil {
@@ -242,12 +284,17 @@ func hybridResults(
 		return scored[i].IssueID < scored[j].IssueID
 	})
 
-	if exact := exactIDIndex(scored, query); exact > 0 {
+	for i := range scored {
+		if exactID == "" || scored[i].IssueID != exactID {
+			continue
+		}
 		// Re-ranking can bury the bead whose id was literally typed. Rotating
-		// it back to the front preserves the relative order of the rest.
-		match := scored[exact]
-		copy(scored[1:exact+1], scored[:exact])
+		// it back to the front preserves the relative order of the rest, as
+		// bv's promoteExactHybridResult does.
+		match := scored[i]
+		copy(scored[1:i+1], scored[:i])
 		scored[0] = match
+		break
 	}
 
 	if len(scored) > limit {
@@ -256,10 +303,13 @@ func hybridResults(
 
 	out := make([]map[string]any, 0, len(scored))
 	for _, score := range scored {
-		entry := map[string]any{
-			"issue_id":   score.IssueID,
-			"score":      score.FinalScore,
-			"text_score": score.TextScore,
+		entry := map[string]any{"issue_id": score.IssueID, "score": score.FinalScore}
+		// bv's field is omitempty, so a zero text score is absent there too.
+		if score.TextScore != 0 {
+			entry["text_score"] = score.TextScore
+		}
+		if title := titles[score.IssueID]; title != "" {
+			entry["title"] = title
 		}
 		if len(score.ComponentScores) > 0 {
 			// The breakdown is what makes a hybrid ranking auditable rather
@@ -271,38 +321,18 @@ func hybridResults(
 	return out, nil
 }
 
-// promoteExactID moves a bead whose id was typed verbatim to the front.
-func promoteExactID(results []search.SearchResult, query string) []search.SearchResult {
-	if !issueIDPattern.MatchString(strings.TrimSpace(query)) {
-		return results
+// validateMinScore applies bv's range: a finite number from -1 to 1, the
+// span of a cosine similarity. bv checks the flag's text in the CLI
+// (parseSearchMinScore); a request arrives already parsed, so the same bounds
+// are applied to the number.
+func validateMinScore(score *float64) error {
+	if score == nil {
+		return nil
 	}
-	target := strings.TrimSpace(query)
-	for i, result := range results {
-		if strings.EqualFold(result.IssueID, target) {
-			if i == 0 {
-				return results
-			}
-			match := results[i]
-			copy(results[1:i+1], results[:i])
-			results[0] = match
-			return results
-		}
+	if math.IsNaN(*score) || math.IsInf(*score, 0) || *score < -1 || *score > 1 {
+		return fmt.Errorf("invalid min_score %v (expected a finite number from -1 to 1)", *score)
 	}
-	return results
-}
-
-// exactIDIndex finds a verbatim id match among scored results, or -1.
-func exactIDIndex(scored []search.HybridScore, query string) int {
-	if !issueIDPattern.MatchString(strings.TrimSpace(query)) {
-		return -1
-	}
-	target := strings.TrimSpace(query)
-	for i, score := range scored {
-		if strings.EqualFold(score.IssueID, target) {
-			return i
-		}
-	}
-	return -1
+	return nil
 }
 
 // searchPresets lists the weight sets available, with their values.

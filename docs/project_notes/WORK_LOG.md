@@ -5,6 +5,29 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Search: `--search-min-score` and bv's guaranteed exact-ID hit (vbx-52c)
+
+The engine's search now calls bv's `VectorIndex.SearchTopKWithOptions` with
+`ExactID`, `MinScore` and the short-query lexical boost as `ScoreBoosts`,
+exactly as `bv --robot-search` does. vbx's own `promoteExactID` and
+`exactIDIndex` are deleted: they only reordered an id already among the
+fetched candidates, required an id-shaped query and folded case even when
+ambiguous. A query that is a bead id now returns that bead first even outside
+the text top-K, in both modes; hybrid re-ranking keeps it first as bv's
+`promoteExactHybridResult` does. The boost moved before top-K (it was applied
+after), results carry bv's `title`, and hybrid omits a zero `text_score` as bv
+does. The engine takes `min_score` (bv's -1..1 range) and echoes it.
+`vbx-cli --search-min-score` parses with bv's rules and message, exit 2, and
+is checked only beside `--search`, as bv checks it. The app's hybrid search
+field gets the exact-ID hit through the same call; its text mode was already
+exact-id-first through `IssueQuery`. A threshold control in the app is not
+built (filed as vbx-c1j). `parity-check.py` gains 20 `--robot-search` comparisons on the ranking
+and its echo: thresholds and rejections over the demo, and the buried id, its
+control, a case-folded id, an ambiguous case pair, an unknown id and an exact
+id under a threshold over the new `Fixtures/search`, which runs only the
+comparisons that name it. Tests: `search_options_test.go`,
+`SearchExactIDTests`, and the harness's `test_search`.
+
 ## 2026-10-01 — Reports in bv 0.25's four formats (vbx-im9)
 
 The engine's `export_markdown` (bv's old `GenerateMarkdown`) is replaced by

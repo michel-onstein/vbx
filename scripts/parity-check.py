@@ -44,8 +44,10 @@ at run time by `build_sqlite_workspace` because vbx reads SQLite through its
 own loader rather than bv's, `Fixtures/sprints`, the only one with sprints
 for the burndown and sprint commands to read, and `Fixtures/feedback` and
 `Fixtures/feedback-few`, the only ones with a triage feedback file — one with
-enough verdicts for bv to apply its weights and one without. `--workspace`
-narrows the run to one.
+enough verdicts for bv to apply its weights and one without, and
+`Fixtures/search`, whose text buries a bead below a query for its own id — the
+case bv's guaranteed exact-id hit exists for — and which runs only the search
+comparisons. `--workspace` narrows the run to one.
 
 Each differing command reports its first difference and how many more there
 are; `--verbose` lists every one.
@@ -100,6 +102,12 @@ FIXTURES = [
     # fb-1, and with two, which bv reports but does not apply (vbx-5ba).
     {"name": "feedback", "workspace": "Fixtures/feedback"},
     {"name": "feedback-few", "workspace": "Fixtures/feedback-few"},
+    # Search beads (vbx-52c): decoys whose text is all "tax 7", which bury the
+    # bead whose id is tax-7 below the text top-K, and two ids that differ
+    # only in case. Built for --robot-search alone, so it is `only_named`:
+    # just the comparisons whose `only` names it run here, and every other is
+    # reported skipped rather than compared over beads not made for it.
+    {"name": "search", "workspace": "Fixtures/search", "only_named": True},
 ]
 
 # br's issues columns, in br's order. A beads.db built here has the column
@@ -244,12 +252,17 @@ SPRINT_OMITZERO = {"created_at", "updated_at"}
 # `only` names the fixtures a command is compared over, for one that needs data
 # only some fixtures hold; elsewhere it is reported as skipped, never passed.
 # `bv_lift` copies top-level bv keys into the compared subtree (see lift), and
-# `env` is given to both binaries.
+# `env` is given to both binaries. `keys` compares only those top-level keys of
+# each side's subtree, a key absent on both staying absent. `rejects` expects
+# both binaries to refuse the arguments, and compares the exit status and the
+# first line of stderr — vbx-cli adds a pointer to --help after it.
 #
 # Triage's `feedback` block is lifted on every run, so a fixture with no
 # feedback.json proves vbx emits none, as well as the feedback fixtures
 # proving it emits bv's.
 TRIAGE_PATHS = {"bv_path": "triage", "bv_lift": ("feedback",)}
+# What a search comparison compares: the ranking and the request it echoes.
+SEARCH_KEYS = ("query", "mode", "limit", "min_score", "results")
 NOT_READY = "needs-design"
 
 COMPARISONS = [
@@ -339,6 +352,46 @@ COMPARISONS = [
         ["--capacity-label", "no-such-label"],
         ["--label", "ui", "--capacity-label", "engine"],
     )
+] + [
+    # Search (vbx-52c). bv 0.25 guarantees a query that is a bead id that
+    # bead, first, even outside the text top-K, and --search-min-score drops
+    # candidates below a raw-similarity threshold — exact ids too. Compared on
+    # the ranking and what echoes it (SEARCH_KEYS), not the envelope, whose
+    # index statistics and hashes are bv's alone. Text mode only: hybrid
+    # recency reads the wall clock in vbx (vbx-48y), so its scores differ for
+    # a reason that is not search's.
+    {"vbx": "robot-search", "bv": "robot-search", "name": "robot-search " + " ".join(arg or "''" for arg in args),
+     "vbx_args": ["--search", query, "--limit", limit, *rest],
+     "bv_args": ["--search", query, "--search-limit", limit, *rest],
+     "keys": SEARCH_KEYS, "only": {fixture}}
+    for fixture, query, limit, rest in (
+        ("demo", "graph", "5", []),
+        ("demo", "graph", "5", ["--search-min-score", "0.3"]),
+        ("demo", "graph", "5", ["--search-min-score", "-1"]),
+        ("demo", "graph", "5", ["--search-min-score", "1"]),
+        ("demo", "graph", "5", ["--search-min-score", ""]),
+        ("demo", "vbx-17", "1", []),
+        # The control: the same words as tax-7, not spelled as its id, never
+        # reach it — which is what makes the next one a test of the guarantee.
+        ("search", "tax 7", "3", []),
+        ("search", "tax-7", "3", []),
+        ("search", "TAX-7", "3", []),
+        ("search", "tax-7", "1", []),
+        ("search", "tax-7", "3", ["--search-min-score", "0.2"]),
+        ("search", "tax-7", "3", ["--search-min-score", "0.5"]),
+        ("search", "case-1", "2", []),
+        ("search", "CASE-1", "2", []),
+        ("search", "tax-70", "3", []),
+    )
+    for args in [[query, limit, *rest]]
+] + [
+    # Each rejected as bv rejects it: exit 2, and bv's message.
+    {"vbx": "robot-search", "bv": "robot-search",
+     "name": f"robot-search graph --search-min-score {value!r}",
+     "vbx_args": ["--search", "graph", "--search-min-score", value],
+     "bv_args": ["--search", "graph", "--search-min-score", value],
+     "rejects": True, "only": {"demo"}}
+    for value in ("2", "-1.5", "abc", "NaN", "inf")
 ] + [
     # bv's opt-in not-ready label-class keeps a bead out of the claimable top
     # picks of triage and --robot-next, from the flag or, failing that, the
@@ -517,6 +570,31 @@ def export_differences(vbx_run, bv_run) -> list[str]:
                     break
             else:
                 found.append(f"file: {len(vfile)} bytes vs {len(bfile)}")
+    return found
+
+
+def select_keys(payload, keys):
+    """Keeps `keys` of a dict payload; a key neither side has stays absent."""
+    if not keys or not isinstance(payload, dict):
+        return payload
+    return {key: payload[key] for key in keys if key in payload}
+
+
+def rejection_differences(vbx_run: tuple[int, str], bv_run: tuple[int, str]) -> list[str]:
+    """How two runs that should both refuse their arguments disagree.
+
+    Each run is (status, stderr). Only stderr's first line is compared: bv
+    prints one, and vbx-cli follows it with a pointer to --help.
+    """
+    (vs, ve), (bs, be) = vbx_run, bv_run
+    first = lambda text: (text.strip().splitlines() or [""])[0]  # noqa: E731
+    if vs == 0 or bs == 0:
+        return [f"expected both to refuse: exit {vs} vs {bs}"]
+    found = []
+    if vs != bs:
+        found.append(f"exit {vs} vs {bs}")
+    if first(ve) != first(be):
+        found.append(f"stderr {first(ve)!r} vs {first(be)!r}")
     return found
 
 
@@ -892,8 +970,11 @@ def implemented_commands(vbx: str, cwd: Path) -> set[str]:
 
 
 def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
-                      label: str, verbose: bool) -> tuple[int, int]:
+                      label: str, verbose: bool, only_named: bool = False) -> tuple[int, int]:
     """Runs every comparison over one workspace and prints the result.
+
+    only_named, for a fixture built for a few commands, runs only the
+    comparisons whose `only` names it; the rest are reported skipped.
 
     bv_skip, when set, is why no command is compared against bv — it is not
     installed, or it is not the engine's version — and every comparable
@@ -910,6 +991,7 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
     skipped: list[tuple[str, str]] = []
     vbx_only: list[str] = []
     missing: list[str] = []
+    not_named = f"{label} is compared only for the commands that name it"
 
     for entry in COMPARISONS:
         command = entry["vbx"]
@@ -926,6 +1008,9 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
         if entry.get("compare") is False:
             skipped.append((name, entry.get("note", "not comparable")))
             continue
+        if only_named and label not in entry.get("only", ()):
+            skipped.append((name, not_named))
+            continue
         if "only" in entry and label not in entry["only"]:
             skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
             continue
@@ -938,6 +1023,14 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
         bv_status, bv_out, bv_err = run(
             bv, [f"--{entry['bv']}", *entry.get("bv_args", []), "--format", "json"], workspace,
             entry.get("env"))
+
+        if entry.get("rejects"):
+            differences = rejection_differences((vbx_status, vbx_err), (bv_status, bv_err))
+            if differences:
+                differed.append((name, differences))
+            else:
+                matched.append(name)
+            continue
 
         if vbx_status != 0:
             differed.append((name, [f"vbx-cli exited {vbx_status}: {vbx_err.strip()}"]))
@@ -958,6 +1051,8 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
         if bv_payload is None:
             skipped.append((name, f"bv payload has no {entry.get('bv_path')}"))
             continue
+        vbx_payload = select_keys(vbx_payload, entry.get("keys"))
+        bv_payload = select_keys(bv_payload, entry.get("keys"))
 
         bv_payload = strip_bv_zero_times(bv_payload, entry.get("bv_omitzero", set()))
 
@@ -980,6 +1075,9 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
         if not flags <= available:
             missing.append(name)
             continue
+        if only_named and label not in entry.get("only", ()):
+            skipped.append((name, not_named))
+            continue
         if "only" in entry and label not in entry["only"]:
             skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
             continue
@@ -1000,6 +1098,9 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
         flag = entry.get("flag", "--export")
         if flag.removeprefix("--") not in available:
             missing.append(name)
+            continue
+        if only_named and label not in entry["only"]:
+            skipped.append((name, not_named))
             continue
         if label not in entry["only"]:
             skipped.append((name, f"compared over {', '.join(sorted(entry['only']))} only"))
@@ -1105,7 +1206,8 @@ def main() -> int:
                     workspace / ".beads" / "issues.jsonl",
                     Path(scratch) / fixture["workspace"].replace("/", "-"))
             d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
-                                     fixture["name"], args.verbose)
+                                     fixture["name"], args.verbose,
+                                     fixture.get("only_named", False))
             differed += d
             missing += m
 
