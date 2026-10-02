@@ -241,8 +241,10 @@ them.
   `--source-repo` flag and `.beads/config.yaml` holds only `issue_prefix` — but
   `br update` has `--source-repo` and `--source-repo-path`, which is what the
   fix uses. So **after `br create`, run `python3 scripts/beads-check.py
-  --fix`** — from a worktree with `BEADS_DB="$PWD/.beads/beads.db"` set, or its
-  `br update` lands in the main checkout like any other unpinned write. The check
+  --fix`**, from wherever the bead was created. `--fix` pins every `br` call to
+  the `beads.db` beside the export it checked (an explicit `BEADS_DB` wins and is
+  named) and re-reads that export afterwards, failing if the stamps did not land
+  there — so from a worktree it no longer rewrites the main checkout. The check
   is in the verify block, which is what makes forgetting a build failure instead
   of silent drift. The real fix is upstream in `beads_rust`. See ADR-018.
 - **Never call bv's `workspace.LoadAllFromConfig` or `AggregateLoader`.** In

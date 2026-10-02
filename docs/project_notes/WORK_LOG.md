@@ -5,6 +5,15 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — `beads-check.py --fix` fixes the worktree it runs in (vbx-p00)
+
+`--fix` pins every `br` call with `--db` to the database beside the export it
+checked (honouring and naming an explicit `BEADS_DB`), then re-reads that export
+and fails if the stamps did not land there. From a worktree it previously
+rewrote the main checkout's export instead. `test-packaging.py` gains
+`test_beads_fix_from_a_worktree`; the `BEADS_DB` caveat leaves CLAUDE.md's
+`source_repo` entry. Tooling only.
+
 ## 2026-10-01 — The br quirks in CLAUDE.md match what br does (vbx-cd7)
 
 The "`br update --description-file` is a silent no-op" rule is replaced by its
