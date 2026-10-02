@@ -131,11 +131,11 @@ def test_default_run_covers_every_fixture(parity) -> None:
     print("\nFixtures")
     names = [fixture["name"] for fixture in parity.FIXTURES]
     check("the demo, the readiness fixture, its beads.db form, the sprints, both feedback"
-          " fixtures, the search fixture, the recipes workspace and the dropped records in"
-          " both forms and as a workspace member are all compared",
+          " fixtures, the search fixture, the recipes workspace, the dropped records in"
+          " both forms and as a workspace member, and the discovery layout are all compared",
           names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
                     "feedback-few", "search", "recipes", "dropped", "dropped (beads.db)",
-                    "dropped (workspace)"],
+                    "dropped (workspace)", "discovery"],
           str(names))
     for fixture in parity.FIXTURES:
         root = ROOT / fixture["workspace"]
@@ -597,6 +597,42 @@ def test_export_hooks(parity) -> None:
     check("a marker only one side left is a difference", len(found) == 1, str(found))
 
 
+def test_workspace_discovery(parity) -> None:
+    print("\nWorkspace discovery (vbx-1y5)")
+    gate = [entry for entry in parity.COMPARISONS
+            if entry.get("only") == {"dropped (workspace)"}]
+    check("the claim gate is compared once by discovery, naming no configuration",
+          any(entry["vbx_args"] == [] and entry["bv_args"] == [] for entry in gate),
+          str([entry["name"] for entry in gate]))
+    check("and once with --workspace, spelled the same on both sides",
+          any(entry["vbx_args"][:1] == ["--workspace"]
+              and entry["vbx_args"] == entry["bv_args"] for entry in gate))
+
+    found = [entry for entry in parity.COMPARISONS if entry.get("only") == {"discovery"}]
+    names = [entry["name"] for entry in found]
+    check("each discovery run has its own name", len(names) == len(set(names)), str(names))
+    layouts = {(entry.get("cwd"), "--workspace" in entry["vbx_args"]) for entry in found}
+    check("discovery is compared from the root, a member and a plain folder, with and"
+          " without --workspace",
+          {(None, False), (None, True), ("api", False), ("notes", False),
+           ("notes", True)} <= layouts, str(sorted(layouts, key=str)))
+    fixtures = {fixture["name"]: fixture for fixture in parity.FIXTURES}
+    check("both workspace fixtures are compared outside this checkout",
+          fixtures["dropped (workspace)"].get("outside_checkout")
+          and fixtures["discovery"].get("discovery"))
+
+    with tempfile.TemporaryDirectory() as scratch:
+        built = parity.build_discovery_workspace(
+            ROOT / "Fixtures" / "dropped-workspace", ROOT / "Fixtures" / "demo",
+            Path(scratch) / "discovery")
+        check("the discovery workspace holds both a .beads and a configuration at its root",
+              (built / ".beads" / "issues.jsonl").exists()
+              and (built / ".bv" / "workspace.yaml").exists())
+        check("its members and a plain folder sit below the root",
+              (built / "api" / ".beads").is_dir() and (built / "notes").is_dir()
+              and not (built / "notes" / ".beads").exists())
+
+
 def test_search(parity) -> None:
     print("\nSearch (vbx-52c)")
     searches = [entry for entry in parity.COMPARISONS if entry["vbx"] == "robot-search"]
@@ -662,6 +698,7 @@ def test_search(parity) -> None:
 
 def main() -> int:
     parity = load_parity()
+    test_workspace_discovery(parity)
     test_search(parity)
     test_report_exports(parity)
     test_export_hooks(parity)

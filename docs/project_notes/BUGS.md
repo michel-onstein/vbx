@@ -4,6 +4,27 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — A repository with its own `.beads` opened as the workspace around it
+
+**Symptom:** a directory holding a `.beads`, under or beside a
+`.bv/workspace.yaml`, opened as the multi-repository aggregate in vbx and
+`vbx-cli`, while bv 0.25.2 opened the single repository. The two showed
+different graphs, ids (namespaced or not) and metrics for the same
+directory. (vbx-1y5)
+
+**Cause:** `Session.load` and `Probe` checked for a workspace configuration
+first. bv's `discoverWorkspaceConfig` checks `loader.GetBeadsDir` first and
+climbs to a configuration only when no `.beads` is reachable.
+
+**Fix:** `discoverWorkspaceConfig` in `workspace.go` ports bv's rule. Both
+`load` and `Probe` ask it, and `vbx-cli --workspace` names a configuration
+explicitly. See ADR-026.
+
+**Regression test:** `TestDiscoveryPrefersTheBeadsBesideAWorkspaceConfig`,
+`TestDiscoveryPrefersTheBeadsInTheDirectoryOverAWorkspaceAbove`,
+`TestDiscoveryPrefersTheCheckoutRootsBeadsOverAWorkspaceAbove`; parity over
+the `discovery` fixture.
+
 ## 2026-10-02 — A workspace member that dropped a record still let `--robot-next` claim
 
 **Symptom:** in a multi-repository workspace whose member held a malformed

@@ -102,7 +102,7 @@ view snapshots for inspection.
 | `Fixtures/sprints` | 15 beads and 3 sprints: each at-risk signal, a stale `closed_at`, a tombstone; tests and parity only |
 | `Fixtures/search` | 9 beads: six whose text is all "tax 7" bury `tax-7` below a query for its own id, plus `Case-1`/`case-1`. Search tests and parity only — the harness runs nothing else over it |
 | `Fixtures/dropped` | 4 valid beads, a line cut off mid-record and one whose `updated_at` precedes its `created_at`: what bv's `load_stats` counts. Deliberately unwritable by `br`. Tests and parity only, as JSONL and as a `beads.db` |
-| `Fixtures/dropped-workspace` | Two repositories (`api`, `web`) under one `.bv/workspace.yaml`; `web` holds a line cut off mid-record. Parity's workspace claim gate only (vbx-koc). Named explicitly on both sides — bv's discovery prefers this repository's own `.beads` to a `workspace.yaml` in the working directory |
+| `Fixtures/dropped-workspace` | Two repositories (`api`, `web`) under one `.bv/workspace.yaml`; `web` holds a line cut off mid-record. Parity's workspace claim gate (vbx-koc) and, with the demo's `.beads` added at the root, its discovery comparisons (vbx-1y5). Parity copies it out of this repository first: from inside, discovery reaches the repository's own `.beads` and never the workspace (ADR-026) |
 | `Fixtures/feedback`, `Fixtures/feedback-few` | The same 8 beads with a triage `feedback.json` of 4 verdicts (applied: fb-5 outranks the hub fb-1) and of 2 (reported, not applied); fb-6 carries the not-ready label `needs-design`. Tests and parity only |
 | `Resources` | App icon: generated `vbx-icon.svg` and the committed `vbx.icns` |
 | `Resources/entitlements` | Developer ID entitlements, plus the App Store *template* |
@@ -302,12 +302,15 @@ view snapshots for inspection.
 - **`VBX_DEVELOPER_ID_APP=-` signs ad-hoc**, which makes the whole packaging
   path runnable with no certificates. It produces nothing distributable and
   says so; notarizing it is refused rather than attempted.
-- **Discovery does not walk upwards.** bv's `GetBeadsDir` checks `<path>/.beads`
-  and, for a linked checkout, the main repository's — nothing else. A folder
-  *below* a project root is therefore not openable, which is why the Open
-  panel's guard asks `vbx_probe` rather than testing for `.beads` itself: the
-  set of openable paths is wider in one direction (a workspace root holds
-  `.bv/workspace.yaml` and no `.beads`) and narrower in another.
+- **`.beads` discovery does not walk upwards; workspace discovery does.**
+  bv's `GetBeadsDir` checks `<path>/.beads` and then the root of the checkout
+  (the main repository's, for a linked one), and nothing else. A plain folder
+  *below* a project root is therefore not openable. A `.bv/workspace.yaml` is
+  found in any parent, but only when no `.beads` is reachable: bv's
+  precedence, which the engine follows for the app too (ADR-026). This is why
+  the Open panel's guard asks `vbx_probe` rather than testing for `.beads`
+  itself. The set of openable paths is wider in one direction (a workspace
+  root holds `.bv/workspace.yaml` and no `.beads`) and narrower in another.
 - **Tests that write into a workspace must use `Fixture.writableStore()`**,
   which copies the fixture to a temporary directory. Swift Testing runs tests
   in parallel, and two of them writing to the shared fixture interfered — see

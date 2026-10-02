@@ -51,7 +51,11 @@ func TestWorkspaceWatchPathsCoverEveryMember(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".beads"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(OpenConfig{Path: root, SkipPhase2: true})
+	// Named explicitly: with a `.beads` at the root, discovery would take the
+	// root for a single repository, as bv's does (ADR-026).
+	s, err := Open(OpenConfig{
+		Workspace: filepath.Join(root, ".bv", "workspace.yaml"), SkipPhase2: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

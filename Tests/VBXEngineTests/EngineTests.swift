@@ -54,6 +54,46 @@ func loadStatsCrossTheBridge() async throws {
     await clean.close()
 }
 
+/// A copy of `Fixtures/dropped-workspace` outside any checkout, so discovery
+/// from its root reaches no `.beads` — inside this repository it would reach
+/// the repository's own.
+private func copiedWorkspace() throws -> URL {
+    let source = URL(fileURLWithPath: fixturePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("dropped-workspace")
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("vbx-discovery-\(UUID().uuidString)")
+    try FileManager.default.copyItem(at: source, to: root)
+    return root
+}
+
+@Test("Discovery prefers a reachable .beads to a workspace; --workspace overrides it")
+func workspaceDiscoveryCrossesTheBridge() async throws {
+    let root = try copiedWorkspace()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appendingPathComponent(".bv/workspace.yaml").path
+
+    // No .beads reachable: the workspace, found by discovery.
+    let engine = BeadsEngine()
+    let discovered = try await engine.open(path: root.path, skipPhase2: true)
+    #expect(discovered.source.hasSuffix(".bv/workspace.yaml"))
+    await engine.close()
+
+    // The root gains a .beads of its own: bv takes it, and so does vbx.
+    try FileManager.default.copyItem(
+        at: URL(fileURLWithPath: fixturePath).appendingPathComponent(".beads"),
+        to: root.appendingPathComponent(".beads"))
+    let single = try await engine.open(path: root.path, skipPhase2: true)
+    #expect(single.source.hasSuffix("issues.jsonl"))
+    #expect(single.issueCount == 18)
+    await engine.close()
+
+    // vbx-cli's --workspace reaches the engine and skips discovery.
+    let explicit = try await engine.open(path: root.path, skipPhase2: true, workspace: config)
+    #expect(explicit.source == config)
+    await engine.close()
+}
+
 @Test("Issues cross the bridge with their fields intact")
 func issuesDecode() async throws {
     let engine = BeadsEngine()

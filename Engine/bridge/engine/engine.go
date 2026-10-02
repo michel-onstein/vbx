@@ -45,6 +45,10 @@ type OpenConfig struct {
 	// Sandbox forbids — so only vbx-cli sets it, and only without
 	// --no-hooks. Off, export_report never reads the hook file.
 	ExportHooks bool `json:"export_hooks"`
+	// Workspace names a workspace configuration to load as given, skipping
+	// discovery — bv's --workspace, which vbx-cli's sets. Path is then not
+	// read. Empty means discover from Path, by bv's precedence (ADR-026).
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // Session holds one loaded workspace and its analysis state.
@@ -220,10 +224,9 @@ func phase1OnlyConfig() analysis.AnalysisConfig {
 }
 
 func (s *Session) load() error {
-	// A workspace configuration wins over single-repository discovery: if one
-	// exists, the graph the user means is the aggregate, and loading a single
-	// repo out of it would silently hide every cross-repo dependency.
-	if configPath := findWorkspaceConfig(s.config.Path); configPath != "" {
+	// bv's precedence (ADR-026): a reachable `.beads` wins over a workspace
+	// configuration found upward, and an explicit configuration over both.
+	if configPath := workspaceConfigFor(s.config); configPath != "" {
 		return s.loadWorkspaceSession(configPath)
 	}
 

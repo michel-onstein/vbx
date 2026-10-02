@@ -106,18 +106,24 @@ public actor BeadsEngine {
     /// `export_report` writes to disk, as `bv --export` does. A hook is a
     /// repository-configured shell command — the same subprocess the sandbox
     /// forbids — so only `vbx-cli` passes `true`, and not under `--no-hooks`.
+    ///
+    /// `workspace` names a `.bv/workspace.yaml` to load as given, skipping
+    /// discovery from `path` — `bv --workspace`, which only `vbx-cli` passes.
+    /// Without it, `path` is discovered by bv's precedence: a reachable
+    /// `.beads` wins over a workspace configuration above it. See ADR-026.
     public func open(
         path: String, skipPhase2: Bool = false, liveTrackerActions: Bool = false,
-        exportHooks: Bool = false
+        exportHooks: Bool = false, workspace: String? = nil
     ) throws -> WorkspaceInfo {
         close()
 
-        let config =
+        var config =
             [
                 "path": path, "skip_phase2": skipPhase2,
                 "live_tracker_actions": liveTrackerActions,
                 "export_hooks": exportHooks,
             ] as [String: Any]
+        if let workspace { config["workspace"] = workspace }
         let configData = try JSONSerialization.data(withJSONObject: config)
         let configString = String(decoding: configData, as: UTF8.self)
 

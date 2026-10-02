@@ -51,7 +51,11 @@ comparisons, and `Fixtures/dropped`, as JSONL and as a beads.db, whose
 malformed line and invalid record make every envelope carry `load_stats`,
 and `Fixtures/dropped-workspace`, two repositories under one
 `.bv/workspace.yaml` with a malformed line in one member, which runs only the
-workspace claim-gate comparisons. `--workspace` narrows the run to one.
+workspace claim-gate comparisons, and the same workspace with a `.beads` at
+its root, for which graph discovery takes from the root, a member and a plain
+folder below it (vbx-1y5). Both are copied out of this repository first, since
+inside it discovery reaches the repository's own `.beads`. `--workspace`
+narrows the run to one.
 
 Each differing command reports its first difference and how many more there
 are; `--verbose` lists every one.
@@ -136,8 +140,18 @@ FIXTURES = [
     # mid-record (vbx-koc). bv withholds every claim when any member dropped a
     # record, not only when one failed to load; vbx used to count only the
     # failures. `only_named`: just the claim-gate comparisons run over it.
+    # `outside_checkout`: copied out of this repository first, because from
+    # inside it both binaries' discovery reaches the repository's own `.beads`
+    # and never the workspace (vbx-1y5).
     {"name": "dropped (workspace)", "workspace": "Fixtures/dropped-workspace",
-     "only_named": True},
+     "only_named": True, "outside_checkout": True},
+    # The same workspace with a `.beads` of its own at the root and a plain
+    # `notes/` folder: the layout where bv 0.25's precedence and vbx's old
+    # workspace-first rule parted (vbx-1y5, ADR-026). Built outside this
+    # repository by build_discovery_workspace; the discovery comparisons run
+    # over it from the root, from a member and from `notes/`.
+    {"name": "discovery", "workspace": "Fixtures/dropped-workspace",
+     "only_named": True, "discovery": True},
 ]
 
 # The recipe files of the `recipes` fixture, by path relative to the
@@ -590,14 +604,33 @@ COMPARISONS = [
 ] + [
     # The claim gate over a multi-repository workspace with a dropped record
     # (vbx-koc): no claim, bv's source_authority_incomplete diagnostic, and
-    # every recommendation unclaimable. The configuration is named on both
-    # sides because bv's discovery prefers any `.beads` reachable upward —
-    # this repository's own — to a workspace.yaml in the working directory.
-    {"vbx": command, "bv": command, "name": f"{command} workspace claim gate",
-     "only": {"dropped (workspace)"}, **paths,
-     "vbx_args": ["--path", ".bv/workspace.yaml"],
-     "bv_args": ["--workspace", ".bv/workspace.yaml"]}
+    # every recommendation unclaimable. Once found by discovery — the root
+    # holds no `.beads`, so both binaries climb to the configuration — and
+    # once named with --workspace on both sides (vbx-1y5).
+    {"vbx": command, "bv": command, "name": f"{command} workspace claim gate{spelling}",
+     "only": {"dropped (workspace)"}, **paths, "vbx_args": args, "bv_args": args}
     for command, paths in (("robot-triage", TRIAGE_PATHS), ("robot-next", {}))
+    for spelling, args in (("", []),
+                           (" --workspace", ["--workspace", ".bv/workspace.yaml"]))
+] + [
+    # Which graph a directory means (vbx-1y5, ADR-026), over the discovery
+    # fixture: a root holding both a `.beads` and a `.bv/workspace.yaml`, and
+    # the workspace's members below it. bv 0.25 takes a reachable `.beads`
+    # first and climbs to a configuration only without one; --workspace
+    # overrides both. Triage and next name every bead they rank, so the wrong
+    # graph cannot match.
+    {"vbx": command, "bv": command, "name": f"{command} discovery {where}",
+     "only": {"discovery"}, **paths, "vbx_args": args, "bv_args": args,
+     **({"cwd": cwd} if cwd else {})}
+    for command, paths in (("robot-triage", TRIAGE_PATHS), ("robot-next", {}))
+    for where, cwd, args in (
+        ("root with both", None, []),
+        ("root with both --workspace", None, ["--workspace", ".bv/workspace.yaml"]),
+        ("member below a workspace", "api", []),
+        ("folder below a workspace", "notes", []),
+        ("folder below a workspace --workspace", "notes",
+         ["--workspace", "../.bv/workspace.yaml"]),
+    )
 ] + [
     # bv's opt-in not-ready label-class keeps a bead out of the claimable top
     # picks of triage and --robot-next, from the flag or, failing that, the
@@ -1101,6 +1134,24 @@ def build_recipe_workspace(source: Path, destination: Path) -> Path:
     return destination
 
 
+def build_discovery_workspace(source: Path, demo: Path, destination: Path) -> Path:
+    """Copies the workspace at `source` to `destination`, outside this
+    repository, and gives its root a `.beads` — the demo's — and an empty
+    `notes/` folder.
+
+    Outside, because inside this checkout both binaries' discovery reaches the
+    repository's own `.beads`. The root's beads are the demo's so that the
+    single repository and the aggregate share no id, and taking one for the
+    other cannot pass. Returns the workspace directory.
+    """
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(source, destination)
+    shutil.copytree(demo / ".beads", destination / ".beads")
+    (destination / "notes").mkdir()
+    return destination
+
+
 def build_sqlite_workspace(jsonl: Path, destination: Path) -> Path:
     """Writes `destination/.beads/beads.db` holding the beads in `jsonl`.
 
@@ -1342,10 +1393,13 @@ def compare_workspace(vbx: str, bv: str, bv_skip: str | None, workspace: Path,
             skipped.append((name, bv_skip))
             continue
 
+        # `cwd` runs both binaries from a folder inside the workspace, for
+        # the discovery comparisons; otherwise from the workspace itself.
+        where = workspace / entry["cwd"] if "cwd" in entry else workspace
         vbx_status, vbx_out, vbx_err = run(
-            vbx, [f"--{command}", *entry.get("vbx_args", [])], workspace, entry.get("env"))
+            vbx, [f"--{command}", *entry.get("vbx_args", [])], where, entry.get("env"))
         bv_status, bv_out, bv_err = run(
-            bv, [f"--{entry['bv']}", *entry.get("bv_args", []), "--format", "json"], workspace,
+            bv, [f"--{entry['bv']}", *entry.get("bv_args", []), "--format", "json"], where,
             entry.get("env"))
 
         if entry.get("rejects"):
@@ -1561,6 +1615,14 @@ def main() -> int:
             if fixture.get("recipes"):
                 workspace = build_recipe_workspace(
                     workspace, Path(scratch) / f"{fixture['name']}-recipes")
+            if fixture.get("outside_checkout"):
+                copy = Path(scratch) / fixture["workspace"].replace("/", "-")
+                if copy.exists():
+                    shutil.rmtree(copy)
+                workspace = Path(shutil.copytree(workspace, copy))
+            if fixture.get("discovery"):
+                workspace = build_discovery_workspace(
+                    workspace, root / "Fixtures" / "demo", Path(scratch) / "discovery")
             d, m = compare_workspace(vbx, bv_path or args.bv, bv_skip, workspace,
                                      fixture["name"], args.verbose,
                                      fixture.get("only_named", False),

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/Dicklesworthstone/beads_viewer/pkg/workspace"
 )
 
 // Probing a path without opening it.
@@ -39,7 +41,10 @@ type ProbeResult struct {
 //   - a `.beads` directory chosen directly
 //   - a `.jsonl` or `.db` file chosen directly
 //   - a multi-repository workspace root, which holds `.bv/workspace.yaml` while
-//     its `.beads` directories live in the repositories below it
+//     its `.beads` directories live in the repositories below it — and any
+//     folder below one from which no `.beads` is reachable, since bv's
+//     discovery climbs to a workspace configuration (ADR-026)
+//   - a workspace configuration chosen directly, when it parses as one
 //   - a git worktree whose `.beads` lives in the main repository, not in it
 //   - any folder inside a *git checkout* whose root holds `.beads`, because
 //     discovery resolves a path to its repository root
@@ -47,7 +52,7 @@ type ProbeResult struct {
 // The workspace case is the one a naive check breaks: requiring `.beads` at the
 // chosen level makes every workspace root unselectable.
 //
-// A file is accepted only by extension — `.jsonl`, `.db`, `.sqlite`,
+// A data file is accepted only by extension — `.jsonl`, `.db`, `.sqlite`,
 // `.sqlite3`. It is not sniffed for content: an `issues.jsonl` that is empty,
 // or momentarily mid-write, is still the file the user means, and refusing it
 // here would break the documented fallback to `beads.db`.
@@ -70,8 +75,19 @@ func Probe(path string) ProbeResult {
 		return result
 	}
 
-	// A workspace configuration wins, exactly as it does when loading.
-	if configPath := findWorkspaceConfig(path); configPath != "" {
+	// The same precedence as loading (ADR-026): a reachable `.beads` wins, and
+	// a workspace configuration found upward is used only without one.
+	if configPath := discoverWorkspaceConfig(path); configPath != "" {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			// A YAML file chosen directly is offered only when it is a
+			// workspace configuration. Parsing it opens nothing; offering
+			// every YAML file would be the panel promising what the loader
+			// then refuses.
+			if _, err := workspace.LoadConfig(configPath); err != nil {
+				result.Reason = err.Error()
+				return result
+			}
+		}
 		result.CanOpen = true
 		result.Kind = "workspace"
 		result.Source = configPath

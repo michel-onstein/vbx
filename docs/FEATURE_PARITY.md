@@ -34,10 +34,10 @@ feedback, `--export` reports in four formats (vbx-im9), `--search-min-score`
 with bv's guaranteed exact-ID hit (vbx-52c), `--recipe` as a robot scope,
 by name or path (vbx-7d5), `.bv/hooks.yaml` export hooks with `--no-hooks`
 in `vbx-cli` (vbx-uos), and `load_stats` in the robot envelope, counted in the
-app's warnings badge (vbx-dv5). Not yet built, each with a child bead of epic
-vbx-htg: the app's search threshold control (vbx-c1j),
-and bv's `.beads`-first workspace discovery with `--workspace` (vbx-1y5). A row naming a bead is not built until
-that bead closes.
+app's warnings badge (vbx-dv5), and bv's `.beads`-first workspace discovery
+with `--workspace` (vbx-1y5). Not yet built, with a child bead of epic
+vbx-htg: the app's search threshold control (vbx-c1j). A row naming a bead is
+not built until that bead closes.
 
 **Verified rather than asserted.** `scripts/parity-check.py` runs `vbx-cli` and
 `bv` over the same workspace and diffs them command by command, stripping only
@@ -142,7 +142,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.
 | Legacy field aliases (`depends_on`, `target_id`) | Transparent | Engine | 0 |
 | Comment ID as UUIDv7 or legacy integer | Transparent | Engine | 0 |
 | Multi-repo workspace (`.bv/workspace.yaml`) | Sidebar "Repos" section, repo picker; loader is vbx's port of bv's, held to it by `TestWorkspaceLoaderMatchesBV` | Engine + Native | 2 |
-| `.bv/workspace.yaml` discovery: bv 0.25 uses it only when no `.beads` is reachable, `--workspace` overrides | **Not built:** vbx prefers a found workspace over the repo's own `.beads`, an unrecorded divergence; `vbx-cli` has no `--workspace` (vbx-1y5) | Engine | — |
+| `.bv/workspace.yaml` discovery: bv 0.25 uses it only when no `.beads` is reachable, `--workspace` overrides | ✓ bv's precedence in the engine, for `vbx-cli` and the app alike, and `vbx-cli --workspace FILE`; compared against bv from a root holding both, a member and a plain folder below a workspace, with and without `--workspace`. In the app, the aggregate of a folder that also has its own `.beads` is opened by choosing its `.bv/workspace.yaml` (vbx-1y5, ADR-026) | Engine | — |
 | Repo auto-discovery, monorepo layouts | Workspace open flow | Engine | 2 |
 | ID namespacing across repos | Displayed prefix badges on rows | Engine + Native | 2 |
 | Cross-repository dependency edges | Graph edges styled as cross-repo | Engine + Native | 3 |
