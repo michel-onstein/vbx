@@ -7,6 +7,12 @@ edit.** The engineering-facing views live elsewhere:
 [BUGS.md](project_notes/BUGS.md) records a bug and the regression test locking
 it in, and [WORK_LOG.md](project_notes/WORK_LOG.md) records dated work.
 
+## 0.19.0 — 2026-10-02
+
+### Features
+
+- Alerts panel shows bv's suggested action, bead labels and related bead for each alert ([#116](https://github.com/michel-onstein/vbx/pull/116))
+
 ## 0.18.0 — 2026-10-02
 
 ### Features
