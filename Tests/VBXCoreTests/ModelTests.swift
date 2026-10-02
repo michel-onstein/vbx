@@ -127,6 +127,37 @@ func dependencyTypeRoundTrip() throws {
     #expect(DependencyType(rawValue: "custom-link") == .other("custom-link"))
 }
 
+// vbx-j7r: SourceKind had no workspace case, and its decoder read anything it
+// did not know as JSONL — so a multi-repository session reported "JSONL".
+@Test(
+    "Every source kind the engine reports decodes as itself, and an unknown one stays open",
+    arguments: [
+        ("jsonl", SourceKind.jsonl),
+        ("jsonl_local", SourceKind.jsonl),
+        ("sqlite", SourceKind.sqlite),
+        ("workspace", SourceKind.workspace),
+        ("jsonl_worktree", SourceKind.unknown("jsonl_worktree")),
+    ])
+func sourceKindDecodes(raw: String, expected: SourceKind) throws {
+    let json = #"{"source":"/x/.beads/issues.jsonl","kind":"\#(raw)","issue_count":1}"#
+    let info = try JSONDecoder().decode(WorkspaceInfo.self, from: Data(json.utf8))
+    #expect(info.kind == expected)
+    // The kind round-trips through the engine's spelling.
+    let encoded = try JSONEncoder().encode(info.kind)
+    #expect(try JSONDecoder().decode(SourceKind.self, from: encoded) == expected)
+}
+
+@Test("A workspace session is named for its root, not its .bv folder")
+func workspaceDisplayName() {
+    let workspace = WorkspaceInfo(
+        source: "/src/platform/.bv/workspace.yaml", kind: .workspace, issueCount: 4, dataHash: "h")
+    #expect(workspace.displayName == "platform")
+    #expect(workspace.kind.displayName == "Workspace")
+    let single = WorkspaceInfo(
+        source: "/src/platform/.beads/issues.jsonl", kind: .jsonl, issueCount: 4, dataHash: "h")
+    #expect(single.displayName == "platform")
+}
+
 @Test("blockingDependencies filters out non-blocking edges")
 func blockingDependenciesFilter() {
     let issue = Issue(

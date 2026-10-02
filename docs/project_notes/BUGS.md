@@ -4,6 +4,35 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — A multi-repository session said it was JSONL, titled ".bv"
+
+**Symptom:** Opening a `.bv/workspace.yaml` showed **JSONL** in the status
+bar's source badge, and the window — and the export wizard's default title —
+was named `.bv` instead of the workspace root. (vbx-j7r, found by the vbx-1y5
+pass.)
+
+**Cause:** Swift's `SourceKind` had only `jsonl` and `sqlite`, and
+`WorkspaceInfo` decoded any other value as `.jsonl`. The engine reports
+`workspace` for a multi-repository session, so it was read as JSONL; and
+`WorkspaceInfo.displayName` only stepped over a `.beads` folder, so a source of
+`<root>/.bv/workspace.yaml` was named for its `.bv` folder. The closed enum was
+also the very fallback CLAUDE.md forbids: an unknown kind became a wrong known
+one.
+
+**Fix:** `SourceKind` gains `workspace` and is open — `unknown(String)` keeps
+anything else, as `IssueStatus` does. Both of the engine's spellings of the
+local JSONL (`jsonl` in its load info, bv's `jsonl_local` in envelopes) decode
+to `.jsonl`. `displayName` steps over `.bv` for a workspace session. The badge
+and title had no other branch on the kind; `workspaceDirectory` (where `br`
+runs) already went two levels up, which is the root for a workspace too.
+
+**Regression tests:** `sourceKindDecodes` (VBXCoreTests) decodes `jsonl`,
+`jsonl_local`, `sqlite`, `workspace` and an unknown `jsonl_worktree`;
+`workspaceDisplayName` checks the root name. `storeReportsWorkspaceKind`
+(VBXAppCoreTests) opens `Fixtures/dropped-workspace/.bv/workspace.yaml`
+explicitly (ADR-026) and asserts `.workspace` and `dropped-workspace`. The
+engine discovery test now asserts the kind as well.
+
 ## 2026-10-02 — vbx-cli spelled a symlinked working directory by its resolved path
 
 **Symptom:** From a shell in a directory reached through a symlink — every

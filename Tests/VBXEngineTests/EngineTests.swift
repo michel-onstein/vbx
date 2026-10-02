@@ -135,6 +135,7 @@ func workspaceDiscoveryCrossesTheBridge() async throws {
     let engine = BeadsEngine()
     let discovered = try await engine.open(path: root.path, skipPhase2: true)
     #expect(discovered.source.hasSuffix(".bv/workspace.yaml"))
+    #expect(discovered.kind == .workspace)
     await engine.close()
 
     // The root gains a .beads of its own: bv takes it, and so does vbx.
