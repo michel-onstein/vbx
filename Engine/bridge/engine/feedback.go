@@ -122,7 +122,7 @@ func (s *Session) feedbackBlock() *analysis.FeedbackJSON {
 // triageRequest is what triage and next accept: bv's --label scope and its
 // --robot-not-ready-labels value, as written.
 type triageRequest struct {
-	Label          string `json:"label"`
+	scopeRequest
 	NotReadyLabels string `json:"not_ready_labels"`
 }
 

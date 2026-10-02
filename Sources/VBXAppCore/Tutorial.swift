@@ -274,8 +274,9 @@ public final class Tutorial: ObservableObject {
                 and the rest — are the same ones `bv --recipe` uses.
 
                 Recipes you create are written to `.bv/recipes.yaml` in the
-                project, which is bv's own location. A recipe made here works
-                on the command line, and the other way round.
+                project, which is bv's own location. A recipe that has its own
+                file in `.beads/recipes` is saved back to that file. A recipe
+                made here works on the command line, and the other way round.
                 """
         ),
         TutorialSection(

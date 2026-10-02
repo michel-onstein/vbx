@@ -25,8 +25,8 @@ import (
 //     filters nothing.
 
 type capacityRequest struct {
-	Agents        int    `json:"agents"`
-	Label         string `json:"label"`
+	Agents int `json:"agents"`
+	scopeRequest
 	CapacityLabel string `json:"capacity_label"`
 }
 
@@ -76,7 +76,10 @@ func (s *Session) capacity(req []byte) ([]byte, error) {
 		filter = r.CapacityLabel
 	}
 
-	v := s.view(r.Label)
+	v, err := s.view(r.scopeRequest)
+	if err != nil {
+		return nil, err
+	}
 	// bv runs the full analysis here whatever else is configured, because the
 	// estimate's depth factor reads the critical-path score, a Phase-2
 	// metric. A session that skips Phase 2 has none, so it analyses afresh

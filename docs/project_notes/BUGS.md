@@ -4,6 +4,30 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-02 — Editing a `.beads/recipes` recipe in the app changed nothing
+
+**Symptom:** found by reading the code, then reproduced in a test. A recipe
+defined by its own `.beads/recipes/<name>.yaml` could be opened in the recipe
+editor and saved without error, but it went on selecting what it selected
+before; deleting it reported success and left it in the list. (vbx-7d5)
+
+**Cause:** `recipe_save` wrote every recipe into `.bv/recipes.yaml`. bv's
+loader ranks a project file above that map (builtin < user < `.bv/recipes.yaml`
+< `.beads/recipes`), so the saved copy was shadowed by the very file the user
+meant to edit. `recipe_delete` only read the map, so it removed that copy and
+never touched the file.
+
+**Fix:** both ask bv's loader where the recipe comes from. A `project-file`
+recipe is written back to its own file as a single-recipe YAML that bv's
+`recipe.LoadFile` reads; deleting one removes the file, and any same-named
+entry in `.bv/recipes.yaml`, which removing the file would otherwise uncover.
+
+**Regression test:** `TestProjectFileRecipeIsEditedInItsOwnFile`,
+`TestProjectFileRecipeIsFoundByNameNotFilename` and
+`TestDeletingAProjectFileRecipeClearsItsShadowedCopy` in
+`Engine/bridge/engine/recipes_test.go`; `editProjectFileRecipe` in
+`Tests/VBXUITests/RecipeTests.swift` drives the same edit through the store.
+
 ## 2026-10-02 — The Alerts label picker was empty on bv 0.25 alerts
 
 **Symptom:** the Alerts panel's label picker offered only "All labels" over

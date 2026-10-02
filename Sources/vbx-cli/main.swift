@@ -29,13 +29,14 @@ struct RobotCommand {
     let request: (Options) throws -> [String: Any]?
     /// True when the command needs the expensive metrics before it can answer.
     var waitsForPhase2 = false
-    /// True when `--label` is bv's global scope for this command: the engine
-    /// answers over the label's subgraph and says so in the envelope. Set here
-    /// rather than in each `request`, so a label-aware command cannot forget
-    /// to forward it. Alerts and capacity take a filter of their own too, as
+    /// True when `--label` and `--recipe` are bv's global scope for this
+    /// command: the engine answers over the label's subgraph, narrowed to
+    /// what the recipe selects, and says so in the envelope. Set here rather
+    /// than in each `request`, so a scope-aware command cannot forget to
+    /// forward either. Alerts and capacity take a filter of their own too, as
     /// bv does: `--label` scopes the issue set, and `--alert-label` filters
     /// the alerts computed over it, `--capacity-label` the beads simulated.
-    var labelScoped = false
+    var scoped = false
     /// True when the command prints the engine's `message` — bv's own text
     /// for the same flag — rather than the payload. The feedback commands are
     /// the only ones: bv prints prose for them whatever `--format` says, and
@@ -44,7 +45,7 @@ struct RobotCommand {
 
     init(
         _ flag: String, method: String, summary: String, waitsForPhase2: Bool = false,
-        labelScoped: Bool = false, printsMessage: Bool = false,
+        scoped: Bool = false, printsMessage: Bool = false,
         request: @escaping (Options) throws -> [String: Any]? = { _ in nil }
     ) {
         self.flag = flag
@@ -52,15 +53,19 @@ struct RobotCommand {
         self.summary = summary
         self.request = request
         self.waitsForPhase2 = waitsForPhase2
-        self.labelScoped = labelScoped
+        self.scoped = scoped
         self.printsMessage = printsMessage
     }
 
-    /// The engine request: the command's own, plus the label scope.
+    /// The engine request: the command's own, plus the scope.
     func payload(_ options: Options) throws -> [String: Any]? {
         var payload = try request(options)
-        if labelScoped, let label = options.label, !label.isEmpty {
-            payload = (payload ?? [:]).merging(["label": label]) { _, scope in scope }
+        guard scoped else { return payload }
+        var scope: [String: Any] = [:]
+        if let label = options.label, !label.isEmpty { scope["label"] = label }
+        if let recipe = options.recipe, !recipe.isEmpty { scope["recipe"] = recipe }
+        if !scope.isEmpty {
+            payload = (payload ?? [:]).merging(scope) { _, scope in scope }
         }
         return payload
     }
@@ -104,16 +109,16 @@ let robotCommands: [RobotCommand] = [
     // Triage and planning
     RobotCommand(
         "robot-triage", method: "triage", summary: "Ranked recommendations",
-        waitsForPhase2: true, labelScoped: true, request: notReadyRequest),
+        waitsForPhase2: true, scoped: true, request: notReadyRequest),
     RobotCommand(
         "robot-next", method: "next", summary: "The single claim-safe next bead",
-        waitsForPhase2: true, labelScoped: true, request: notReadyRequest),
+        waitsForPhase2: true, scoped: true, request: notReadyRequest),
     RobotCommand(
         "robot-plan", method: "plan", summary: "Parallel execution tracks",
-        labelScoped: true),
+        scoped: true),
     RobotCommand(
         "robot-priority", method: "priority", summary: "Priority misalignment",
-        waitsForPhase2: true, labelScoped: true,
+        waitsForPhase2: true, scoped: true,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.minConfidence { request["min_confidence"] = value }
@@ -124,7 +129,7 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-insights", method: "insights", summary: "Deep graph metrics",
-        waitsForPhase2: true, labelScoped: true,
+        waitsForPhase2: true, scoped: true,
         request: { options in options.limit.map { ["limit": $0] } }),
     RobotCommand(
         "robot-actionable", method: "actionable", summary: "Beads with nothing blocking them"),
@@ -137,7 +142,7 @@ let robotCommands: [RobotCommand] = [
     // Hygiene and health
     RobotCommand(
         "robot-suggest", method: "suggest", summary: "Duplicates, deps, labels, cycles",
-        labelScoped: true,
+        scoped: true,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.suggestType { request["type"] = value }
@@ -147,7 +152,7 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-alerts", method: "alerts", summary: "Drift and health alerts",
-        labelScoped: true,
+        scoped: true,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.severity { request["severity"] = value }
@@ -167,7 +172,7 @@ let robotCommands: [RobotCommand] = [
     // Graph
     RobotCommand(
         "robot-graph", method: "graph_export", summary: "Graph export",
-        labelScoped: true,
+        scoped: true,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.graphFormat { request["format"] = value }
@@ -283,7 +288,7 @@ let robotCommands: [RobotCommand] = [
         request: { options in ["id": options.id ?? "current"] }),
     RobotCommand(
         "robot-capacity", method: "capacity", summary: "Capacity simulation",
-        labelScoped: true,
+        scoped: true,
         request: { options in
             var request: [String: Any] = ["agents": options.agents]
             if let value = options.capacityLabel { request["capacity_label"] = value }
@@ -659,6 +664,10 @@ func usageText() -> String {
         "  --pretty             Indent JSON output",
         "  --list-commands      Print the command list as JSON",
         "",
+        "SCOPE (triage, next, plan, priority, insights, suggest, alerts, graph, capacity):",
+        "  --label L            The label's subgraph; only its beads are picked",
+        "  --recipe NAME|FILE   What a recipe selects — a name, or a .yaml/.yml path",
+        "",
         "REPORTS (bv's --export):",
         "  --export FILE        Write a report; a --recipe supplies export defaults",
         "  --export-md FILE     The same, always Markdown",
@@ -714,6 +723,44 @@ func printMessage(
     }
 }
 
+/// Resolves `--recipe` before anything runs, as bv does, and refuses one that
+/// names no recipe or no loadable file with bv's stderr: the error, the
+/// loader's warnings, and — for an unknown name — the recipes it could have
+/// named. Returns false when the run must stop (exit 1).
+func recipeResolves(_ argument: String, engine: BeadsEngine) async -> Bool {
+    struct Summary: Decodable {
+        let name: String
+        let description: String?
+    }
+    struct Resolution: Decodable {
+        let error: String?
+        let warnings: [String]?
+        let available: [Summary]?
+    }
+    do {
+        let data = try await engine.rawJSON("recipe_resolve", request: ["name": argument])
+        let resolution = try JSONDecoder().decode(Resolution.self, from: data)
+        guard let error = resolution.error else { return true }
+        complain("Error: \(error)")
+        for warning in resolution.warnings ?? [] { complain("Warning: \(warning)") }
+        if let available = resolution.available {
+            complain("\nAvailable recipes:")
+            for recipe in available {
+                let name = recipe.name.padding(
+                    toLength: max(15, recipe.name.count), withPad: " ", startingAt: 0)
+                complain("  \(name) \(recipe.description ?? "")")
+            }
+            complain(
+                "\nA path ending in .yaml or .yml loads one recipe file, e.g. --recipe .beads/recipes/sprint.yaml"
+            )
+        }
+        return false
+    } catch {
+        complain("Error: \(error.localizedDescription)")
+        return false
+    }
+}
+
 // MARK: - Main
 
 func run() async -> Int32 {
@@ -760,6 +807,9 @@ func run() async -> Int32 {
             return 1
         }
         defer { Task { await engine.close() } }
+        if let recipe = options.recipe, !(await recipeResolves(recipe, engine: engine)) {
+            return 1
+        }
         return await runExport(options, path: path, engine: engine)
     }
 
@@ -793,6 +843,15 @@ func run() async -> Int32 {
         return 1
     }
     defer { Task { await engine.close() } }
+
+    // bv resolves --recipe before it loads issues, so a recipe that does not
+    // resolve fails the command whatever it is; here, every command that
+    // reads the recipe.
+    if command.scoped || command.flag == "robot-recipe-apply", let recipe = options.recipe,
+        !(await recipeResolves(recipe, engine: engine))
+    {
+        return 1
+    }
 
     if command.waitsForPhase2 {
         // Metrics that have not been computed would be reported as absent,

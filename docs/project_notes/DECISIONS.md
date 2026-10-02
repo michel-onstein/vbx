@@ -1229,7 +1229,10 @@ holds *and* it means what it means in bv; otherwise declare it envelope-only.
     unscoped data hash and the sorted candidate ids. Under a label — graph,
     triage, plan, priority, next, suggest and insights, all through
     `Session.view` — the ids are the label's core beads as bv's `--label`
-    makes them, and the envelope reports `scope.label`.
+    makes them, and the envelope reports `scope.label`. Under a recipe
+    (vbx-7d5, the same step) the ids are what the recipe selected, of the
+    label's beads when both are given; the recipe is hashed and reported in
+    `scope.recipe` exactly as it was given, a path included.
 - **Envelope-only**, in `parity-check.py`'s single `ENVELOPE_ONLY_KEYS`, each
   with its reason:
   - `source_authority` — bv's report of its multi-source selection: candidates

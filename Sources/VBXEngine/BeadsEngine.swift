@@ -443,7 +443,9 @@ public actor BeadsEngine {
         try call("recipe_apply", request: ["name": name], as: AppliedRecipe.self)
     }
 
-    /// Writes a project recipe into `<project>/.bv/recipes.yaml`.
+    /// Writes a project recipe into `<project>/.bv/recipes.yaml` — or, for one
+    /// defined by its own `.beads/recipes` file, back into that file, which
+    /// would otherwise shadow the edit.
     public func saveRecipe(_ recipe: Recipe) throws {
         let encoded = try JSONEncoder().encode(recipe)
         let object = try JSONSerialization.jsonObject(with: encoded)
