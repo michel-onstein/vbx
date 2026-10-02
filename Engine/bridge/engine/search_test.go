@@ -2,8 +2,6 @@ package engine
 
 import (
 	"testing"
-
-	"github.com/Dicklesworthstone/beads_viewer/pkg/search"
 )
 
 type searchShape struct {
@@ -56,42 +54,6 @@ func TestTextSearchReturnsRankedResults(t *testing.T) {
 		if result.Results[i-1].Score < result.Results[i].Score {
 			t.Errorf("results are not ordered by score: %+v", result.Results)
 		}
-	}
-}
-
-func TestExactIDIsPromotedToTheTop(t *testing.T) {
-	// Tested directly rather than through a query, because this fixture's ids
-	// are single letters and so are not id-shaped at all.
-	results := []searchResultFixture{
-		{"proj-9", 0.9}, {"proj-4", 0.8}, {"proj-1", 0.7}, {"proj-7", 0.6},
-	}
-	promoted := promoteExactID(toSearchResults(results), "proj-1")
-
-	// Re-ranking can bury the bead whose id was literally typed.
-	if promoted[0].IssueID != "proj-1" {
-		t.Fatalf("exact match was not promoted: %+v", promoted)
-	}
-	// And the rest keep their relative order.
-	rest := []string{promoted[1].IssueID, promoted[2].IssueID, promoted[3].IssueID}
-	if rest[0] != "proj-9" || rest[1] != "proj-4" || rest[2] != "proj-7" {
-		t.Errorf("promotion disturbed the rest of the order: %v", rest)
-	}
-}
-
-func TestPromotionIgnoresQueriesThatAreNotIDs(t *testing.T) {
-	results := toSearchResults([]searchResultFixture{{"proj-9", 0.9}, {"proj-1", 0.7}})
-	// A prose query must not reorder anything, or every search would promote
-	// whatever happened to look like a match.
-	unchanged := promoteExactID(results, "the parser is broken")
-	if unchanged[0].IssueID != "proj-9" {
-		t.Errorf("a prose query reordered the results: %+v", unchanged)
-	}
-
-	// An id-shaped query naming a bead that is not in the results leaves them
-	// alone too.
-	missing := promoteExactID(results, "proj-42")
-	if missing[0].IssueID != "proj-9" {
-		t.Errorf("an absent id reordered the results: %+v", missing)
 	}
 }
 
@@ -243,17 +205,4 @@ func TestSearchPresetsAreListed(t *testing.T) {
 			t.Errorf("preset %q gives no weight to text relevance", preset.Name)
 		}
 	}
-}
-
-type searchResultFixture struct {
-	id    string
-	score float64
-}
-
-func toSearchResults(items []searchResultFixture) []search.SearchResult {
-	out := make([]search.SearchResult, 0, len(items))
-	for _, item := range items {
-		out = append(out, search.SearchResult{IssueID: item.id, Score: item.score})
-	}
-	return out
 }

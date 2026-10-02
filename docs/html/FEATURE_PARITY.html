@@ -254,9 +254,11 @@ the robot protocol with TOON output.</p>
 capabilities bv gained between 0.21 and 0.25 are mapped below with their real
 state. Built: the six new alert types with <code>suggested_action</code> (engine and
 <code>vbx-cli</code>), <code>defer_until</code> in readiness, <code>.beads/recipes/*.yaml</code> recipe files,
-the multi-repository loader, triage feedback, and <code>--export</code> reports in four
-formats (vbx-im9). Not yet built, each with a child bead of epic vbx-htg:
-export hooks around <code>vbx-cli --export</code> (vbx-uos), <code>--search-min-score</code> and bv's exact-ID guarantee (vbx-52c), <code>defer_until</code> in
+the multi-repository loader, triage feedback, <code>--export</code> reports in four
+formats (vbx-im9), and <code>--search-min-score</code> with bv's guaranteed exact-ID hit
+(vbx-52c). Not yet built, each with a child bead of epic vbx-htg: the app's
+search threshold control (vbx-c1j),
+export hooks around <code>vbx-cli --export</code> (vbx-uos), <code>defer_until</code> in
 the app (vbx-upz), <code>load_stats</code> in the robot envelope (vbx-dv5), suggested
 actions in the Alerts panel (vbx-fc7), <code>--recipe</code> as a robot scope and recipe
 file paths (vbx-7d5), and bv's <code>.beads</code>-first workspace discovery with
@@ -272,7 +274,10 @@ the demo fixture, over <code>Fixtures/readiness</code> — the readiness and blo
 cases bv 0.25 changed — both as JSONL and as a <code>beads.db</code>, because vbx reads
 SQLite through its own loader rather than bv's, and over <code>Fixtures/sprints</code>,
 the only one with sprints, where <code>--robot-sprint-show</code> and <code>--robot-burndown</code>
-(at-risk beads included) are compared.</p>
+(at-risk beads included) are compared. <code>--robot-search</code> is compared in text
+mode over the demo — thresholds at both bounds, between them and empty, and
+five rejected values — and over <code>Fixtures/search</code>, whose text buries a bead
+below a query for its own id, the case bv's exact-ID guarantee exists for.</p>
 <p>Two known non-comparisons are declared in the harness rather than hidden:
 <code>--robot-insights</code>, because bv inlines <code>analysis.Insights</code>' untagged PascalCase
 fields at the top level, and <code>--robot-label-attention</code>, because bv projects a
@@ -1170,9 +1175,9 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--search-min-score</code>, guaranteed exact-ID hit (bv 0.25)</td>
-<td><strong>Not built:</strong> no min-score; an exact id is promoted only when already among the fetched candidates (vbx-52c)</td>
-<td>—</td>
-<td>—</td>
+<td>✓ through bv's <code>SearchTopKWithOptions</code>; <code>vbx-cli --search-min-score</code> with bv's validation and <code>min_score</code> echo (vbx-52c). No threshold control in the app yet (vbx-c1j)</td>
+<td>Search field (hybrid mode gets the exact-ID hit)</td>
+<td>6</td>
 </tr>
 <tr>
 <td><code>--robot-suggest</code> (+ type, bead, confidence)</td>

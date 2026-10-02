@@ -28,9 +28,11 @@ the robot protocol with TOON output.
 capabilities bv gained between 0.21 and 0.25 are mapped below with their real
 state. Built: the six new alert types with `suggested_action` (engine and
 `vbx-cli`), `defer_until` in readiness, `.beads/recipes/*.yaml` recipe files,
-the multi-repository loader, triage feedback, and `--export` reports in four
-formats (vbx-im9). Not yet built, each with a child bead of epic vbx-htg:
-export hooks around `vbx-cli --export` (vbx-uos), `--search-min-score` and bv's exact-ID guarantee (vbx-52c), `defer_until` in
+the multi-repository loader, triage feedback, `--export` reports in four
+formats (vbx-im9), and `--search-min-score` with bv's guaranteed exact-ID hit
+(vbx-52c). Not yet built, each with a child bead of epic vbx-htg: the app's
+search threshold control (vbx-c1j),
+export hooks around `vbx-cli --export` (vbx-uos), `defer_until` in
 the app (vbx-upz), `load_stats` in the robot envelope (vbx-dv5), suggested
 actions in the Alerts panel (vbx-fc7), `--recipe` as a robot scope and recipe
 file paths (vbx-7d5), and bv's `.beads`-first workspace discovery with
@@ -47,7 +49,10 @@ the demo fixture, over `Fixtures/readiness` — the readiness and blocking
 cases bv 0.25 changed — both as JSONL and as a `beads.db`, because vbx reads
 SQLite through its own loader rather than bv's, and over `Fixtures/sprints`,
 the only one with sprints, where `--robot-sprint-show` and `--robot-burndown`
-(at-risk beads included) are compared.
+(at-risk beads included) are compared. `--robot-search` is compared in text
+mode over the demo — thresholds at both bounds, between them and empty, and
+five rejected values — and over `Fixtures/search`, whose text buries a bead
+below a query for its own id, the case bv's exact-ID guarantee exists for.
 
 Two known non-comparisons are declared in the harness rather than hidden:
 `--robot-insights`, because bv inlines `analysis.Insights`' untagged PascalCase
@@ -261,7 +266,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-orphans` | ✓ | History orphans tab | 6 |
 | `--robot-explain-correlation`, `--robot-confirm-correlation`, `--robot-reject-correlation`, `--robot-correlation-stats` | ✓ | History feedback controls | 6 |
 | `--robot-search` (+ mode, preset, weights, limit) | ✓ | Search field | 6 |
-| `--search-min-score`, guaranteed exact-ID hit (bv 0.25) | **Not built:** no min-score; an exact id is promoted only when already among the fetched candidates (vbx-52c) | — | — |
+| `--search-min-score`, guaranteed exact-ID hit (bv 0.25) | ✓ through bv's `SearchTopKWithOptions`; `vbx-cli --search-min-score` with bv's validation and `min_score` echo (vbx-52c). No threshold control in the app yet (vbx-c1j) | Search field (hybrid mode gets the exact-ID hit) | 6 |
 | `--robot-suggest` (+ type, bead, confidence) | ✓ | Inspector suggestions | 6 |
 | `--robot-forecast`, `--robot-capacity` (+ agents, capacity-label, label scope) | ✓ | Inspector forecast, sprint scenarios | 6 |
 | `--robot-burndown`, `--robot-sprint-list`, `--robot-sprint-show` | ✓ | Sprint dashboard | 6 |

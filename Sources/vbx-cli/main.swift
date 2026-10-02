@@ -193,6 +193,7 @@ let robotCommands: [RobotCommand] = [
             if let value = options.searchMode { request["mode"] = value }
             if let value = options.searchPreset { request["preset"] = value }
             if let value = options.limit { request["limit"] = value }
+            if let value = options.searchMinScore { request["min_score"] = value }
             return request
         }),
     RobotCommand(
@@ -341,6 +342,18 @@ let exportFlags = ["export", "export-md"]
 /// bv rejects each on its own, and so does vbx-cli.
 let exportModifiers = ["export-format", "export-include-graph", "export-template"]
 
+/// bv's `parseSearchMinScore`: an empty value is no threshold; anything else
+/// must be a finite number from -1 to 1, or the invocation is wrong (exit 2)
+/// with bv's message word for word.
+func parseSearchMinScore(_ raw: String) throws -> Double? {
+    if raw.isEmpty { return nil }
+    guard let score = Double(raw), score.isFinite, score >= -1, score <= 1 else {
+        throw UsageError(
+            message: "invalid --search-min-score \"\(raw)\" (expected a finite number from -1 to 1)")
+    }
+    return score
+}
+
 /// Parses a Go `strconv.ParseBool` value, which is what pflag accepts for
 /// `--export-include-graph=<value>`.
 func parseGoBool(_ value: String) -> Bool? {
@@ -415,6 +428,9 @@ struct Options {
     var query: String?
     var searchMode: String?
     var searchPreset: String?
+    /// bv's --search-min-score, as given; parsed once the query is known.
+    var searchMinScoreText: String?
+    var searchMinScore: Double?
     var suggestType: String?
     var severity: String?
     var alertType: String?
@@ -516,6 +532,7 @@ func parseArguments() throws -> Options {
         case "--search": options.query = try next(arg)
         case "--search-mode": options.searchMode = try next(arg)
         case "--search-preset": options.searchPreset = try next(arg)
+        case "--search-min-score": options.searchMinScoreText = try next(arg)
         case "--suggest-type": options.suggestType = try next(arg)
         case "--severity": options.severity = try next(arg)
         case "--alert-type": options.alertType = try next(arg)
@@ -575,6 +592,11 @@ func parseArguments() throws -> Options {
             // not, and silently exporting the present would be wrong.
             throw UsageError(message: "--as-of is not supported with an export")
         }
+    }
+    // Checked only beside a query, as bv checks it: without --search the flag
+    // means nothing, and bv ignores it rather than failing.
+    if let raw = options.searchMinScoreText, options.query?.isEmpty == false {
+        options.searchMinScore = try parseSearchMinScore(raw)
     }
     guard ["json", "toon"].contains(options.format) else {
         throw UsageError(message: "invalid --format \(options.format) (expected json or toon)")
@@ -646,6 +668,12 @@ func usageText() -> String {
         "  --export-template FILE",
         "                       A Go text/template for the Markdown report;",
         "                       --export-template= disables a recipe's",
+        "",
+        "SEARCH (--robot-search):",
+        "  --search QUERY       The query; a bead id returns that bead first",
+        "  --search-mode text|hybrid / --search-preset NAME / --limit N",
+        "  --search-min-score S Minimum text similarity before hybrid ranking",
+        "                       (-1..1); exact ids also obey it",
         "",
         "TRIAGE AND --robot-next:",
         "  --robot-not-ready-labels A,B",

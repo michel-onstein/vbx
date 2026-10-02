@@ -86,10 +86,10 @@ def test_every_difference_is_reported(parity) -> None:
 def test_default_run_covers_every_fixture(parity) -> None:
     print("\nFixtures")
     names = [fixture["name"] for fixture in parity.FIXTURES]
-    check("the demo, the readiness fixture, its beads.db form, the sprints and both feedback"
-          " fixtures are all compared",
+    check("the demo, the readiness fixture, its beads.db form, the sprints, both feedback"
+          " fixtures and the search fixture are all compared",
           names == ["demo", "readiness", "readiness (beads.db)", "sprints", "feedback",
-                    "feedback-few"], str(names))
+                    "feedback-few", "search"], str(names))
     for fixture in parity.FIXTURES:
         path = ROOT / fixture["workspace"] / ".beads" / "issues.jsonl"
         check(f"{fixture['workspace']} exists", path.exists(), str(path))
@@ -424,8 +424,57 @@ def test_report_exports(parity) -> None:
           any("data_hash" in difference for difference in found), str(found))
 
 
+def test_search(parity) -> None:
+    print("\nSearch (vbx-52c)")
+    searches = [entry for entry in parity.COMPARISONS if entry["vbx"] == "robot-search"]
+    names = [entry["name"] for entry in searches]
+    check("each search run has its own name", len(names) == len(set(names)), str(names))
+    compared = [entry for entry in searches if not entry.get("rejects")]
+    check("search compares the ranking and its echo, not the envelope",
+          all(entry.get("keys") == parity.SEARCH_KEYS for entry in compared)
+          and "results" in parity.SEARCH_KEYS and "min_score" in parity.SEARCH_KEYS)
+
+    def runs(fixture: str) -> list[list[str]]:
+        return [entry["bv_args"] for entry in compared if entry["only"] == {fixture}]
+
+    buried = runs("search")
+    check("an exact id the text ranking buries is compared, with its control",
+          ["--search", "tax-7", "--search-limit", "1"] in buried
+          and ["--search", "tax 7", "--search-limit", "3"] in buried, str(buried))
+    check("an id no bead has is compared",
+          any(args[1] == "tax-70" for args in buried), str(buried))
+    check("an exact id under a threshold that drops it is compared",
+          ["--search", "tax-7", "--search-limit", "3", "--search-min-score", "0.5"] in buried)
+    thresholds = {args[-1] for args in runs("demo") if "--search-min-score" in args}
+    check("both bounds, a middle value and the empty value are compared",
+          {"-1", "1", "0.3", ""} <= thresholds, str(thresholds))
+    rejected = {entry["bv_args"][-1] for entry in searches if entry.get("rejects")}
+    check("out-of-range and unparseable thresholds are compared as rejections",
+          {"2", "-1.5", "abc", "NaN"} <= rejected, str(rejected))
+
+    fixture = next(f for f in parity.FIXTURES if f["name"] == "search")
+    check("the search fixture runs only what names it", fixture.get("only_named") is True)
+
+    payload = {"query": "q", "results": [], "provider": "hash", "index": {"total": 1}}
+    check("select_keys keeps only the named keys",
+          parity.select_keys(payload, ("query", "results", "min_score"))
+          == {"query": "q", "results": []})
+    check("select_keys without keys is the identity", parity.select_keys(payload, None) == payload)
+
+    message = 'Error: invalid --search-min-score "2" (expected a finite number from -1 to 1)'
+    check("the same refusal is no difference",
+          parity.rejection_differences((2, message + "\nRun vbx-cli --help."), (2, message)) == [])
+    check("an accepted value is a difference",
+          parity.rejection_differences((0, ""), (2, message)) != [])
+    check("another exit status is a difference",
+          parity.rejection_differences((1, message), (2, message)) != [])
+    check("another message is a difference",
+          parity.rejection_differences((2, "Error: no"), (2, message)) != [])
+
+
 def main() -> int:
     parity = load_parity()
+    test_search(parity)
     test_report_exports(parity)
     test_feedback_recording(parity)
     test_triage_feedback_and_not_ready(parity)
