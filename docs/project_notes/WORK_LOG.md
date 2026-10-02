@@ -5,6 +5,43 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — The nine history commands are bv's correlator, and answer over --label and --recipe (vbx-k7j)
+
+`vbx-cli`'s history, causality, related, impact-network, orphans, file-beads,
+file-hotspots, file-relations and impact matched no bv 0.25.2 output. Their
+reports came from ADR-006's go-git port of an older correlator. They now run
+bv's own `pkg/correlation`, which `scripts/vendor-correlation.py` copies into
+`Engine/bridge/correlation` with its git calls rerouted. A new package,
+`objgit`, answers each git command line in-process from the object store with
+git's own bytes. That needed git's rename detection (diffcore-rename and
+-delta) and xdiff's line counts ported. A minimal diff counted 278 lines on a
+commit where git counts 361. The handlers are bv's, ported, and route
+through `Session.view`. The extraction is cached per session, keyed by HEAD,
+and the cheap assembly runs per scope. `vbx-cli` gains bv's modifiers
+(`--history-limit`, `--history-since`, `--network-depth`, `--related-*`,
+`--orphans-min-score`, `--file-beads-limit`, `--hotspots-limit`,
+`--relations-*`), and the nine are `scoped`. ADR-027 records the design and
+supersedes ADR-006's port.
+
+Triage's staleness now counts every strategy's commits, as bv 0.25.2's does
+(BUGS.md). The app's History view shows bv's report. That brings methods,
+before and after states, temporal links, confirm pinning at 1.0, bv's orphan
+detector at score 30, and bv's id patterns, so a `br` id named in a message
+without a numeric suffix is no longer linked. `vbx-cli --bead-history`
+remains unsupported; `--robot-history --id` is the spelling.
+
+Parity: 0 differing commands before and after. The `history` fixture gains
+75 compared runs: each command unscoped with its modifiers, each under the
+five history scopes, and bv's "not found" errors. On this repository's own
+history, `--robot-history` equals bv's apart from ADR-024's source keys.
+Tests: `objgit_test.go` compares every supported command line with real git,
+including 120 random line diffs. `correlation/vbx_differential_test.go`
+compares reports, orphans and causality with bv's own package spawning git,
+and checks every git call as it is made. `vbx_noexec_test.go` guards against
+anything that starts a process. The engine's history and triage tests,
+`HistoryViewTests` (a new `Fixture.historyStore()` with linked commits), and
+`EngineTests`.
+
 ## 2026-10-02 — A saved baseline records the workspace's commit, without running git (vbx-6s8)
 
 `baseline_save` used bv's `baseline.New`, which runs `git` three times in the

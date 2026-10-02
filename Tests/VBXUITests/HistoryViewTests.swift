@@ -26,10 +26,30 @@ struct HistoryViewTests {
     }
 
     @Test("Loading history populates the report and is idempotent")
-    func loadsHistory() async {
-        let store = await Fixture.loadedStore()
+    func loadsHistory() async throws {
+        let (store, directory) = try await Fixture.historyStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
         await store.loadHistory()
 
+        #expect(store.historyError == nil, "\(store.historyError ?? "")")
+        #expect(store.historyLoaded)
+        // bv's correlator: the claim commit and the commit closing vbx-4.
+        #expect(store.history.stats.totalCommits == 2)
+        #expect(store.history.gitRange == "limit 500 commits")
+        #expect(store.commits(for: "vbx-4").count == 2)
+
+        // A second call must not re-walk; the report stays identical.
+        let before = store.history
+        await store.loadHistory()
+        #expect(store.history == before)
+
+        await store.close()
+    }
+
+    @Test("The fixture inside this repository has a history of events")
+    func fixtureHistoryHasEvents() async {
+        let store = await Fixture.loadedStore()
+        await store.loadHistory()
         guard store.historyError == nil else {
             // A checkout with no git history is a legitimate environment; the
             // view reports it rather than failing. Nothing else to assert.
@@ -37,28 +57,20 @@ struct HistoryViewTests {
             await store.close()
             return
         }
-
         #expect(store.historyLoaded)
-        #expect(store.history.stats.totalCommits > 0)
         #expect(!store.history.gitRange.isEmpty)
-
-        // A second call must not re-walk; the report stays identical.
-        let before = store.history.gitRange
-        await store.loadHistory()
-        #expect(store.history.gitRange == before)
-
+        let events = store.history.histories.values.reduce(0) { $0 + $1.events.count }
+        #expect(events > 0, "the fixture's beads file has a committed history")
         await store.close()
     }
 
     @Test("Every linked commit carries a method and a confidence in range")
-    func linksAreWellFormed() async {
-        let store = await Fixture.loadedStore()
+    func linksAreWellFormed() async throws {
+        let (store, directory) = try await Fixture.historyStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
         await store.loadHistory()
-        guard store.historyError == nil else {
-            await store.close()
-            return
-        }
 
+        #expect(!store.history.allCommits.isEmpty)
         for (_, commit) in store.history.allCommits {
             #expect(commit.confidence > 0 && commit.confidence <= 1)
             #expect(!commit.sha.isEmpty)
@@ -72,22 +84,21 @@ struct HistoryViewTests {
     }
 
     @Test("Linked commits are ordered newest first")
-    func commitsAreOrdered() async {
-        let store = await Fixture.loadedStore()
+    func commitsAreOrdered() async throws {
+        let (store, directory) = try await Fixture.historyStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
         await store.loadHistory()
-        guard store.historyError == nil, store.history.allCommits.count > 1 else {
-            await store.close()
-            return
-        }
 
         let dates = store.history.allCommits.compactMap(\.commit.timestamp)
+        #expect(dates.count == 2)
         #expect(dates == dates.sorted(by: >))
         await store.close()
     }
 
     @Test("The history view renders its commit tab")
     func rendersCommits() async throws {
-        let store = await Fixture.loadedStore()
+        let (store, directory) = try await Fixture.historyStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
         await store.loadHistory()
 
         let result = try Snapshot.render(
@@ -95,11 +106,10 @@ struct HistoryViewTests {
             name: "history-commits",
             size: CGSize(width: 900, height: 600)
         )
-        // Either the commit list or the "not a git repository" state — both
-        // are real states this view must draw.
         let state =
             "loaded=\(store.historyLoaded) error=\(store.historyError ?? "none") "
             + "commits=\(store.history.stats.totalCommits)"
+        #expect(store.history.stats.totalCommits > 0, "\(state)")
         #expect(result.inkCoverage() > 0.005, "history view drew almost nothing; \(state)")
         await store.close()
     }

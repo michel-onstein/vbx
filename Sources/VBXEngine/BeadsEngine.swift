@@ -298,12 +298,14 @@ public actor BeadsEngine {
 
     // MARK: - Git correlation
     //
-    // The report is built by reading the object store directly, so these work
-    // under the App Sandbox where a `git` subprocess would not. The first call
-    // walks the history and is slow; the engine caches it until the bead set
-    // changes.
+    // bv's own correlator, whose git calls the engine answers from the object
+    // store, so these work under the App Sandbox where a `git` subprocess
+    // would not (ADR-027). The first call walks the history and is slow; the
+    // engine caches the walk until HEAD moves or the bead set changes. Each
+    // request key is named after the bv flag it carries.
 
-    /// The whole bead-to-commit correlation report.
+    /// The whole bead-to-commit correlation report. `limit` is bv's
+    /// --history-limit, the commits walked; 0 keeps bv's default of 500.
     public func history(limit: Int = 0, refresh: Bool = false) throws -> HistoryReport {
         try call("history", request: request(limit: limit, refresh: refresh), as: HistoryReport.self)
     }
@@ -313,10 +315,11 @@ public actor BeadsEngine {
         try call("causality", request: ["id": id], as: CausalityResult.self)
     }
 
-    /// Beads that touched the same files, commits or window as `id`.
+    /// Beads that touched the same files, commits or window as `id`, at most
+    /// `limit` per category (bv's --related-max-results; 0 keeps its 10).
     public func relatedWork(_ id: String, limit: Int = 0) throws -> RelatedWork {
         var req: [String: Any] = ["id": id]
-        if limit > 0 { req["limit"] = limit }
+        if limit > 0 { req["related_max_results"] = limit }
         return try call("related", request: req, as: RelatedWork.self)
     }
 
@@ -328,7 +331,7 @@ public actor BeadsEngine {
 
     /// Files ranked by how many beads have touched them.
     public func fileHotspots(limit: Int = 25) throws -> FileHotspots {
-        try call("file_hotspots", request: ["limit": limit], as: FileHotspots.self)
+        try call("file_hotspots", request: ["hotspots_limit": limit], as: FileHotspots.self)
     }
 
     /// Files that change alongside `path`.
@@ -337,11 +340,12 @@ public actor BeadsEngine {
     ) throws -> CoChangeResult {
         try call(
             "file_relations",
-            request: ["path": path, "threshold": threshold, "limit": limit],
+            request: ["path": path, "relations_threshold": threshold, "relations_limit": limit],
             as: CoChangeResult.self)
     }
 
-    /// Commits no bead accounts for.
+    /// Commits no bead accounts for that bv's detector scores at 30 or more
+    /// (its --orphans-min-score default), within the walked window.
     public func orphanCommits(limit: Int = 0) throws -> OrphanReport {
         try call("orphans", request: request(limit: limit, refresh: false), as: OrphanReport.self)
     }
@@ -573,7 +577,7 @@ public actor BeadsEngine {
 
     private func request(limit: Int, refresh: Bool) -> [String: Any] {
         var req: [String: Any] = [:]
-        if limit > 0 { req["limit"] = limit }
+        if limit > 0 { req["history_limit"] = limit }
         if refresh { req["refresh"] = true }
         return req
     }

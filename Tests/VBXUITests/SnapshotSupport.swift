@@ -408,6 +408,70 @@ enum Fixture {
         return (store, directory)
     }
 
+    /// A store over a git repository whose history links commits to a bead
+    /// the way bv's correlator does: the fixture committed, then vbx-4 claimed
+    /// in the same commit as new code (co-committed), then a code commit whose
+    /// message closes it (explicit id). The demo fixture itself sits inside
+    /// this repository, where no commit changes its beads beside code under
+    /// it, so its own history has events but no linked commits.
+    ///
+    /// Returns the store and the directory, which the caller removes when done.
+    static func historyStore() async throws -> (store: ProjectStore, directory: URL) {
+        let directory = try copy(prefix: "vbx-history")
+        let environment = [
+            "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+            "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+        ].merging(ProcessInfo.processInfo.environment) { mine, _ in mine }
+
+        func git(_ arguments: [String], at date: String) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git"] + arguments
+            process.currentDirectoryURL = directory
+            process.environment = environment.merging(
+                ["GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date]) { _, dated in dated }
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try process.run()
+            process.waitUntilExit()
+        }
+        func write(_ relative: String, _ text: String) throws {
+            let url = directory.appendingPathComponent(relative)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        try git(["init", "-q"], at: "2026-08-01T10:00:00Z")
+        try git(["add", "-A"], at: "2026-08-01T10:00:00Z")
+        try git(["commit", "-qm", "fixture"], at: "2026-08-01T10:00:00Z")
+
+        let beadsURL = directory.appendingPathComponent(".beads/issues.jsonl")
+        let beads = try String(contentsOf: beadsURL, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line in
+                line.contains("\"id\": \"vbx-4\"")
+                    ? line.replacingOccurrences(
+                        of: "\"status\": \"open\"", with: "\"status\": \"in_progress\"")
+                    : String(line)
+            }
+            .joined(separator: "\n")
+        try beads.write(to: beadsURL, atomically: true, encoding: .utf8)
+        try write("Sources/IssueList.swift", "struct IssueList {}\n")
+        try git(["add", "-A"], at: "2026-08-02T10:00:00Z")
+        try git(["commit", "-qm", "Start the issue list"], at: "2026-08-02T10:00:00Z")
+
+        try write("Sources/IssueList.swift", "struct IssueList {\n    var rows: [String]\n}\n")
+        try git(["add", "-A"], at: "2026-08-03T10:00:00Z")
+        try git(["commit", "-qm", "Closes vbx-4: rows in the issue list"], at: "2026-08-03T10:00:00Z")
+
+        let store = ProjectStore()
+        store.loadsHistoryEagerly = false
+        await store.open(path: directory.path)
+        return (store, directory)
+    }
+
     /// Returns the store and the directory, which the caller removes when done.
     static func writableStore() async throws -> (store: ProjectStore, directory: URL) {
         let directory = try copy()

@@ -109,7 +109,9 @@ cache. Snapshots are closer to what the app actually draws.
 
 ## ADR-006 — Correlation reads the git object store directly, not `git`
 
-**Date:** 2026-08-20 · **Status:** Accepted, implemented
+**Date:** 2026-08-20 · **Status:** Accepted; the report it describes is superseded by
+ADR-027 (2026-10-02), which keeps its rule — no `git` process — and replaces the
+port below with bv's own correlator
 
 **Context.** bv's `pkg/correlation` reaches git through exactly one choke
 point — a hardcoded `exec.Command("git")` in `gitcmd.go`. It exposes no
@@ -1542,3 +1544,110 @@ recorded at the root, exactly as bv does not. Parity-checked over the
 `discovery` fixture, whose root now carries `Fixtures/feedback`'s four
 verdicts: triage, next and priority from the root, from a member and from
 `notes/`, with and without `--workspace`.
+
+---
+
+## ADR-027 — vbx carries bv's correlator, and answers its git calls from the object store
+
+**Date:** 2026-10-02 · **Status:** Accepted, implemented · **Supersedes:** ADR-006's port of
+the report (its rule — no `git` process — stands)
+
+**Context.** ADR-006 built the history report by walking the object store with
+go-git and handing it to bv's downstream analyses. That port was written
+against an earlier correlator. bv 0.25.2's differs throughout: three strategies
+(co-committed, explicit id, temporal author) merged per commit with `methods`
+and combined confidences, events with `before`/`after` snapshots, a bounded
+walk shared with the orphan detector, `git_range` describing the walk and a
+short data hash of the beads. The nine history commands therefore disagreed
+with bv on every fixture, and so could not be scoped either (vbx-k7j). The
+orchestration that produces bv's report is unexported. `gitCommand`, a
+hardcoded `exec.Command("git")`, is the package's one way to git, and it
+offers no injection point. Re-porting ~5k lines of extraction by hand would
+recreate the drift, one release later.
+
+**Decision.** vbx carries bv's `pkg/correlation` as `Engine/bridge/correlation`.
+`scripts/vendor-correlation.py` generates it from the module cache at the
+version `go.mod` pins: every non-test file byte for byte, under a
+`Code generated … DO NOT EDIT` line, with seven substitutions, each asserted
+to match exactly once. `gitcmd.go` is not copied. `vbx_gitcmd.go` supplies a
+`gitCommand` with the surface the package uses (`Output`, the two pipes,
+`Start`, `Wait`, `Process.Kill`), and it answers the command line in-process
+through `objgit`. `objgit` is a package that understands exactly the git
+invocations the correlator makes (`log` with the walk, batch, `--raw
+--follow` and causal shapes, `show -s`, `rev-parse`, `cat-file --batch` and
+`-s`). It prints the bytes git prints, and refuses anything else with an
+error rather than approximating it. The substitutions are the env shim (bv's
+`internal/env` is not importable; the shim keeps every disk cache off), the
+two places the package names `*exec.Cmd` as a type, and one that always
+takes bv's snapshot extraction. bv proves that extraction byte-identical to
+its `git log -p` path, and choosing it means a patch never has to be
+rendered. `--check` regenerates the copy in memory and fails on any
+difference, and it is in the verify block.
+
+The equality is proven at both layers, in Go tests that may spawn git:
+
+- **The git layer.** `objgit`'s tests run every supported command line
+  through real git and through `objgit` on repositories that exercise renames
+  (exact, edited, same basename, the beads file itself), `--follow` through a
+  copy, merges and equal timestamps, non-UTC dates, multi-paragraph messages,
+  binary files, mode and type changes, excluded directories and quoted paths,
+  and compare the bytes. git's rename detection is ported from diffcore-rename
+  and diffcore-delta, and its line counts from xdiff, because neither a minimal
+  diff nor go-git's rename scoring gives git's numbers. On this repository a
+  minimal diff counted 278 lines where git counts 361.
+- **The report layer.** `vbx_differential_test.go` runs the vendored
+  correlator, with every git call checked against real git as it is made,
+  beside bv's own package spawning git on the same repository: report, orphans
+  and causality, under five option sets, on the parity fixture's history and
+  on one whose beads file is renamed.
+
+The engine's handlers are bv's `handleRobot*` (cmd/bv, not importable),
+ported over the vendored package. The git extraction is cached per session,
+keyed by HEAD and the walk's options. Assembly is cheap and runs per request,
+over the request's scope, so `--label` and `--recipe` give bv's scoped reports
+and feedback applies at once.
+
+**Alternatives.**
+
+- *Re-port the extraction onto go-git.* Rejected: it is the approach ADR-006
+  took, and the reason this ADR exists is that it drifted silently.
+- *Emulate git by data, not by bytes.* That would replace the package's git
+  reading with Go structs. Rejected: it needs edits all through the copied
+  files, so every upgrade is a merge, and it gives up the strongest available
+  check, which is that git's own output is the oracle.
+- *Spawn git in the CLI only.* Rejected: the app and the CLI would build
+  reports differently, which is ADR-001's drift moved inside vbx.
+
+**Consequences.**
+
+- `vbx-cli`'s nine history commands match bv 0.25.2, unscoped and under every
+  scope. The parity harness compares 75 runs on the `history` fixture. On this
+  repository's own 200-commit history, the reports are identical apart from
+  ADR-024's source keys.
+- **Upgrading bv** means bumping `go.mod`, running the script, and running the
+  tests. A new git invocation is refused by `objgit` and fails the
+  differential tests. An exec added outside `gitCommand` fails
+  `TestNoSourceStartsAProcess`.
+- **What differs from git, by construction.** `objgit` reads the repository's
+  own configuration (`core.quotePath`, `diff.renames`) and no global or
+  system file. It does not read `.gitattributes` (binary or diff drivers).
+  `diff.renames=copies` is treated as renames.
+- **What differs from bv, by choice.** vbx's history needs no `.git` in the
+  workspace directory itself: a workspace nested in a repository has a
+  history in vbx where bv says "not a git repository". Triage still applies
+  bv's gate (vbx-8u3). bv's `--bead-history` on a beads file under 64 KB
+  filters with `git log -G'"id":\s*"<id>"'`, and macOS's regex reads `\s` as
+  a literal `s`. A record written `"id": "x"` is then never found. vbx always
+  takes the snapshot path, which bv itself takes above 64 KB, so it finds the
+  record.
+- **The app sees bv's report.** Commits now carry `methods`, events carry
+  `before` and `after`, and temporal-author links appear. A confirmation pins
+  a link at 1.0 and marks it `confirmed`, where ADR-006's port raised it to
+  its method's ceiling. Explicit-id matching is bv's patterns. Those require a
+  numeric suffix, so a commit that names a `br` id like `vbx-8ou` without
+  touching its record is no longer linked; bv's `--id-pattern` is the remedy,
+  not yet ported. Orphans are bv's detector at its default minimum score of 30.
+  Tombstoned beads have no history, as in bv. Triage's staleness counts every
+  strategy's commits, as bv 0.25.2's does (BUGS.md, 2026-10-02).
+- **The copy carries bv's licence.** Its `LICENSE`, rider included, is
+  copied unmodified beside it, as the licence requires of any distribution.

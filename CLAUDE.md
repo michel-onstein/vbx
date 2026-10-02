@@ -17,7 +17,7 @@ box, the README title.
 | [FEATURE_PARITY.md](docs/FEATURE_PARITY.md) | — | Every bv capability mapped to a vbx surface and delivery phase | Living |
 | [RELEASES.md](docs/RELEASES.md) | ADR-013 | User-facing changes per release — generated from the git tags, never edited | Generated |
 | [project_notes/BUGS.md](docs/project_notes/BUGS.md) | — | Bug log with the regression test locking each fix in | Living |
-| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…026 | Architectural decisions and their trade-offs | Living |
+| [project_notes/DECISIONS.md](docs/project_notes/DECISIONS.md) | ADR-001…027 | Architectural decisions and their trade-offs | Living |
 | [project_notes/KEY_FACTS.md](docs/project_notes/KEY_FACTS.md) | — | Toolchain, commands, layout, gotchas | Living |
 | [project_notes/WORK_LOG.md](docs/project_notes/WORK_LOG.md) | — | Dated work log | Living |
 
@@ -261,6 +261,16 @@ them.
   `Probe` and `load` both ask it. Parity over a workspace must run outside
   this checkout, because from inside it discovery reaches this repository's
   own `.beads`. See ADR-026.
+- **`Engine/bridge/correlation` is bv's `pkg/correlation`, generated — never
+  edit it.** `scripts/vendor-correlation.py` copies it from the module cache at
+  the version `go.mod` pins, with seven asserted substitutions, and `--check`
+  in the verify block fails on any hand edit. vbx's own files there are
+  `vbx_*.go` and `internal/env`. Its one way to git, `gitCommand`, runs
+  `objgit` in-process, which answers each command line from the object store
+  with the bytes git prints and **refuses** any it does not know — so a bv
+  upgrade that adds a git call fails the differential tests instead of
+  approximating. Never make `objgit` guess at an invocation. Port git's
+  behaviour, and prove it against real git in a test. See ADR-027.
 - **Triage includes a bounded git-history walk**, because bv's does and it
   moves the scores. It is capped at 200 commits with a 10 s timeout, and
   reports `history_status` so an absent staleness signal is distinguishable
@@ -303,6 +313,7 @@ python3 scripts/test-packaging.py   # signing, redaction, universal, version, ca
 python3 scripts/release-notes.py --check  # docs/RELEASES.md matches the tags
 python3 scripts/build-docs.py --check     # docs/html matches docs/*.md
 python3 scripts/beads-check.py            # every bead is stamped with this repo
+python3 scripts/vendor-correlation.py --check  # Engine/bridge/correlation is bv's
 swift test                          # Swift suite
 cd Engine/bridge && go test ./...   # Go suite
 gofmt -l Engine/bridge              # must print nothing

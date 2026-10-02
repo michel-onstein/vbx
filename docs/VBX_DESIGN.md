@@ -601,11 +601,11 @@ a member with no history as `unknown_ids` rather than leaving them to read as ad
   [ADR-025](project_notes/DECISIONS.md).
 - Git history requires reading `.git`, which is inside the granted folder, so no extra
   entitlement is needed — *provided* correlation reads the object database directly rather
-  than spawning `git`. `bv` currently shells out (`pkg/correlation/gitcmd.go`).
-  **Decision:** for the sandboxed app, route correlation through a Go path that reads the
-  object store directly; keep the subprocess path for `vbx-cli`, which is not sandboxed.
-  This is the one place the engine needs an upstream-friendly patch, and it is worth
-  contributing back.
+  than spawning `git`. `bv` shells out (`pkg/correlation/gitcmd.go`). **Built:** the engine
+  carries bv's correlation package unchanged but for that one file, and answers each git
+  command line it runs from the object store with git's own bytes (`objgit`). The app and
+  `vbx-cli` share that one path. See ADR-027. An injectable runner upstream would remove
+  the copy, and is worth contributing back.
 - bv 0.25 also spawns `br update --help` to bind each bead to its live tracker, which is
   where claim and show commands come from. Only `vbx-cli` opens a session with
   `live_tracker_actions`; in the app every bead's actions say why they are unavailable

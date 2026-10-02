@@ -20,9 +20,10 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
-	"github.com/Dicklesworthstone/beads_viewer/pkg/correlation"
+	bvcorrelation "github.com/Dicklesworthstone/beads_viewer/pkg/correlation"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/loader"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
+	"github.com/qjam/vbx/engine/correlation"
 )
 
 // OpenConfig is the payload accepted by Open.
@@ -137,9 +138,8 @@ type Session struct {
 	// Correlation state, guarded separately: walking the object store is slow
 	// enough that it must not hold the analysis lock, and it is only built on
 	// demand because most sessions never ask for history at all.
-	historyMu    sync.Mutex
-	history      *historyResult
-	historyLimit int
+	historyMu        sync.Mutex
+	historyArtifacts map[string]*correlation.HistoryArtifact
 
 	// clockMu serialises use of the analyzer's reference instant. The
 	// analyzer outlives any one call, so each call that reads its clock sets
@@ -959,8 +959,8 @@ func (s *Session) triage(req []byte) ([]byte, error) {
 		if gated := s.triageHistoryGate(); gated != "" {
 			historyStatus = gated
 		} else {
-			report, status := s.triageHistory()
-			opts.History = historyForTriage(report)
+			report, status := s.triageHistory(issues)
+			opts.History = report
 			historyStatus = status
 		}
 	}
@@ -977,61 +977,6 @@ func (s *Session) triage(req []byte) ([]byte, error) {
 		analysis.TriageResult
 		Feedback *analysis.FeedbackJSON `json:"feedback,omitempty"`
 	}{result, s.feedbackBlock()}, v.dataHash, v.scope)
-}
-
-// historyForTriage narrows a report to the activity signal bv's triage sees.
-//
-// vbx correlates a commit to a bead two ways: the commit edited the bead's
-// record beside some code (co-committed), or the commit *message* names the
-// bead (explicit). bv's triage path only ever sees the first — it derives its
-// commits from the beads-file events, and its `ExplicitMatcher` is never
-// constructed anywhere in bv — so a commit that mentions a bead without
-// touching its record is activity to vbx and nothing at all to bv.
-//
-// That is not cosmetic. `ComputeStaleness` takes the latest of a bead's events
-// and commits, so an explicit-only commit makes a bead look freshly worked and
-// drops it out of `stale_count`, and staleness is 10 % of the triage score:
-// the whole ranking shifts. Reproduced against bv v0.20.0 with one bead
-// mentioned in a commit touching no bead record — bv reported 3 stale, vbx 2.
-//
-// The narrowing keeps commits whose SHA also appears among the bead's own
-// events, which is exactly the set bv derives, rather than filtering on the
-// method label: a commit that both names a bead and edits its record is
-// recorded as explicit here but is a co-commit to bv, and dropping it by label
-// would swap one divergence for another.
-//
-// Explicit correlation is untouched everywhere else. It is the History view's
-// whole point, and it is genuinely better — bv's own patterns require a
-// numeric suffix and so miss every `br`-minted id. Only triage's staleness has
-// to agree with bv, so only triage's copy is narrowed; the cached report the
-// History view reads is left alone.
-func historyForTriage(report *correlation.HistoryReport) *correlation.HistoryReport {
-	if report == nil {
-		return nil
-	}
-
-	histories := make(map[string]correlation.BeadHistory, len(report.Histories))
-	for id, history := range report.Histories {
-		fromEvents := make(map[string]struct{}, len(history.Events))
-		for _, event := range history.Events {
-			fromEvents[event.CommitSHA] = struct{}{}
-		}
-
-		kept := make([]correlation.CorrelatedCommit, 0, len(history.Commits))
-		for _, commit := range history.Commits {
-			if _, ok := fromEvents[commit.SHA]; ok {
-				kept = append(kept, commit)
-			}
-		}
-		// A copy: the report is cached and shared with the History view, which
-		// must keep every correlation this drops.
-		history.Commits = kept
-		histories[id] = history
-	}
-
-	narrowed := *report
-	narrowed.Histories = histories
-	return &narrowed
 }
 
 // hasOpenIssues reports whether there is anything left to triage.
@@ -1081,19 +1026,20 @@ func (s *Session) triageHistoryGate() string {
 	return ""
 }
 
-// triageHistory fetches the correlation report within a bounded time.
+// triageHistory fetches the correlation report within a bounded time — bv's
+// generateTriageHistoryBounded, over the triage's own issues.
 //
 // Returns bv's own vocabulary for what happened — "ok", "timeout" or "error" —
 // which travels in the payload so a caller can tell a low staleness signal
 // from an absent one.
-func (s *Session) triageHistory() (*correlation.HistoryReport, string) {
+func (s *Session) triageHistory(issues []model.Issue) (*bvcorrelation.HistoryReport, string) {
 	type outcome struct {
-		report *historyResult
+		report *bvcorrelation.HistoryReport
 		err    error
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		report, err := s.correlationHistory(triageHistoryLimit, false)
+		report, err := s.triageReport(issues)
 		done <- outcome{report, err}
 	}()
 
@@ -1104,7 +1050,7 @@ func (s *Session) triageHistory() (*correlation.HistoryReport, string) {
 			// is not a failure of triage.
 			return nil, "error"
 		}
-		return result.report.report, "ok"
+		return result.report, "ok"
 	case <-time.After(triageHistoryTimeout):
 		return nil, "timeout"
 	}

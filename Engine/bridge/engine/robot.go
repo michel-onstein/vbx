@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Dicklesworthstone/beads_viewer/pkg/analysis"
-	"github.com/Dicklesworthstone/beads_viewer/pkg/correlation"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/export"
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
@@ -618,28 +617,4 @@ func (s *Session) graphExport(req []byte) ([]byte, error) {
 	// exporter returns an empty graph — an unknown label — and leaves it unset.
 	result.DataHash = dataHash
 	return s.withProvenance(result, dataHash, v.scope)
-}
-
-// fileImpact rates the risk of touching a set of files.
-func (s *Session) fileImpact(req []byte) ([]byte, error) {
-	var r struct {
-		Files []string `json:"files"`
-		Limit int      `json:"limit"`
-	}
-	if len(req) == 0 {
-		return nil, fmt.Errorf("file_impact requires \"files\"")
-	}
-	if err := json.Unmarshal(req, &r); err != nil {
-		return nil, err
-	}
-	if len(r.Files) == 0 {
-		return nil, fmt.Errorf("file_impact requires a non-empty \"files\"")
-	}
-
-	result, err := s.correlationHistory(r.Limit, false)
-	if err != nil {
-		return nil, err
-	}
-	lookup := correlation.NewFileLookup(result.report)
-	return json.Marshal(lookup.ImpactAnalysis(r.Files))
 }

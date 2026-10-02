@@ -48,6 +48,8 @@ swift test                          # Swift suite
 cd Engine/bridge && go test ./...   # Go suite
 python3 scripts/test-packaging.py   # signing config, redaction, leak guard
 python3 scripts/build-docs.py       # regenerate docs/html
+python3 scripts/vendor-correlation.py          # regenerate Engine/bridge/correlation
+python3 scripts/vendor-correlation.py --check  # prove it is bv's, as go.mod pins it
 ```
 
 Distribution:
@@ -89,6 +91,8 @@ view snapshots for inspection.
 | Path | Contents |
 |---|---|
 | `Engine/bridge/engine` | Go session wrapper over bv's `pkg/*`, plus a SQLite reader |
+| `Engine/bridge/correlation` | bv's `pkg/correlation`, **generated** by `scripts/vendor-correlation.py` — never edit it. `vbx_*.go` and `internal/env` are vbx's own: the in-process `gitCommand`, the artifact split, the env shim (ADR-027) |
+| `Engine/bridge/objgit` | Answers the git command lines the correlator runs from the object store, byte for byte as git prints them: log, show, rev-parse, cat-file, with git's rename detection and xdiff's line counts ported (ADR-027) |
 | `Engine/bridge/cbridge` | C ABI (`vbx_open` / `vbx_call` / `vbx_close` / `vbx_free` / `vbx_probe`) |
 | `Engine/smoke` | C ABI smoke test |
 | `Engine/build` | Generated archive — **gitignored**, rebuild with the script |
@@ -104,7 +108,7 @@ view snapshots for inspection.
 | `Fixtures/dropped` | 4 valid beads, a line cut off mid-record and one whose `updated_at` precedes its `created_at`: what bv's `load_stats` counts. Deliberately unwritable by `br`. Tests and parity only, as JSONL and as a `beads.db` |
 | `Fixtures/dropped-workspace` | Two repositories (`api`, `web`) under one `.bv/workspace.yaml`; `web` holds a line cut off mid-record. Parity's workspace claim gate (vbx-koc) and, with the demo's `.beads` added at the root, its discovery comparisons (vbx-1y5). Parity copies it out of this repository first: from inside, discovery reaches the repository's own `.beads` and never the workspace (ADR-026) |
 | `Fixtures/feedback`, `Fixtures/feedback-few` | The same 8 beads with a triage `feedback.json` of 4 verdicts (applied: fb-5 outranks the hub fb-1) and of 2 (reported, not applied); fb-6 carries the not-ready label `needs-design`. Tests and parity only |
-| parity's `history` fixture (no directory) | A git repository `parity-check.py` builds at run time (`build_history_workspace`): 8 beads over 13 commits with fixed authors and dates, so the SHAs never change, a tombstone and a late dependency cycle, plus a drift baseline bv saves from the day-4 beads. `--workspace history` runs it alone. Diff and drift parity (vbx-9gl) |
+| parity's `history` fixture (no directory) | A git repository `parity-check.py` builds at run time (`build_history_workspace`): 8 beads over 13 commits with fixed authors and dates, so the SHAs never change, a tombstone and a late dependency cycle, plus a drift baseline bv saves from the day-4 beads. `--workspace history` runs it alone. Diff and drift parity (vbx-9gl), and the nine history commands' (vbx-k7j). Its JSONL is written by Python, `"id": "x"` with a space, which bv's `--bead-history` cannot find on macOS (ADR-027) |
 | `Resources` | App icon: generated `vbx-icon.svg` and the committed `vbx.icns` |
 | `Resources/entitlements` | Developer ID entitlements, plus the App Store *template* |
 | `docs/images` | `vbx-icon.png`, the same artwork at 512px for the README |
@@ -131,6 +135,12 @@ view snapshots for inspection.
   `SSH_AUTH_SOCK`, …) from a hook's environment unless the hook's own `env:`
   re-grants them. Only a session opened with `export_hooks` runs a hook, and
   the app never opens one: the sandbox forbids the subprocess (vbx-uos).
+- **A bv upgrade regenerates the correlation copy.** Bump `go.mod`, run
+  `python3 scripts/vendor-correlation.py`, then `go test ./...`: a git command
+  line the new correlator runs that `objgit` does not know is refused, and the
+  differential tests (`objgit_test.go`, `correlation/vbx_differential_test.go`)
+  fail on it. They compare against real git and real bv, so they need `git` on
+  PATH; the package itself never runs it.
 - **This repo's own `.beads` store is empty** (0 issues). Point vbx at
   `Fixtures/demo` for anything with a real dependency graph.
 - **bv's `--feedback-*` flags are not pinned by `SOURCE_DATE_EPOCH`.** The

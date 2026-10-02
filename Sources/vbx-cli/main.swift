@@ -38,9 +38,10 @@ enum ScopeRule {
     /// a recipe that does not resolve fails the command, and otherwise the
     /// flags change nothing.
     case validated
-    /// bv scopes the command and vbx does not yet (vbx-k7j). Either flag is
-    /// refused rather than answered over every bead, which would look like a
-    /// scoped answer and not be one.
+    /// bv scopes the command and vbx does not yet: --save-baseline, which
+    /// vbx saves over the whole workspace. Either flag is refused rather than
+    /// answered over every bead, which would look like a scoped answer and
+    /// not be one.
     case unported
 }
 
@@ -126,6 +127,47 @@ struct RobotCommand {
 /// Raised when the arguments are wrong, which is exit code 2 rather than 1.
 struct UsageError: Error {
     let message: String
+}
+
+/// The request keys every history command shares: bv's --history-limit.
+func historyRequest(_ options: Options) -> [String: Any] {
+    var request: [String: Any] = [:]
+    if let value = options.historyLimit { request["history_limit"] = value }
+    return request
+}
+
+/// bv's --related-min-relevance: an int percent 0-100, or — when the value
+/// holds a "." — a fraction 0.0-1.0, rounded to the nearest percent.
+func parsePercentOrFraction(_ raw: String, flag: String) throws -> Int {
+    let value = raw.trimmingCharacters(in: .whitespaces)
+    if value.contains(".") {
+        guard let fraction = Double(value) else {
+            throw UsageError(message:
+                "--\(flag): \"\(value)\" is not a number (expected int 0-100 percent OR float 0.0-1.0 fraction)")
+        }
+        guard fraction >= 0, fraction <= 1 else {
+            throw UsageError(message:
+                "--\(flag): float \(fraction) out of range (expected 0.0-1.0 fraction; for percent use int 0-100)")
+        }
+        return Int(fraction * 100 + 0.5)
+    }
+    guard let percent = Int(value) else {
+        throw UsageError(message:
+            "--\(flag): \"\(value)\" is not an integer (expected int 0-100 percent OR float 0.0-1.0 fraction)")
+    }
+    guard percent >= 0, percent <= 100 else {
+        throw UsageError(message:
+            "--\(flag): int \(percent) out of range (expected 0-100 percent; for fraction use float 0.0-1.0)")
+    }
+    return percent
+}
+
+/// An integer flag's value, refused as a usage error when it is not one.
+func intValue(_ raw: String, flag: String) throws -> Int {
+    guard let value = Int(raw.trimmingCharacters(in: .whitespaces)) else {
+        throw UsageError(message: "invalid argument \"\(raw)\" for \(flag)")
+    }
+    return value
 }
 
 func requireID(_ options: Options, for flag: String) throws -> String {
@@ -274,72 +316,101 @@ let robotCommands: [RobotCommand] = [
     RobotCommand(
         "robot-search-presets", method: "search_presets", summary: "Available weight presets"),
 
-    // History and correlation. bv builds each report from its scoped issues;
-    // vbx's report is the whole workspace's, and its shapes predate bv 0.25.2's
-    // correlator, so the scope is refused until both are ported (vbx-k7j).
+    // History and correlation: bv's handlers over bv's correlator, whose git
+    // calls the engine answers from the object store (ADR-027). Each report
+    // is built from the scope's beads, as bv builds it from its scoped
+    // issues. bv takes the bead, path or files as the flag's value; vbx-cli
+    // takes --id, --file and --files, as for every other command.
     RobotCommand(
         "robot-history", method: "history", summary: "Bead-to-commit correlation",
-        scope: .unported,
+        scope: .scoped,
         request: { options in
-            var request: [String: Any] = [:]
+            var request = historyRequest(options)
             if let value = options.id { request["id"] = value }
-            if let value = options.limit { request["limit"] = value }
-            return request.isEmpty ? nil : request
+            if let value = options.historySince { request["history_since"] = value }
+            if let value = options.minConfidence { request["min_confidence"] = value }
+            return request
         }),
     RobotCommand(
         "robot-causality", method: "causality", summary: "One bead's causal chain",
-        scope: .unported,
-        request: { options in ["id": try requireID(options, for: "robot-causality")] }),
+        scope: .scoped, bvErrorText: true,
+        request: { options in
+            var request = historyRequest(options)
+            request["id"] = try requireID(options, for: "robot-causality")
+            if let value = options.historySince { request["history_since"] = value }
+            return request
+        }),
     RobotCommand(
         "robot-related", method: "related", summary: "Related work",
-        scope: .unported,
-        request: { options in ["id": try requireID(options, for: "robot-related")] }),
+        scope: .scoped, bvErrorText: true,
+        request: { options in
+            var request = historyRequest(options)
+            request["id"] = try requireID(options, for: "robot-related")
+            if let value = options.relatedMinRelevance { request["related_min_relevance"] = value }
+            if let value = options.relatedMaxResults { request["related_max_results"] = value }
+            if options.relatedIncludeClosed { request["related_include_closed"] = true }
+            return request
+        }),
     RobotCommand(
         "robot-impact-network", method: "impact_network", summary: "Bead impact network",
-        scope: .unported,
+        scope: .scoped, bvErrorText: true,
         request: { options in
-            var request: [String: Any] = [:]
+            var request = historyRequest(options)
             if let value = options.id { request["id"] = value }
-            if let value = options.depth { request["depth"] = value }
-            return request.isEmpty ? nil : request
+            if let value = options.networkDepth { request["network_depth"] = value }
+            return request
         }),
     RobotCommand(
         "robot-orphans", method: "orphans", summary: "Commits no bead accounts for",
-        scope: .unported,
-        request: { options in options.limit.map { ["limit": $0] } }),
+        scope: .scoped,
+        request: { options in
+            var request = historyRequest(options)
+            if let value = options.orphansMinScore { request["orphans_min_score"] = value }
+            return request
+        }),
     RobotCommand(
         "robot-file-beads", method: "file_beads", summary: "Beads that touched a file",
-        scope: .unported,
+        scope: .scoped,
         request: { options in
             guard let path = options.file else {
                 throw UsageError(message: "--robot-file-beads requires --file")
             }
-            return ["path": path]
+            var request = historyRequest(options)
+            request["path"] = path
+            if let value = options.fileBeadsLimit { request["file_beads_limit"] = value }
+            return request
         }),
     RobotCommand(
         "robot-file-hotspots", method: "file_hotspots", summary: "Most-touched files",
-        scope: .unported,
-        request: { options in options.limit.map { ["limit": $0] } }),
+        scope: .scoped,
+        request: { options in
+            var request = historyRequest(options)
+            if let value = options.hotspotsLimit { request["hotspots_limit"] = value }
+            return request
+        }),
     RobotCommand(
         "robot-file-relations", method: "file_relations", summary: "Co-change partners",
-        scope: .unported,
+        scope: .scoped,
         request: { options in
             guard let path = options.file else {
                 throw UsageError(message: "--robot-file-relations requires --file")
             }
-            var request: [String: Any] = ["path": path]
-            if let value = options.threshold { request["threshold"] = value }
-            if let value = options.limit { request["limit"] = value }
+            var request = historyRequest(options)
+            request["path"] = path
+            if let value = options.relationsThreshold { request["relations_threshold"] = value }
+            if let value = options.relationsLimit { request["relations_limit"] = value }
             return request
         }),
     RobotCommand(
         "robot-impact", method: "file_impact", summary: "Risk of changing files",
-        scope: .unported,
+        scope: .scoped,
         request: { options in
             guard let files = options.files, !files.isEmpty else {
                 throw UsageError(message: "--robot-impact requires --files")
             }
-            return ["files": files]
+            var request = historyRequest(options)
+            request["files"] = files
+            return request
         }),
     // bv loads and scopes issues first, then reports the feedback file alone.
     RobotCommand(
@@ -567,6 +638,22 @@ struct Options {
     var maxResults: Int?
     var minConfidence: Double?
     var threshold: Double?
+    /// The history commands' modifiers, under bv's names: --history-limit,
+    /// --history-since, --hotspots-limit, --relations-threshold,
+    /// --relations-limit, --file-beads-limit, --network-depth,
+    /// --related-min-relevance, --related-max-results,
+    /// --related-include-closed and --orphans-min-score.
+    var historyLimit: Int?
+    var historySince: String?
+    var hotspotsLimit: Int?
+    var relationsThreshold: Double?
+    var relationsLimit: Int?
+    var fileBeadsLimit: Int?
+    var networkDepth: Int?
+    var relatedMinRelevance: Int?
+    var relatedMaxResults: Int?
+    var relatedIncludeClosed = false
+    var orphansMinScore: Int?
     var byLabel: String?
     var byAssignee: String?
     var notReadyLabels: String?
@@ -679,6 +766,25 @@ func parseArguments() throws -> Options {
         case "--max-results": options.maxResults = Int(try next(arg))
         case "--min-confidence": options.minConfidence = Double(try next(arg))
         case "--threshold": options.threshold = Double(try next(arg))
+        case "--history-limit": options.historyLimit = try intValue(try next(arg), flag: arg)
+        case "--history-since": options.historySince = try next(arg)
+        case "--hotspots-limit": options.hotspotsLimit = try intValue(try next(arg), flag: arg)
+        case "--relations-threshold":
+            let raw = try next(arg)
+            guard let value = Double(raw) else {
+                throw UsageError(message: "invalid argument \"\(raw)\" for \(arg)")
+            }
+            options.relationsThreshold = value
+        case "--relations-limit": options.relationsLimit = try intValue(try next(arg), flag: arg)
+        case "--file-beads-limit": options.fileBeadsLimit = try intValue(try next(arg), flag: arg)
+        case "--network-depth": options.networkDepth = try intValue(try next(arg), flag: arg)
+        case "--related-min-relevance":
+            options.relatedMinRelevance = try parsePercentOrFraction(
+                try next(arg), flag: "related-min-relevance")
+        case "--related-max-results":
+            options.relatedMaxResults = try intValue(try next(arg), flag: arg)
+        case "--related-include-closed": options.relatedIncludeClosed = true
+        case "--orphans-min-score": options.orphansMinScore = try intValue(try next(arg), flag: arg)
         case "--by-label": options.byLabel = try next(arg)
         case "--by-assignee": options.byAssignee = try next(arg)
         // A modifier spelled like a command, so it is matched before the
@@ -706,7 +812,7 @@ func parseArguments() throws -> Options {
             }
             options.baselineDescription = value
         default:
-            if arg.hasPrefix("--robot-") || arg == "--bead-history" {
+            if arg.hasPrefix("--robot-") {
                 try select(arg)
             } else if arg.hasPrefix("-") {
                 throw UsageError(message: "unknown flag \(arg)")
@@ -756,7 +862,7 @@ func parseArguments() throws -> Options {
         for (flag, value) in [("label", options.label), ("recipe", options.recipe)] {
             if let value, !value.isEmpty {
                 throw UsageError(
-                    message: "--\(flag) does not scope --\(name) in vbx-cli yet (vbx-k7j)")
+                    message: "--\(flag) does not scope --\(name) in vbx-cli yet")
             }
         }
     }
@@ -851,7 +957,7 @@ func usageText() -> String {
     lines.append(contentsOf: wrapped(
         "Scoped: " + scopeNames(.scoped), indent: "                       "))
     lines.append(contentsOf: wrapped(
-        "Refused, not yet scoped (vbx-k7j): " + scopeNames(.unported),
+        "Refused, not yet scoped: " + scopeNames(.unported),
         indent: "                       "))
     lines.append(contentsOf: [
         "",
@@ -873,6 +979,19 @@ func usageText() -> String {
         "  --search-mode text|hybrid / --search-preset NAME / --limit N",
         "  --search-min-score S Minimum text similarity before hybrid ranking",
         "                       (-1..1); exact ids also obey it",
+        "",
+        "HISTORY (--robot-history and the correlation commands, bv's flags):",
+        "  --id ID              The bead: --robot-history --id is bv's --bead-history",
+        "  --file PATH / --files A,B",
+        "                       The file for --robot-file-beads and",
+        "                       --robot-file-relations; the files for --robot-impact",
+        "  --history-limit N    Commits walked (default 500, 0 for all)",
+        "  --history-since S    History and causality: commits after S",
+        "  --min-confidence C   History: links at or above C (0.0-1.0)",
+        "  --hotspots-limit N / --file-beads-limit N / --relations-limit N",
+        "  --relations-threshold T / --network-depth N (1-3)",
+        "  --related-min-relevance P / --related-max-results N",
+        "  --related-include-closed / --orphans-min-score N",
         "",
         "FORECAST (--robot-forecast):",
         "  --id ID|all          One bead's ETA, or every open bead's with a summary",
