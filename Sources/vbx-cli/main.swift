@@ -218,6 +218,14 @@ let robotCommands: [RobotCommand] = [
         "robot-drift", method: "drift", summary: "Drift against the saved baseline",
         scope: .scoped, bvErrorText: true, exitsWithPayloadCode: true),
     RobotCommand("robot-baseline", method: "baseline_info", summary: "The saved baseline"),
+    // bv's --save-baseline DESCRIPTION: writes .bv/baseline.json and prints
+    // bv's prose. bv saves the scoped issues; vbx saves the whole workspace,
+    // so the scope is refused rather than ignored.
+    RobotCommand(
+        "save-baseline", method: "baseline_save",
+        summary: "Save the current metrics as the drift baseline", scope: .unported,
+        printsMessage: true, printsLoadWarnings: true,
+        request: { options in ["description": options.baselineDescription ?? ""] }),
 
     // Labels
     RobotCommand(
@@ -562,6 +570,8 @@ struct Options {
     var byLabel: String?
     var byAssignee: String?
     var notReadyLabels: String?
+    /// bv's --save-baseline value: the baseline's description.
+    var baselineDescription: String?
     var exportPath: String?
     var exportMarkdownPath: String?
     var exportFormat: String?
@@ -687,6 +697,14 @@ func parseArguments() throws -> Options {
             options.id = value
         case "--feedback-reset", "--feedback-show":
             try select(arg)
+        case "--save-baseline":
+            try select(arg)
+            // bv reads an empty value as the flag not given.
+            let value = try next(arg)
+            guard !value.isEmpty else {
+                throw UsageError(message: "--save-baseline requires a description")
+            }
+            options.baselineDescription = value
         default:
             if arg.hasPrefix("--robot-") || arg == "--bead-history" {
                 try select(arg)
@@ -865,6 +883,8 @@ func usageText() -> String {
         "DRIFT (--robot-drift, bv's --check-drift --robot-drift):",
         "  Compares the scope against the saved baseline; exits 1 on critical",
         "  drift and 2 on a warning, as bv does",
+        "  --save-baseline DESC Save the current metrics as that baseline",
+        "                       (.bv/baseline.json, in bv's format)",
         "",
         "TRIAGE AND --robot-next:",
         "  --robot-not-ready-labels A,B",

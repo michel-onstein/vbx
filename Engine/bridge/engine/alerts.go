@@ -432,7 +432,9 @@ func (s *Session) saveBaseline(req []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	saved := baseline.New(stats, s.currentTopMetrics(whole), cycles, r.Description)
+	// Not baseline.New: it runs `git` in the process's working directory,
+	// which is neither the workspace nor allowed in the app (vbx-6s8).
+	saved := newWorkspaceBaseline(dir, stats, s.currentTopMetrics(whole), cycles, r.Description)
 	path := baseline.DefaultPath(dir)
 	if err := saved.Save(path); err != nil {
 		return nil, fmt.Errorf("saving baseline to %s: %w", path, err)
@@ -442,14 +444,19 @@ func (s *Session) saveBaseline(req []byte) ([]byte, error) {
 	// with baseline_info, and a caller decoding it would otherwise read the
 	// baseline it just wrote as absent.
 	return json.Marshal(map[string]any{
-		"exists":      true,
-		"path":        path,
-		"created_at":  saved.CreatedAt,
-		"description": saved.Description,
-		"commit_sha":  saved.CommitSHA,
-		"branch":      saved.Branch,
-		"summary":     saved.Summary(),
-		"stats":       saved.Stats,
+		"exists":         true,
+		"path":           path,
+		"created_at":     saved.CreatedAt,
+		"description":    saved.Description,
+		"commit_sha":     saved.CommitSHA,
+		"commit_message": saved.CommitMessage,
+		"branch":         saved.Branch,
+		"summary":        saved.Summary(),
+		"stats":          saved.Stats,
+		// bv's --save-baseline output, word for word, which vbx-cli prints —
+		// less the final newline, which its print adds back.
+		"message": strings.TrimSuffix(
+			fmt.Sprintf("Baseline saved to %s\n", path)+saved.Summary(), "\n"),
 	})
 }
 

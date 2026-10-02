@@ -154,6 +154,13 @@ the numbers — it is the same code, fed different input.
 - The walk computes a patch per commit for line counts, so it is capped at
   bv's own `DefaultHistoryLimit` of 500 and cached until the bead set changes.
   An unchanged reload deliberately keeps the cache; only a changed one drops it.
+- **The same rule holds outside correlation.** bv's `baseline.New` stamps a
+  drift baseline through `baseline.GetGitInfo(".")` — three `git` processes in
+  the *process's* directory, which for the engine is not the workspace. The
+  engine builds bv's `baseline.Baseline` itself and reads HEAD's commit,
+  subject and branch from the workspace's object store (vbx-6s8,
+  `baseline_git.go`). Any later bv call that shells out to git gets the same
+  treatment rather than an exception.
 
 ---
 
