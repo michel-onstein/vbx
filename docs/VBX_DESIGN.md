@@ -716,7 +716,7 @@ Native affordances that replace TUI mechanics:
 | **Sprint dashboard** | Burndown | Swift Charts line + ideal-line overlay | At-risk banner; velocity comparison chart |
 | **History** | Timeline + commit list | `Table` + a custom timeline `Canvas` | Confidence badges, causality markers, file-centric drill-down, Quick Look on diffs |
 | **Alerts** | Severity-grouped list | `List` with sections | Optional `UNUserNotificationCenter` delivery for critical alerts while watching |
-| **Semantic search** | Unified search field | `.searchable` + scope bar | Fuzzy ↔ semantic toggle; hybrid weights in a popover |
+| **Semantic search** | Unified search field | `.searchable` + scope bar | Fuzzy ↔ semantic toggle; hybrid weights in a popover; hybrid min-score threshold menu |
 | **Recipes** | Sidebar section + editor | `List` + a form-based recipe editor | Built-in and user recipes; applying one sets filter, sort, and view atomically |
 | **Time travel** | Revision scrubber | Toolbar control + diff badges | Scrubber over recent commits; badges tint rows |
 | **Tutorial** | Onboarding window | A separate `WindowGroup` with progress | Sections mirror `bv`'s; progress persisted; each view links to "learn this view" |

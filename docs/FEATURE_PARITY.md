@@ -31,14 +31,14 @@ state. Built: the six new alert types with `suggested_action` and `labels`
 and in the app (vbx-upz), `.beads/recipes/*.yaml` recipe files — edited and
 deleted in their own file (vbx-7d5) — the multi-repository loader, triage
 feedback, `--export` reports in four formats (vbx-im9), `--search-min-score`
-with bv's guaranteed exact-ID hit (vbx-52c), `--recipe` as a robot scope,
+with bv's guaranteed exact-ID hit (vbx-52c) and its threshold control in the
+app's search scope bar (vbx-c1j), `--recipe` as a robot scope,
 by name or path (vbx-7d5), `.bv/hooks.yaml` export hooks with `--no-hooks`
 in `vbx-cli` (vbx-uos), and `load_stats` in the robot envelope, counted in the
 app's warnings badge (vbx-dv5), and bv's `.beads`-first workspace discovery
 with `--workspace` (vbx-1y5), and the loader's warnings on `vbx-cli`'s
-stderr where bv prints them (vbx-1l6). Not yet built, with a child bead of epic
-vbx-htg: the app's search threshold control (vbx-c1j). A row naming a bead is
-not built until that bead closes.
+stderr where bv prints them (vbx-1l6). Nothing in epic vbx-htg is left unbuilt.
+A row naming a bead is not built until that bead closes.
 
 **Verified rather than asserted.** `scripts/parity-check.py` runs `vbx-cli` and
 `bv` over the same workspace and diffs them command by command, stripping only
@@ -360,7 +360,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-orphans` (+ `--orphans-min-score`, label and recipe scope) | ✓ bv's detector (vbx-k7j) | History orphans tab | 6 |
 | `--robot-explain-correlation`, `--robot-confirm-correlation`, `--robot-reject-correlation`, `--robot-correlation-stats` | ✓ | History feedback controls | 6 |
 | `--robot-search` (+ mode, preset, weights, `--search-limit`) | ✓ | Search field | 6 |
-| `--search-min-score`, guaranteed exact-ID hit (bv 0.25) | ✓ through bv's `SearchTopKWithOptions`; `vbx-cli --search-min-score` with bv's validation and `min_score` echo (vbx-52c). No threshold control in the app yet (vbx-c1j) | Search field (hybrid mode gets the exact-ID hit) | 6 |
+| `--search-min-score`, guaranteed exact-ID hit (bv 0.25) | ✓ through bv's `SearchTopKWithOptions`; `vbx-cli --search-min-score` with bv's validation and `min_score` echo (vbx-52c). In the app, a Min score menu in the search scope bar, hybrid mode only, off by default; a threshold that excludes everything says so in the empty list (vbx-c1j) | Search field (hybrid mode gets the exact-ID hit) + scope bar | 6 |
 | `--robot-suggest` (+ `--suggest-type`, `--suggest-bead`, `--suggest-confidence`) | ✓ | Inspector suggestions | 6 |
 | `--robot-forecast`, `--robot-capacity` (+ agents, forecast-label, forecast-sprint, capacity-label, label and recipe scope) | ✓ | Inspector forecast, sprint scenarios | 6 |
 | `--robot-burndown`, `--robot-sprint-list`, `--robot-sprint-show` | ✓ | Sprint dashboard | 6 |

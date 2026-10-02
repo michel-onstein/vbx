@@ -75,6 +75,137 @@ struct SearchTests {
         await store.close()
     }
 
+    // MARK: - Minimum score
+
+    /// A store over a private copy of `Fixtures/search`, whose six "tax 7"
+    /// beads score high against "tax 7" and whose other three do not.
+    /// A copy because searching writes a vector index into the workspace.
+    private func searchStore() async throws -> (store: ProjectStore, directory: URL) {
+        let source = URL(fileURLWithPath: Fixture.path).deletingLastPathComponent()
+            .appendingPathComponent("search").path
+        let directory = try Fixture.copy(from: source, prefix: "vbx-search")
+        let store = ProjectStore()
+        store.loadsHistoryEagerly = false
+        await store.open(path: directory.path)
+        await store.computePhase2()
+        return (store, directory)
+    }
+
+    @Test("The threshold is off by default")
+    func thresholdOffByDefault() {
+        // Off sends no threshold at all, which is how search behaved before
+        // the control existed.
+        #expect(ProjectStore().searchMinScore == nil)
+    }
+
+    @Test("A min score reaches the engine and drops hits below it")
+    func minScoreFilters() async throws {
+        let (store, directory) = try await searchStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        store.query.searchText = "tax 7"
+        store.searchMode = .hybrid
+        await store.runEngineSearch()
+        let unfiltered = store.searchResults
+        #expect(unfiltered.minScore == nil, "no threshold was asked for, so none is echoed")
+        #expect(unfiltered.results.count == store.issues.count)
+
+        // A threshold between the weakest and strongest similarity: some hits
+        // must go, some must stay, whichever way the embedder lands.
+        let scores = unfiltered.results.map(\.textScore).sorted()
+        let threshold = try #require(
+            zip(scores, scores.dropFirst()).first { $0 < $1 }.map { ($0 + $1) / 2 })
+
+        store.searchMinScore = threshold
+        await store.runEngineSearch()
+
+        // The engine echoes the threshold, which is the proof it was sent.
+        #expect(store.searchResults.minScore == threshold)
+        #expect(!store.searchResults.isEmpty)
+        #expect(store.searchResults.results.count < unfiltered.results.count)
+        #expect(store.searchResults.results.allSatisfy { $0.textScore >= threshold })
+        #expect(store.visibleIssues.map(\Bead.id) == store.searchResults.rankedIDs)
+        #expect(store.searchThresholdExcludedAll == nil)
+
+        await store.close()
+    }
+
+    @Test("A threshold nothing reaches empties the list and says why")
+    func thresholdExcludesAll() async throws {
+        let (store, directory) = try await searchStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        store.query.searchText = "tax 7"
+        store.searchMode = .hybrid
+        store.searchMinScore = 1.0
+        await store.runEngineSearch()
+
+        #expect(store.searchResults.isEmpty)
+        #expect(store.searchThresholdExcludedAll == 1.0)
+        // Not the fuzzy fallback: that would show beads the threshold excluded.
+        #expect(store.isUsingEngineSearch)
+        #expect(store.visibleIssues.isEmpty)
+
+        // Rendered, the list says which threshold and what to do about it —
+        // ink in the middle, where the empty state sits.
+        let size = CGSize(width: 900, height: 400)
+        let result = try Snapshot.render(
+            IssueListView().environmentObject(store).frame(width: size.width, height: size.height),
+            name: "search-threshold-empty", size: size)
+        #expect(
+            result.inkCoverage(in: CGRect(x: 250, y: 120, width: 400, height: 180)) > 0.005,
+            "the empty state drew nothing")
+
+        // Clearing the threshold brings the ranking back.
+        store.searchMinScore = nil
+        await store.runEngineSearch()
+        #expect(store.searchThresholdExcludedAll == nil)
+        #expect(!store.visibleIssues.isEmpty)
+
+        await store.close()
+    }
+
+    @Test("A failed search is not reported as an excluding threshold")
+    func failureIsNotThreshold() async throws {
+        let (store, directory) = try await searchStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        store.query.searchText = "tax 7"
+        store.searchMode = .hybrid
+        // Outside bv's -1…1: the engine refuses it, through the shared
+        // unavailable mechanism, rather than answering "nothing scored".
+        store.searchMinScore = 2
+        await store.runEngineSearch()
+
+        #expect(store.unavailableReason(.search) != nil)
+        #expect(store.searchThresholdExcludedAll == nil)
+        #expect(!store.isUsingEngineSearch)
+
+        await store.close()
+    }
+
+    @Test("The empty state names the threshold")
+    func thresholdWording() {
+        #expect(SearchThresholdText.emptyTitle(0.4) == "No results above 0.40")
+        #expect(SearchThresholdText.emptyMessage.hasPrefix("Lower the threshold"))
+        // Every step the menu offers is one the engine accepts.
+        #expect(SearchThresholdText.steps.allSatisfy { (-1...1).contains($0) })
+    }
+
+    @Test("The threshold control renders")
+    func rendersThresholdPicker() async throws {
+        let store = await Fixture.loadedStore()
+        store.searchMinScore = 0.4
+        let size = CGSize(width: 200, height: 30)
+        let result = try Snapshot.render(
+            SearchThresholdPicker().environmentObject(store).frame(width: size.width),
+            name: "search-threshold", size: size)
+        #expect(
+            result.inkCoverage(in: CGRect(x: 0, y: 4, width: 200, height: 22)) > 0.01,
+            "the threshold control drew nothing")
+        await store.close()
+    }
+
     @Test("The presets load with their weights")
     func presetsLoad() async {
         let store = await Fixture.loadedStore()

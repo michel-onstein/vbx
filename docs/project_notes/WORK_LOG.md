@@ -5,6 +5,21 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-02 — A min-score threshold in the app's search scope bar (vbx-c1j)
+
+The scope bar gains a **Min score** menu in hybrid mode: off by default (no
+`min_score` sent, so search is unchanged), or 0.10–0.90 in steps of 0.10.
+`BeadsEngine.search` takes `minScore` and sends bv's `min_score` through the
+same engine call vbx-52c gave `vbx-cli`; `SearchResults` decodes the echo.
+Hidden in text mode, which is `IssueQuery`'s fuzzy ranking and has no
+similarity to compare. Per window, like the mode and preset beside it — none of
+the scope bar's settings outlive the window. A threshold that excludes every
+hit now shows an empty list titled "No results above 0.40" instead of falling
+back to the fuzzy ranking, which would have shown the beads it excluded; a
+failed search still goes through the shared unavailable report. Store tests
+over `Fixtures/search`, a snapshot of the control and of the empty state. The
+last open child of epic vbx-htg. semver:minor. Parity: unchanged (app only).
+
 ## 2026-10-02 — vbx-cli spells a symlinked working directory as bv does (vbx-9g1)
 
 Without `--path`, vbx-cli now lets the engine resolve the working directory
