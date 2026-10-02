@@ -400,13 +400,17 @@ public actor BeadsEngine {
     /// Works with or without a saved baseline: without one the delta checks
     /// have nothing to compare, but the checks that read the issue list —
     /// staleness, blocking cascades — still run.
+    ///
+    /// `alertLabel` is bv's `--alert-label`: it keeps only alerts that name
+    /// the label — on their issue, as their own label, or in a detail line —
+    /// so workspace-wide alerts drop out under it.
     public func alerts(
-        severity: AlertSeverity? = nil, type: String? = nil, label: String? = nil
+        severity: AlertSeverity? = nil, type: String? = nil, alertLabel: String? = nil
     ) throws -> AlertReport {
         var req: [String: Any] = [:]
         if let severity { req["severity"] = severity.rawValue }
         if let type, !type.isEmpty { req["type"] = type }
-        if let label, !label.isEmpty { req["label"] = label }
+        if let alertLabel, !alertLabel.isEmpty { req["alert_label"] = alertLabel }
         return try call("alerts", request: req.isEmpty ? nil : req, as: AlertReport.self)
     }
 

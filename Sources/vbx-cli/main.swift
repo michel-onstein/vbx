@@ -32,8 +32,9 @@ struct RobotCommand {
     /// True when `--label` is bv's global scope for this command: the engine
     /// answers over the label's subgraph and says so in the envelope. Set here
     /// rather than in each `request`, so a label-aware command cannot forget
-    /// to forward it. Alerts and capacity read `--label` as their own filter
-    /// and leave this off.
+    /// to forward it. Capacity reads `--label` as its own filter and leaves
+    /// this off. Alerts take both, as bv does: `--label` scopes the issue set
+    /// and `--alert-label` filters the alerts computed over it.
     var labelScoped = false
 
     init(
@@ -118,11 +119,12 @@ let robotCommands: [RobotCommand] = [
         }),
     RobotCommand(
         "robot-alerts", method: "alerts", summary: "Drift and health alerts",
+        labelScoped: true,
         request: { options in
             var request: [String: Any] = [:]
             if let value = options.severity { request["severity"] = value }
             if let value = options.alertType { request["type"] = value }
-            if let value = options.label { request["label"] = value }
+            if let value = options.alertLabel { request["alert_label"] = value }
             return request.isEmpty ? nil : request
         }),
     RobotCommand("robot-drift", method: "drift", summary: "Drift against the saved baseline"),
@@ -300,6 +302,7 @@ struct Options {
     var suggestType: String?
     var severity: String?
     var alertType: String?
+    var alertLabel: String?
     var graphFormat: String?
     var agents = 1
     var depth: Int?
@@ -348,6 +351,7 @@ func parseArguments() throws -> Options {
         case "--suggest-type": options.suggestType = try next(arg)
         case "--severity": options.severity = try next(arg)
         case "--alert-type": options.alertType = try next(arg)
+        case "--alert-label": options.alertLabel = try next(arg)
         case "--graph-format": options.graphFormat = try next(arg)
         case "--agents": options.agents = Int(try next(arg)) ?? 1
         case "--depth": options.depth = Int(try next(arg))

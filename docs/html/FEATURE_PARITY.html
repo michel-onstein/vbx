@@ -277,12 +277,14 @@ stops firing fails the run.</p>
 <p>bv's <code>--label</code> is a global scope — the label's subgraph, its beads plus their
 direct dependency neighbours — so the harness also runs label-scoped commands
 over the demo. The engine applies that scope in one place (<code>Session.view</code>,
-<code>scope.go</code>), and graph, triage, plan, priority, next, suggest and insights all
-read it, so each is compared with a known label (<code>engine</code>) and an unknown one
-(vbx-4cz); insights compares its <code>full_stats</code>, since bv shapes its top level
-differently. The two that do not match yet are listed as label-scoped skips,
-each naming its bead: <code>--label</code> on alerts keeps every alert (vbx-jnm), and
-<code>--robot-capacity</code> is not compared at all yet (vbx-ko1).</p>
+<code>scope.go</code>), and graph, triage, plan, priority, next, suggest, insights and
+alerts all read it, so each is compared with a known label (<code>engine</code>) and an
+unknown one (vbx-4cz, vbx-jnm); insights compares its <code>full_stats</code>, since bv
+shapes its top level differently. Alerts also take bv's separate
+<code>--alert-label</code> filter, which keeps only the alerts naming the label and is
+compared with <code>engine</code>, <code>ui</code> and an unknown label (vbx-jnm). The one that does
+not match yet is a label-scoped skip naming its bead: <code>--robot-capacity</code> is not
+compared at all yet (vbx-ko1).</p>
 <p>The Phase numbers in the tables below are the original delivery plan and have
 not been re-sequenced; treat them as intent, not as a claim about what exists.</p>
 <p><strong>Mechanism legend</strong></p>
@@ -1148,7 +1150,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 <td>6</td>
 </tr>
 <tr>
-<td><code>--robot-alerts</code> (+ severity, type, label)</td>
+<td><code>--robot-alerts</code> (+ severity, alert-type, alert-label, label scope)</td>
 <td>✓</td>
 <td>Alerts panel</td>
 <td>6</td>

@@ -5,6 +5,17 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-01 — Alerts filter and scope by label like bv (vbx-jnm)
+
+`vbx-cli --robot-alerts` gains bv 0.25.2's `--alert-label`, which keeps only
+the alerts naming the label, and `--label` on alerts is now the global scope
+the other label-aware commands share, computing the alerts over the label's
+subgraph. On the demo: 6, 9 and 0 alerts for `--alert-label engine`, `ui` and
+an unknown label; 11, 12 and 0 under `--label`. The app's Alerts label picker
+uses the same filter, so it no longer keeps workspace-wide alerts. Parity with
+bv 0.25.2: 0 differing commands before and after; the alerts skip became five
+comparisons (two scoped, three filtered). See BUGS.md.
+
 ## 2026-10-01 — `--label` scopes every label-aware robot command (vbx-4cz)
 
 `vbx-cli --label` is now bv 0.25.2's global scope on `--robot-triage`,

@@ -39,9 +39,9 @@ func (s *Session) projectDir() string {
 	return filepath.Dir(filepath.Dir(source))
 }
 
-// currentBaselineStats summarises the loaded workspace the way a baseline does.
-func (s *Session) currentBaselineStats() (baseline.GraphStats, [][]string, error) {
-	issues, analyzer, _ := s.snapshot()
+// currentBaselineStats summarises an analysis set the way a baseline does.
+func (s *Session) currentBaselineStats(v robotView) (baseline.GraphStats, [][]string, error) {
+	issues, analyzer := v.issues, v.analyzer
 	if analyzer == nil {
 		return baseline.GraphStats{}, nil, fmt.Errorf("session has no analyzer")
 	}
@@ -108,9 +108,9 @@ func topMetricItems(m map[string]float64, limit int) []baseline.MetricItem {
 	return items
 }
 
-// currentTopMetrics collects the Phase-2 leaders for a baseline.
-func (s *Session) currentTopMetrics() baseline.TopMetrics {
-	_, _, stats := s.snapshot()
+// currentTopMetrics collects an analysis set's Phase-2 leaders for a baseline.
+func (s *Session) currentTopMetrics(v robotView) baseline.TopMetrics {
+	stats := v.stats
 	if stats == nil {
 		return baseline.TopMetrics{}
 	}
@@ -126,7 +126,11 @@ func (s *Session) currentTopMetrics() baseline.TopMetrics {
 type alertsRequest struct {
 	Severity string `json:"severity"`
 	Type     string `json:"type"`
-	Label    string `json:"label"`
+	// AlertLabel is bv's --alert-label: a filter on the alerts computed.
+	AlertLabel string `json:"alert_label"`
+	// Label is bv's global --label scope (scope.go): it changes the issue set
+	// the alerts are computed over. bv applies both when both are given.
+	Label string `json:"label"`
 }
 
 // alerts compares the workspace against its saved baseline, if any.
@@ -138,7 +142,7 @@ func (s *Session) alerts(req []byte) ([]byte, error) {
 		}
 	}
 
-	result, hasBaseline, baselineInfo, err := s.computeDrift()
+	result, hasBaseline, baselineInfo, err := s.computeDrift(s.view(r.Label))
 	if err != nil {
 		return nil, err
 	}
@@ -159,8 +163,10 @@ func (s *Session) alerts(req []byte) ([]byte, error) {
 	})
 }
 
-// computeDrift runs the drift calculator against the saved baseline.
-func (s *Session) computeDrift() (*drift.Result, bool, map[string]any, error) {
+// computeDrift runs the drift calculator over an analysis set against the saved
+// baseline. bv computes the current stats, top metrics and issue-derived alerts
+// over its label-scoped set, so a label view does the same here.
+func (s *Session) computeDrift(v robotView) (*drift.Result, bool, map[string]any, error) {
 	dir := s.projectDir()
 	if dir == "" {
 		return nil, false, nil, fmt.Errorf("session has no source")
@@ -172,7 +178,7 @@ func (s *Session) computeDrift() (*drift.Result, bool, map[string]any, error) {
 		config = drift.DefaultConfig()
 	}
 
-	stats, cycles, err := s.currentBaselineStats()
+	stats, cycles, err := s.currentBaselineStats(v)
 	if err != nil {
 		return nil, false, nil, err
 	}
@@ -187,7 +193,7 @@ func (s *Session) computeDrift() (*drift.Result, bool, map[string]any, error) {
 		if saved, lerr := baseline.Load(path); lerr == nil && saved != nil {
 			previous = saved
 			hasBaseline = true
-			current.TopMetrics = s.currentTopMetrics()
+			current.TopMetrics = s.currentTopMetrics(v)
 			info = map[string]any{
 				"created_at":     saved.CreatedAt,
 				"commit_sha":     saved.CommitSHA,
@@ -198,10 +204,20 @@ func (s *Session) computeDrift() (*drift.Result, bool, map[string]any, error) {
 		}
 	}
 
-	issues, _, _ := s.snapshot()
+	// The calculator borrows the view's analyzer, as bv's does, so a scoped
+	// view's candidates bound the issue-derived checks: under a label only the
+	// labelled beads can raise a cascade or a high-impact unblock, not their
+	// dependency neighbours. A calculator analysing the rows afresh would treat
+	// every row as a candidate. The clock is pinned throughout, because the
+	// borrow requires the analyzer and the calculator to share one instant.
+	release := s.pinClock(v.analyzer)
+	defer release()
 	calculator := drift.NewCalculator(previous, current, config)
-	calculator.SetNow(robotNow())
-	calculator.SetIssues(issues)
+	calculator.SetNow(v.analyzer.Now())
+	calculator.SetIssues(v.issues)
+	if !calculator.ReuseAnalyzer(v.analyzer) {
+		return nil, false, nil, fmt.Errorf("preparing alerts: issue rows do not match the analyzer")
+	}
 	return calculator.Calculate(), hasBaseline, info, nil
 }
 
@@ -215,7 +231,7 @@ func filterAlerts(alerts []drift.Alert, r alertsRequest) []drift.Alert {
 		if r.Type != "" && string(alert.Type) != r.Type {
 			continue
 		}
-		if r.Label != "" && !alertMatchesLabel(alert, r.Label) {
+		if !alertMatchesLabel(alert, r.AlertLabel) {
 			continue
 		}
 		out = append(out, alert)
@@ -223,22 +239,33 @@ func filterAlerts(alerts []drift.Alert, r alertsRequest) []drift.Alert {
 	return out
 }
 
-// alertMatchesLabel reports whether an alert concerns a label.
+// alertMatchesLabel is bv 0.25.2's --alert-label rule, from the robot-alerts
+// handler in cmd/bv/robot_registry.go, which exports no function for it.
 //
-// An alert carrying no label at all is kept: a workspace-wide alert — a new
-// cycle, a density jump — is not "about" some other label just because it does
-// not name this one, and filtering it out would hide the most important ones.
+// A blank label keeps everything. Otherwise, case-insensitively and after
+// trimming, an alert matches when one of its issue's labels equals the label,
+// when its own label equals it, or when a detail line contains it. An alert
+// naming no label and no matching detail — a workspace-wide one, a new cycle or
+// a density jump — is dropped, so an unknown label returns no alerts at all.
 func alertMatchesLabel(alert drift.Alert, label string) bool {
-	needle := strings.ToLower(label)
-	for _, detail := range alert.Details {
-		if strings.Contains(strings.ToLower(detail), needle) {
+	want := strings.ToLower(strings.TrimSpace(label))
+	if want == "" {
+		return true
+	}
+	for _, l := range alert.Labels {
+		if strings.ToLower(l) == want {
 			return true
 		}
 	}
-	if alert.Label == "" {
+	if alert.Label != "" && strings.ToLower(alert.Label) == want {
 		return true
 	}
-	return strings.Contains(strings.ToLower(alert.Label), needle)
+	for _, detail := range alert.Details {
+		if strings.Contains(strings.ToLower(detail), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func countSeverities(alerts []drift.Alert) (critical, warning, info int) {
@@ -257,7 +284,7 @@ func countSeverities(alerts []drift.Alert) (critical, warning, info int) {
 
 // driftPayload is the drift check on its own, with bv's exit code echoed.
 func (s *Session) driftPayload() ([]byte, error) {
-	result, hasBaseline, info, err := s.computeDrift()
+	result, hasBaseline, info, err := s.computeDrift(s.view(""))
 	if err != nil {
 		return nil, err
 	}
@@ -296,12 +323,13 @@ func (s *Session) saveBaseline(req []byte) ([]byte, error) {
 		return nil, fmt.Errorf("session has no source")
 	}
 
-	stats, cycles, err := s.currentBaselineStats()
+	whole := s.view("")
+	stats, cycles, err := s.currentBaselineStats(whole)
 	if err != nil {
 		return nil, err
 	}
 
-	saved := baseline.New(stats, s.currentTopMetrics(), cycles, r.Description)
+	saved := baseline.New(stats, s.currentTopMetrics(whole), cycles, r.Description)
 	path := baseline.DefaultPath(dir)
 	if err := saved.Save(path); err != nil {
 		return nil, fmt.Errorf("saving baseline to %s: %w", path, err)

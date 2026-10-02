@@ -1441,7 +1441,7 @@ public final class ProjectStore: ObservableObject {
             (try? await engine.alerts(
                 severity: alertSeverityFilter,
                 type: alertTypeFilter,
-                label: alertLabelFilter)) ?? .empty
+                alertLabel: alertLabelFilter)) ?? .empty
         baseline = (try? await engine.baselineInfo()) ?? .empty
 
         // Only alerts that were not there a moment ago are announced. Without
