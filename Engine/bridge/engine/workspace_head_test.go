@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -371,6 +372,76 @@ func TestGitDirOfFollowsAWorktreePointer(t *testing.T) {
 		// runner's temp dir is inside one, the walk finding it is correct.
 		if _, err := os.Stat(got); err != nil {
 			t.Fatalf("gitDirOf returned %q, which does not exist", got)
+		}
+	}
+}
+
+// Time travel in a multi-repository workspace (vbx-bcq, ADR-028).
+//
+// Every revision but HEAD went through the object store of the repository
+// holding `.bv/workspace.yaml`, read the yaml as the bead set, and showed the
+// root repository's view as if it were the workspace's: the scrubber offered
+// commits that changed the yaml, and a diff against one called every bead new.
+// The layout here is that worst case — a monorepo whose root commits the yaml
+// beside both members — where every call used to *succeed*.
+func TestWorkspaceTimeTravelIsRefusedRatherThanReadFromTheRoot(t *testing.T) {
+	root := t.TempDir()
+	repo := initMember(t, root)
+	writeBeads(t, filepath.Join(root, "api"), apiOne)
+	writeBeads(t, filepath.Join(root, "web"), webOne)
+	writeWorkspaceConfig(t, root, "api", "web")
+	for _, rel := range []string{"api/.beads/issues.jsonl", "web/.beads/issues.jsonl", ".bv/workspace.yaml"} {
+		if _, err := repo.tree.Add(rel); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.tree.Commit("workspace", &git.CommitOptions{
+		Author: &object.Signature{Name: "dev", Email: "dev@example.com", When: repo.when},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(OpenConfig{Path: root, SkipPhase2: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+
+	refused := []struct{ method, request string }{
+		{"revisions", `{}`},
+		{"diff", `{"revision":"HEAD"}`},
+		{"snapshot_at", `{"revision":"HEAD~0"}`},
+	}
+	for _, c := range refused {
+		out, err := s.Call(c.method, []byte(c.request))
+		if !errors.Is(err, errWorkspaceTimeTravel) {
+			t.Errorf("%s %s = %s, %v; want the workspace refusal", c.method, c.request, out, err)
+		}
+	}
+
+	// HEAD keeps its per-member meaning: the uncommitted marks read it.
+	head := call[headSnapshot](t, s, "snapshot_at", map[string]string{"revision": "HEAD"})
+	if head.ResolvedRevision == "" {
+		t.Errorf("snapshot_at HEAD lost its per-member answer: %+v", head.Repos)
+	}
+}
+
+// A single repository is unaffected by the refusal.
+func TestSingleRepositoryTimeTravelIsNotRefused(t *testing.T) {
+	root := t.TempDir()
+	repo := initMember(t, root)
+	writeBeads(t, root, apiOne)
+	repo.commitBeads("beads")
+
+	s, err := Open(OpenConfig{Path: root, SkipPhase2: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+
+	for _, method := range []string{"revisions", "diff"} {
+		if _, err := s.Call(method, []byte(`{"revision":"HEAD"}`)); err != nil {
+			t.Errorf("%s: %v", method, err)
 		}
 	}
 }

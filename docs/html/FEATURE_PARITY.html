@@ -1089,7 +1089,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 </tr>
 <tr>
 <td>Time-travel mode + diff badges + summary</td>
-<td>Revision scrubber + row badges</td>
+<td>Revision scrubber + row badges. <strong>Not offered in a multi-repository workspace</strong>, where the scrubber states why (ADR-028, vbx-bcq)</td>
 <td>Engine + Native</td>
 <td>7</td>
 </tr>
@@ -1315,7 +1315,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 </tr>
 <tr>
 <td><code>--robot-diff</code>, <code>--diff-since</code> (+ label and recipe scope), <code>--as-of</code></td>
-<td>✓</td>
+<td>✓ (with <code>--workspace</code>, refused where bv reads the working directory's repository — a deliberate divergence, ADR-028)</td>
 <td>Time-travel mode</td>
 <td>7</td>
 </tr>

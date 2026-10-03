@@ -1716,3 +1716,66 @@ registers extra regexes through `correlation.SetCustomIDPatterns`.
   set `BV_NO_CACHE=1` on both sides, so bv computes rather than recalls.
   On this repository's 200-commit history, `--robot-history --id-pattern`
   with `br`'s shape adds 157 links, identical to bv's.
+
+## ADR-028 — A multi-repository workspace has no time travel, and says so
+
+**Date:** 2026-10-03 · **Status:** Accepted, implemented · **Bead:** vbx-bcq
+
+**Context.** Time travel has three engine calls: `revisions` (the scrubber),
+`snapshot_at` and `diff`. All three opened one object store, the repository
+holding the session's source, and read the beads at that source's path. In a
+workspace session the source is `.bv/workspace.yaml`. vbx-d1c already gave
+`snapshot_at` for `HEAD` a per-member answer, because the uncommitted marks
+need one. Any other revision still went to the yaml's repository. The
+scrubber offered the commits that changed the yaml. A comparison read the
+yaml as the bead set, which parses to nothing, so every bead showed as new.
+Where the root is in no repository, the calls failed with "opening git
+repository", which hides the real reason. A member is normally its own
+repository, so a SHA or `HEAD~3` names a commit in at most one of them. There
+is no single "the workspace at that revision" to show.
+
+bv has no answer either. Its `--as-of` warns that `--workspace` is ignored and
+loads from the working directory's repository. Its `--diff-since` reads that
+repository whatever `--workspace` says. Both are the same root-repository
+view.
+
+**Options.**
+
+1. **Per-member revisions.** Each member gets a scrubber of its own, and a
+   diff covers that member's beads against its own commit. This is honest,
+   but it is a new surface: a member picker, a per-member diff that has to
+   leave the other members' beads alone, and badges scoped to one prefix.
+   None of it comes from bv's analysis, which compares two whole bead sets.
+2. **A date, resolved per member.** "The workspace as of Tuesday" has a
+   meaning across repositories. But bv's time travel takes revisions, not
+   dates, and it would be vbx's own semantics with nothing to check it
+   against.
+3. **Not offered, with the reason.** This is the chosen option.
+
+**Decision.** In a workspace session the engine refuses `revisions`, `diff`
+and `snapshot_at` for anything but `HEAD`. The refusal is one error,
+`errWorkspaceTimeTravel`, which names the reason. `snapshot_at` for `HEAD`
+keeps vbx-d1c's per-member answer. The app guards before the call, as it
+already did for a workspace in no repository. A deliberate absence is not a
+failed read, so it is never published in `unavailable`.
+`ProjectStore.timeTravelUnavailableReason` covers both cases, and the
+scrubber shows that reason instead of "No bead-changing commits found".
+`travel(to:)` does nothing. Opening another workspace also clears the
+revisions and any comparison in progress, and the scrubber reloads per
+source. Before, the previous repository's commits stayed in the menu.
+
+**Consequences.**
+
+- `vbx-cli --workspace … --diff-since`/`--as-of`/`--robot-revisions` exits
+  with the refusal, where bv prints the root repository's view. This is a
+  deliberate divergence. No parity fixture compares it, because the workspace
+  fixtures run only the claim-gate comparisons.
+- A monorepo workspace, with every member in one repository, could have
+  real time travel. Its revisions are that repository's, and a snapshot
+  would read each member's beads file at the commit. It is refused too for
+  now. When it is wanted, it is an extension of this decision, keyed on every
+  member resolving to one repository, as the `HEAD` snapshot already detects.
+- Locked in by `TestWorkspaceTimeTravelIsRefusedRatherThanReadFromTheRoot`
+  (a monorepo whose root commits the yaml, the layout where every call used
+  to succeed), `TestSingleRepositoryTimeTravelIsNotRefused`, and the store
+  test "A multi-repository workspace offers no time travel, and says why".

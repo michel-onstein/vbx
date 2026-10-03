@@ -322,7 +322,7 @@ All nine metrics are computed by the engine. `vbx` never reimplements one.
 | Recipe picker (`'`) and recipe files | Sidebar section + form editor; `.beads/recipes/*.yaml` files listed through bv's own `recipe.Loader`, and an edit or delete of one goes to its own file (vbx-7d5) | Engine + Native | 2 |
 | `defer_until` (bv 0.25 scheduler deferral) | **Built** — readiness, triage, plan and next honour it; `actionable` also names the beads a future deferral withholds, at the same pinned clock. The app shows "Deferred until" in the Inspector, a sortable *Deferred until* list column with a title-cell marker, and the count in the Ready filter's tooltip (vbx-upz) | Engine + Native | — |
 | Repo picker (`w`) | Sidebar repos section | Engine + Native | 2 |
-| Time-travel mode + diff badges + summary | Revision scrubber + row badges | Engine + Native | 7 |
+| Time-travel mode + diff badges + summary | Revision scrubber + row badges. **Not offered in a multi-repository workspace**, where the scrubber states why (ADR-028, vbx-bcq) | Engine + Native | 7 |
 | Shortcuts sidebar (`;`) | Menu bar, `⌘/` shortcuts sheet, `⌘K` palette | Native | 2 |
 | Help overlay (`?`) | Searchable Help menu | Native | 2 |
 | Interactive tutorial with progress | Onboarding window with persisted progress | Native | 7 |
@@ -367,7 +367,7 @@ the parity suite. The table marks where the GUI additionally surfaces the same d
 | `--robot-label-health`, `--robot-label-flow`, `--robot-label-attention` (+ label and recipe scope) | ✓ | Label dashboard, Flow matrix, Attention | 6 |
 | `--robot-alerts` (+ severity, alert-type, alert-label, label scope) | ✓ | Alerts panel | 6 |
 | `--robot-drift`, `--check-drift` (+ label and recipe scope; bv's exit code), baseline save/show | ✓ (`vbx-cli --save-baseline DESC` in bv's file format and prose, the commit read from the workspace's object store rather than a `git` process — vbx-6s8. **Not built:** `--label` / `--recipe` on the save, refused) | Alerts + baseline menu | 6 |
-| `--robot-diff`, `--diff-since` (+ label and recipe scope), `--as-of` | ✓ | Time-travel mode | 7 |
+| `--robot-diff`, `--diff-since` (+ label and recipe scope), `--as-of` | ✓ (with `--workspace`, refused where bv reads the working directory's repository — a deliberate divergence, ADR-028) | Time-travel mode | 7 |
 | `--robot-graph` (+ `--graph-format`, `--graph-root`, `--graph-depth`) | ✓ | Graph export menu | 6 |
 | `--robot-recipes` | ✓ | Recipe sidebar | 6 |
 | `--recipe <name or path.yaml>` as a global scope on robot commands (bv 0.25) | ✓ `vbx-cli` triage, next, plan, priority, insights, suggest, alerts, graph, capacity, the three label commands, blocker-chain, search, sprint-list, sprint-show, burndown, diff, drift and forecast, diff, drift, forecast and the nine history commands, alone or with `--label`, with `scope.recipe` and `scope_hash`; a path wherever a name goes (also `--robot-recipe-apply` and `--export`); an unknown recipe refused with bv's message and list. Matched in `parity-check.py` (vbx-7d5, vbx-shz, vbx-9gl, vbx-k7j). **Not built:** `--save-baseline`, which refuses either flag | Recipe sidebar applies by name | — |

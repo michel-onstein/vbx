@@ -545,7 +545,10 @@ stateDiagram-v2
 Discovery order is `issues.jsonl` → `beads.jsonl` → `beads.base.jsonl` → `beads.db`, with
 backups, merge artefacts, and deletion manifests skipped. Time travel loads a snapshot from
 the git object store and diffs it against the current state, producing per-issue badges:
-`NEW`, `CLOSED`, `MODIFIED`, `REOPENED`.
+`NEW`, `CLOSED`, `MODIFIED`, `REOPENED`. A multi-repository workspace offers no time travel:
+each member is its own repository, so a revision names a commit in at most one of them. The
+engine refuses every revision but `HEAD` there, and the scrubber says why
+([ADR-028](project_notes/DECISIONS.md)).
 
 ### 8.1 Source selection
 

@@ -60,6 +60,41 @@ func storeReportsWorkspaceKind() async {
 }
 
 @MainActor
+@Test("A multi-repository workspace offers no time travel, and says why")
+func workspaceOffersNoTimeTravel() async {
+    // vbx-bcq, ADR-028: the fixture's yaml sits in this checkout, so the
+    // scrubber offered this repository's commits to it, and comparing against
+    // HEAD read the yaml as the beads and called every bead new.
+    let config = URL(fileURLWithPath: fixturePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("dropped-workspace/.bv/workspace.yaml")
+        .path
+    let store = ProjectStore()
+    store.skipPhase2 = true
+
+    // A single repository first: what it loaded must not follow the switch.
+    await store.open(path: fixturePath)
+    #expect(store.timeTravelUnavailableReason == nil)
+    await store.loadRevisions()
+
+    await store.open(path: config)
+    #expect(store.info?.kind == .workspace)
+    #expect(store.timeTravelUnavailableReason != nil)
+    #expect(store.revisions.revisions.isEmpty)
+
+    await store.loadRevisions()
+    #expect(store.revisions.revisions.isEmpty)
+    // A state the engine refuses on purpose, not a failed read.
+    #expect(store.unavailableReason(.revisions) == nil)
+
+    await store.travel(to: "HEAD")
+    #expect(!store.isTimeTravelling)
+    #expect(store.timeTravel.badges.isEmpty)
+    #expect(store.pastIssues.isEmpty)
+    await store.close()
+}
+
+@MainActor
 @Test("A failed open reports the error and clears stale state")
 func storeHandlesFailure() async {
     let store = ProjectStore()
