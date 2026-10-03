@@ -5,6 +5,18 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-10-03 — A workspace offers no time travel, and says why (vbx-bcq)
+
+Decided in ADR-028. A multi-repository workspace has no single history, so the
+engine refuses `revisions`, `diff` and `snapshot_at` for any revision but
+`HEAD`. Before, it read the root repository's `.bv/workspace.yaml` as the beads
+and badged every bead new. `HEAD` keeps vbx-d1c's per-member snapshot. In the
+app, `timeTravelUnavailableReason` guards the scrubber before the call, so this
+is not shown as a failure, and the scrubber says why. Opening another workspace
+now clears the revisions and any comparison in progress. `vbx-cli` refuses
+`--diff-since`/`--as-of` under `--workspace`, a deliberate divergence from bv's
+root-repository view. Go and store regression tests added. semver:patch.
+
 ## 2026-10-02 — Hybrid search is compared with bv in full (vbx-rgw)
 
 Hybrid recency was the engine's own wall-clock read (`NewHybridScorer`), not

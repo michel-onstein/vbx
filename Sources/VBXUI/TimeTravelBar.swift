@@ -33,7 +33,12 @@ struct RevisionScrubber: View {
                 }
             }
 
-            if let reason = store.unavailableReason(.revisions) {
+            if let reason = store.timeTravelUnavailableReason {
+                // Not offered here at all — a workspace of several
+                // repositories, or none (ADR-028) — so say why, not "no
+                // commits found", which would claim a history was read.
+                Text(reason).foregroundStyle(.secondary)
+            } else if let reason = store.unavailableReason(.revisions) {
                 // A menu draws text and buttons only, so the compact label is
                 // spelled out: the title with its reason, and the retry.
                 Text(EngineReportText.unavailable(.revisions, reason))
@@ -46,8 +51,10 @@ struct RevisionScrubber: View {
                 store.isTimeTravelling ? store.timeTravel.shortRevision : "Compare",
                 systemImage: "clock.arrow.2.circlepath")
         }
-        .help("Compare the current beads against an earlier revision")
-        .task { await store.loadRevisions() }
+        .help(store.timeTravelUnavailableReason ?? "Compare the current beads against an earlier revision")
+        // Keyed by the source: the toolbar outlives a workspace, and opening
+        // another one clears the revisions, which have to be read again for it.
+        .task(id: store.info?.source) { await store.loadRevisions() }
     }
 }
 

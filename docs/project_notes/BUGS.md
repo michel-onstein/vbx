@@ -4,6 +4,38 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-10-03 — Time travel in a workspace showed the root repository's view
+
+**Symptom:** In a multi-repository workspace session, the Compare menu offered
+the commits that changed `.bv/workspace.yaml` in the repository holding it.
+Picking one showed every bead as **new**. Where the root was in no repository,
+the menu reported a failure to open git instead. Opening a workspace after a
+single repository also kept that repository's commits in the menu.
+(vbx-bcq, found under vbx-d1c.)
+
+**Cause:** `revisions`, `diff` and `snapshot_at` for anything but `HEAD` went
+through `Session.extractor()`. It opens the object store around the session's
+source and reads the beads at that path. In a workspace session that path is
+the yaml, which parses to no beads. The members are separate repositories, so
+no revision means anything across them. Separately, the store never cleared
+`revisions` on opening another workspace, and the scrubber loaded once.
+
+**Fix:** decided in ADR-028. The engine refuses the three calls in a workspace
+session (`errWorkspaceTimeTravel`), except `snapshot_at` for `HEAD`, which
+keeps its per-member answer. `ProjectStore.timeTravelUnavailableReason` guards
+`loadRevisions` and `travel(to:)` before the call, and the scrubber shows the
+reason. Opening another source clears the revisions and any comparison, and
+the scrubber's `.task` is keyed by the source.
+
+**Regression tests:** `TestWorkspaceTimeTravelIsRefusedRatherThanReadFromTheRoot`
+uses a monorepo whose root commits the yaml, where all three calls used to
+succeed. Without the fix, the diff badges both beads `new`.
+`TestSingleRepositoryTimeTravelIsNotRefused` checks a single repository still
+travels. The store test "A multi-repository workspace offers no time travel,
+and says why" opens the demo, then `Fixtures/dropped-workspace`, and asserts
+the reason, empty revisions, no unavailable report, and that travelling to
+`HEAD` does not start a comparison.
+
 ## 2026-10-02 — Hybrid search's recency read the wall clock, not SOURCE_DATE_EPOCH
 
 **Symptom:** `vbx-cli --robot-search --search-mode hybrid` disagreed with bv

@@ -803,6 +803,13 @@ public final class ProjectStore: ObservableObject {
                 // no repository at all, where no walk runs to overwrite it, it
                 // would simply stay.
                 resetHistory()
+                // The same goes for time travel: the revisions are the
+                // previous repository's commits, and a comparison in progress
+                // describes its beads. Left in place, a workspace opened after
+                // a single repository offered that repository's commits
+                // (vbx-bcq). The scrubber reloads per source.
+                revisions = .empty
+                returnToNow()
                 // Every failure on record was a failure to read the
                 // workspace being left.
                 unavailable = [:]
@@ -1038,6 +1045,29 @@ public final class ProjectStore: ObservableObject {
     /// Whether this workspace has a repository behind it at all.
     public var hasGitRepository: Bool { gitRepositoryRoot != nil }
 
+    /// Why time travel is not offered here, or nil when it is.
+    ///
+    /// Not a failure, so never an entry in ``unavailable``: both are normal
+    /// states the engine would throw for, and they are guarded before the call
+    /// rather than shown as "Revisions unavailable" with a retry that cannot
+    /// help.
+    ///
+    /// **A multi-repository workspace has no time travel** (ADR-028,
+    /// vbx-bcq). A member is normally its own repository, so a revision names
+    /// a commit in at most one of them; the engine refuses every revision but
+    /// `HEAD` there. Before, the scrubber offered the root repository's commits
+    /// to `.bv/workspace.yaml` and a comparison read that file as the beads,
+    /// so every bead showed as new.
+    public var timeTravelUnavailableReason: String? {
+        if info?.kind == .workspace {
+            return "Time travel compares one repository's history, and this workspace spans several"
+        }
+        if !hasGitRepository {
+            return "This workspace is not in a git repository"
+        }
+        return nil
+    }
+
     /// The surfaces worth offering for this workspace.
     ///
     /// Read by everything that offers a surface — the toolbar picker, the
@@ -1046,9 +1076,8 @@ public final class ProjectStore: ObservableObject {
     /// than one that is always offered.
     ///
     /// History correlates beads to commits, so without a repository it has
-    /// nothing to correlate and is left out. Nothing else is conditional yet;
-    /// time travel needs a repository too, and when its controls learn that
-    /// they should read this rather than deciding for themselves.
+    /// nothing to correlate and is left out. Time travel is a toolbar control
+    /// rather than a surface, and reads ``timeTravelUnavailableReason``.
     public var availableSurfaces: [ViewSurface] {
         guard !hasGitRepository else { return ViewSurface.allCases }
         return ViewSurface.allCases.filter { $0 != .history }
@@ -1765,10 +1794,11 @@ public final class ProjectStore: ObservableObject {
     /// Loads the revisions the scrubber can jump to.
     public func loadRevisions() async {
         guard isLoaded, revisions.revisions.isEmpty else { return }
-        // No repository is a normal state with no revisions in it, not a
-        // failed read: the engine throws for it, and showing that as
-        // "Revisions unavailable" would report a fault that is not there.
-        guard hasGitRepository else {
+        // No repository, or a workspace of several, is a normal state with no
+        // revisions in it, not a failed read: the engine throws for both, and
+        // showing that as "Revisions unavailable" would report a fault that is
+        // not there. The scrubber says why instead.
+        guard timeTravelUnavailableReason == nil else {
             revisions = .empty
             unavailable[.revisions] = nil
             return
@@ -1781,7 +1811,7 @@ public final class ProjectStore: ObservableObject {
     /// Any expression git accepts works; what gets displayed afterwards is the
     /// *resolved* commit, because `HEAD~3` names a different commit tomorrow.
     public func travel(to revision: String) async {
-        guard isLoaded, !timeTravelLoading else { return }
+        guard isLoaded, !timeTravelLoading, timeTravelUnavailableReason == nil else { return }
         timeTravelLoading = true
         defer { timeTravelLoading = false }
 

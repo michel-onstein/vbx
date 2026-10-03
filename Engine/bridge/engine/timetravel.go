@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -39,6 +40,36 @@ func (s *Session) decodeRevision(req []byte) (revisionRequest, error) {
 	return r, nil
 }
 
+// errWorkspaceTimeTravel is why a multi-repository workspace offers no time
+// travel (ADR-028, vbx-bcq).
+//
+// The session's source is the workspace yaml, so the one object store
+// `extractor` can open is the repository holding that file — not a member's.
+// Its revisions are commits that changed the yaml, and a diff against one
+// reads the yaml as the bead set: every bead "new". A member is normally a
+// repository of its own, so a revision names a commit in at most one of them,
+// and there is no single "the workspace at HEAD~3" to show. bv has none
+// either: its --as-of ignores --workspace, and its --diff-since reads the
+// working directory's repository whatever --workspace says.
+//
+// HEAD alone has a workspace meaning — each member at its own HEAD — and
+// `snapshot_at` answers it per member (workspace_head.go, vbx-d1c).
+var errWorkspaceTimeTravel = errors.New(
+	"time travel is not available in a multi-repository workspace: " +
+		"each member is its own repository, so a revision names a commit in at most one of them")
+
+// refuseWorkspaceTimeTravel is errWorkspaceTimeTravel for a workspace
+// session, and nil for any other.
+func (s *Session) refuseWorkspaceTimeTravel() error {
+	s.mu.RLock()
+	isWorkspace := s.kind == "workspace"
+	s.mu.RUnlock()
+	if isWorkspace {
+		return errWorkspaceTimeTravel
+	}
+	return nil
+}
+
 // extractor opens the object store for the current source.
 func (s *Session) extractor() (*objectStoreExtractor, error) {
 	s.mu.RLock()
@@ -54,6 +85,9 @@ func (s *Session) extractor() (*objectStoreExtractor, error) {
 func (s *Session) revisions(req []byte) ([]byte, error) {
 	r, err := s.decodeRevision(req)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.refuseWorkspaceTimeTravel(); err != nil {
 		return nil, err
 	}
 	extractor, err := s.extractor()
@@ -79,12 +113,13 @@ func (s *Session) snapshotAt(req []byte) ([]byte, error) {
 	}
 	// A workspace's members are separate repositories with a HEAD each; the
 	// session's source is the workspace yaml, whose repository holds none of
-	// their beads (vbx-d1c).
-	s.mu.RLock()
-	isWorkspace := s.kind == "workspace"
-	s.mu.RUnlock()
-	if isWorkspace && isHeadRevision(r.Revision) {
-		return s.workspaceHeadSnapshot(r)
+	// their beads (vbx-d1c). HEAD means each member's own; any other revision
+	// means nothing across them (vbx-bcq).
+	if err := s.refuseWorkspaceTimeTravel(); err != nil {
+		if isHeadRevision(r.Revision) {
+			return s.workspaceHeadSnapshot(r)
+		}
+		return nil, err
 	}
 	extractor, err := s.extractor()
 	if err != nil {
@@ -136,6 +171,9 @@ func (s *Session) diffSince(req []byte) ([]byte, error) {
 	}
 	if r.Revision == "" {
 		return nil, fmt.Errorf("diff requires a \"revision\"")
+	}
+	if err := s.refuseWorkspaceTimeTravel(); err != nil {
+		return nil, err
 	}
 	v, err := s.view(r.scopeRequest)
 	if err != nil {

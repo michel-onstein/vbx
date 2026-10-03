@@ -856,7 +856,10 @@ the places <code>bv</code> is lenient, so the two agree on what a malformed file
 <p>Discovery order is <code>issues.jsonl</code> → <code>beads.jsonl</code> → <code>beads.base.jsonl</code> → <code>beads.db</code>, with
 backups, merge artefacts, and deletion manifests skipped. Time travel loads a snapshot from
 the git object store and diffs it against the current state, producing per-issue badges:
-<code>NEW</code>, <code>CLOSED</code>, <code>MODIFIED</code>, <code>REOPENED</code>.</p>
+<code>NEW</code>, <code>CLOSED</code>, <code>MODIFIED</code>, <code>REOPENED</code>. A multi-repository workspace offers no time travel:
+each member is its own repository, so a revision names a commit in at most one of them. The
+engine refuses every revision but <code>HEAD</code> there, and the scrubber says why
+(<a href="project_notes/DECISIONS.html">ADR-028</a>).</p>
 <h3 id="81-source-selection"><a class="toclink" href="#81-source-selection">8.1 Source selection</a></h3>
 <p><code>vbx</code> is a <strong>document-based app</strong>: a "document" is a bead workspace (a directory containing
 <code>.beads/</code>, or a <code>.bv/workspace.yaml</code>). This gives recent-documents, window restoration,
