@@ -267,7 +267,7 @@ them.
   one, and a record br re-exports drops the field in the diff; that is br, not a clobber. The
   real fix is upstream in `beads_rust`. See ADR-018.
 - **Never call bv's `workspace.LoadAllFromConfig` or `AggregateLoader`.** In
-  v0.25.2 they run `br update --help` and `bd export` unconditionally, which the
+  v0.25.2 and v0.26.0 they run `br update --help` and `bd export` unconditionally, which the
   App Sandbox forbids. Workspaces load through `workspace_loader.go`, a port
   whose tracker access is the session's choice, and `TestWorkspaceLoaderMatchesBV`
   holds it to bv's. See ADR-020 and BUGS.md, 2026-10-01.

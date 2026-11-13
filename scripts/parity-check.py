@@ -27,11 +27,10 @@ command declares which subtree to compare on each side. Where vbx does carry
 the envelope it carries bv's provenance keys too, except the two listed in
 ENVELOPE_ONLY_KEYS with their reasons — one list for every command.
 
-*Declared differences.* A few differences are decisions rather than bugs:
-on a br beads.db bv 0.25.2 falls back to a lossy read that vbx deliberately
-does not copy (ADR-024). Those are listed in DECLARED_DIFFERENCES, each scoped
-to one fixture, one command and one exact path, and reported as `declared` —
-never as a match. The same paths are compared on every other fixture, any
+*Declared differences.* A difference that is a decision rather than a bug
+is listed in DECLARED_DIFFERENCES, scoped to one fixture, one command and one
+exact path, and reported as `declared` — never as a match. None is declared
+since bv 0.26, which reads a br beads.db in full (ADR-024's lossy read went). The same paths are compared on every other fixture, any
 other difference still fails, and a declaration that stops firing fails too.
 
 *More than one workspace.* The demo fixture exercises none of the readiness
@@ -264,56 +263,11 @@ ENVELOPE_ONLY_KEYS = {
 # match, and a declaration that stops firing fails the run — that is the
 # signal to revisit the decision behind it.
 #
-# bv 0.25.2 reads a br beads.db through a main query that selects due_date and
-# tombstone, which br's schema lacks (br has due_at). It falls back to
-# loadIssuesSimple, which drops closed_at, notes, design, source_repo and
-# dependency timestamps. vbx keeps reading every column (ADR-024), so on a
-# beads.db the fingerprint and the closed-time velocity differ by design.
-_LOSSY_HASH = "bv hashes its lossy fallback read of br's beads.db; vbx reads every column (ADR-024)"
-_LOSSY_SCOPE = "hashes data_hash, so it follows it (ADR-024)"
-DECLARED_DIFFERENCES = {
-    "readiness (beads.db)": {
-        ("robot-label-health", ".labels[0].velocity.avg_days_to_close"):
-            "bv's fallback read has no closed_at, so it skips the closed bead and averages"
-            " an int 0; vbx averages its real close time (ADR-024)",
-        ("robot-label-health", ".data_hash"): _LOSSY_HASH,
-        ("robot-label-health", ".scope_hash"): _LOSSY_SCOPE,
-        ("robot-label-flow", ".data_hash"): _LOSSY_HASH,
-        ("robot-label-flow", ".scope_hash"): _LOSSY_SCOPE,
-        ("robot-label-attention", ".data_hash"): _LOSSY_HASH,
-        ("robot-label-attention", ".scope_hash"): _LOSSY_SCOPE,
-        ("robot-triage", ".project_health.velocity.estimated"):
-            "bv's fallback read has no closed_at, so it estimates close times from"
-            " updated_at; vbx reads closed_at and estimates nothing (ADR-024)",
-        ("robot-suggest", ".data_hash"): _LOSSY_HASH,
-        ("robot-suggest", ".suggestions.data_hash"): _LOSSY_HASH,
-        ("robot-suggest", ".scope_hash"): _LOSSY_SCOPE,
-        ("robot-graph", ".data_hash"): _LOSSY_HASH,
-        ("robot-graph", ".scope_hash"): _LOSSY_SCOPE,
-        ("robot-next", ".data_hash"): _LOSSY_HASH,
-        ("robot-next", ".scope_hash"): _LOSSY_SCOPE,
-        ("robot-capacity", ".data_hash"): _LOSSY_HASH,
-        ("robot-capacity", ".scope_hash"): _LOSSY_SCOPE,
-        ("robot-capacity --agents 3", ".data_hash"): _LOSSY_HASH,
-        ("robot-capacity --agents 3", ".scope_hash"): _LOSSY_SCOPE,
-    } | {
-        # The envelope these four gained in vbx-6su hashes the same read.
-        (command, path): reason
-        for command in ("robot-triage", "robot-plan", "robot-alerts", "robot-metrics")
-        for path, reason in ((".data_hash", _LOSSY_HASH), (".scope_hash", _LOSSY_SCOPE))
-    },
-    # The dropped-records beads as a beads.db (vbx-dv5) are there for
-    # load_stats, which matches; their fingerprint differs as every beads.db's
-    # does. Its beads have no closed one, so no velocity differs as well.
-    "dropped (beads.db)": {
-        (command, path): reason
-        for command in ("robot-label-flow", "robot-label-health", "robot-label-attention",
-                        "robot-suggest", "robot-graph", "robot-next", "robot-capacity",
-                        "robot-capacity --agents 3", "robot-triage", "robot-plan",
-                        "robot-alerts", "robot-metrics")
-        for path, reason in ((".data_hash", _LOSSY_HASH), (".scope_hash", _LOSSY_SCOPE))
-    } | {("robot-suggest", ".suggestions.data_hash"): _LOSSY_HASH},
-}
+# Empty since bv 0.26. Every entry used to be ADR-024's: bv 0.25.2 read a br
+# beads.db through a lossy fallback, so the fingerprint and the closed-time
+# velocity differed by design. bv 0.26 reads every column, the declarations
+# stopped firing, and they went (vbx-rst).
+DECLARED_DIFFERENCES: dict[str, dict[tuple[str, str], str]] = {}
 
 
 def difference_path(difference: str) -> str:
@@ -963,10 +917,10 @@ COMPARISONS = [
           "env": {"BV_ROBOT_NOT_READY_LABELS": NOT_READY}}),
     )
 ] + [
-    # --robot-diff over the history fixture (vbx-9gl): bv compares the whole
-    # revision with its scoped current beads, so a bead outside the scope
-    # reads as removed; both sides drop tombstones. Across five commits, and
-    # across all but the first.
+    # --robot-diff over the history fixture (vbx-9gl): since bv 0.26 both
+    # sides are scoped alike — the revision's beads through the same label and
+    # recipe selection as the current ones (vbx-hj1) — and both drop
+    # tombstones. Across five commits, and across all but the first.
     {"vbx": "robot-diff", "bv": "robot-diff",
      "name": f"robot-diff --diff-since {revision} {' '.join(args)}".strip(),
      "vbx_args": ["--diff-since", revision, *args], "bv_args": ["--diff-since", revision, *args],
@@ -976,8 +930,9 @@ COMPARISONS = [
 ] + [
     # bv's --check-drift --robot-drift against the baseline bv saved into the
     # history fixture, and the one vbx-cli saved into its twin (vbx-6s8): the
-    # scope's issues analysed afresh, no envelope, and the process exiting
-    # with the verdict — compared too (`exits`).
+    # scope's issues analysed afresh with the source's readiness and the
+    # scope's candidates (bv 0.26, vbx-e9j), no envelope, and the process
+    # exiting with the verdict — compared too (`exits`).
     {"vbx": "robot-drift", "bv": "robot-drift",
      "name": f"robot-drift {' '.join(args)}".strip(),
      "vbx_args": args, "bv_args": ["--check-drift", *args], "exits": True,

@@ -21,7 +21,7 @@ import (
 
 // Sprint scope changes — which beads joined or left a sprint mid-flight.
 //
-// Ported from bv v0.25.2's unexported `computeSprintScopeChanges` (cmd/bv
+// Ported from bv v0.26.0's unexported `computeSprintScopeChanges` (cmd/bv
 // main.go). bv runs `git log -p -U0` over `.beads/sprints.jsonl` and reads the
 // sprint's line either side of each hunk; the App Sandbox forbids that
 // subprocess, so this reads the same commits from the object store directly,

@@ -357,19 +357,16 @@ def test_envelope_only_keys_are_one_list(parity) -> None:
 
 
 def test_declared_differences_are_narrow(parity) -> None:
-    print("\nDeclared differences (ADR-024)")
+    print("\nDeclared differences")
     declared = parity.DECLARED_DIFFERENCES
+    # bv 0.26 reads a br beads.db in full, so ADR-024's lossy-read declarations
+    # stopped firing and went (vbx-rst). Nothing is declared now; a new entry is
+    # a decision, and the checks below hold it to the same narrowness.
+    check("nothing is declared since bv 0.26 reads every beads.db column",
+          declared == {}, str(sorted(declared)))
     names = {fixture["name"] for fixture in parity.FIXTURES}
-    check("only the beads.db fixtures declare differences",
-          set(declared) == {"readiness (beads.db)", "dropped (beads.db)"}, str(sorted(declared)))
-    dropped = {path for (_, path) in declared["dropped (beads.db)"]}
-    check("the dropped beads.db declares only the lossy fingerprint, never load_stats",
-          dropped == {".data_hash", ".scope_hash", ".suggestions.data_hash"}, str(dropped))
     check("every declaring fixture is a real one", set(declared) <= names,
           str(set(declared) - names))
-    sqlite_fixtures = {fixture["name"] for fixture in parity.FIXTURES if fixture.get("sqlite")}
-    check("every declaring fixture is read from a beads.db", set(declared) <= sqlite_fixtures,
-          str(set(declared) - sqlite_fixtures))
     # Declarations are keyed by the run's name, which is the command unless the
     # entry is one of several runs of it (`robot-capacity --agents 3`).
     commands = {entry.get("name", entry["vbx"]) for entry in parity.COMPARISONS if entry.get("bv")}
@@ -379,42 +376,54 @@ def test_declared_differences_are_narrow(parity) -> None:
                   command in commands, command)
             check(f"{fixture}: --{command} {path} is one exact path",
                   path.startswith(".") and "*" not in path, path)
-            check(f"{fixture}: --{command} {path} gives its reason, citing ADR-024",
-                  isinstance(reason, str) and "ADR-024" in reason, str(reason))
+            check(f"{fixture}: --{command} {path} gives its reason, citing an ADR",
+                  isinstance(reason, str) and "ADR-" in reason, str(reason))
 
-    hash_diff = ".data_hash: 'a' vs 'b'"
-    velocity_diff = ".project_health.velocity.estimated: missing on the vbx side"
-    other_diff = ".project_health.counts.total: 21 vs 20"
+    # The mechanism, exercised with a declaration of its own: the table is
+    # empty, and a matcher that is never asked anything is never tested.
+    reason = "a test declaration (ADR-000)"
+    saved = dict(declared)
+    declared.clear()
+    declared["readiness (beads.db)"] = {
+        ("robot-next", ".data_hash"): reason,
+        ("robot-triage", ".project_health.velocity.estimated"): reason,
+    }
+    try:
+        hash_diff = ".data_hash: 'a' vs 'b'"
+        velocity_diff = ".project_health.velocity.estimated: missing on the vbx side"
+        other_diff = ".project_health.counts.total: 21 vs 20"
 
-    undeclared, accepted, stale = parity.split_declared(
-        [hash_diff], "readiness (beads.db)", "robot-next")
-    check("a declared path is accepted on its own fixture",
-          undeclared == [] and [d for d, _ in accepted] == [hash_diff], f"{undeclared} {accepted}")
-    check("its reason travels with it", "ADR-024" in accepted[0][1] if accepted else False)
+        undeclared, accepted, _ = parity.split_declared(
+            [hash_diff], "readiness (beads.db)", "robot-next")
+        check("a declared path is accepted on its own fixture",
+              undeclared == [] and [d for d, _ in accepted] == [hash_diff],
+              f"{undeclared} {accepted}")
+        check("its reason travels with it", accepted[0][1] == reason if accepted else False)
 
-    undeclared, accepted, _ = parity.split_declared([hash_diff], "readiness", "robot-next")
-    check("the same path still fails on the JSONL readiness fixture",
-          undeclared == [hash_diff] and accepted == [], f"{undeclared} {accepted}")
-    undeclared, accepted, _ = parity.split_declared([hash_diff], "demo", "robot-next")
-    check("and on the demo", undeclared == [hash_diff] and accepted == [], str(undeclared))
+        undeclared, accepted, _ = parity.split_declared([hash_diff], "readiness", "robot-next")
+        check("the same path still fails on another fixture",
+              undeclared == [hash_diff] and accepted == [], f"{undeclared} {accepted}")
 
-    undeclared, accepted, _ = parity.split_declared(
-        [velocity_diff, other_diff], "readiness (beads.db)", "robot-triage")
-    check("an undeclared difference on the beads.db still fails",
-          undeclared == [other_diff], str(undeclared))
-    check("beside it the declared one is still reported",
-          [d for d, _ in accepted] == [velocity_diff], str(accepted))
+        undeclared, accepted, _ = parity.split_declared(
+            [velocity_diff, other_diff], "readiness (beads.db)", "robot-triage")
+        check("an undeclared difference beside a declared one still fails",
+              undeclared == [other_diff], str(undeclared))
+        check("beside it the declared one is still reported",
+              [d for d, _ in accepted] == [velocity_diff], str(accepted))
 
-    # Priority compares its recommendations alone, so it declares no hash.
-    undeclared, _, _ = parity.split_declared([hash_diff], "readiness (beads.db)", "robot-priority")
-    check("a path declared for one command is not declared for another",
-          undeclared == [hash_diff], str(undeclared))
+        undeclared, _, _ = parity.split_declared(
+            [hash_diff], "readiness (beads.db)", "robot-priority")
+        check("a path declared for one command is not declared for another",
+              undeclared == [hash_diff], str(undeclared))
 
-    _, _, stale = parity.split_declared([], "readiness (beads.db)", "robot-next")
-    check("a declaration that no longer fires is reported stale",
-          stale == [".data_hash", ".scope_hash"], str(stale))
-    _, _, stale = parity.split_declared([], "demo", "robot-next")
-    check("a fixture with no declarations has nothing stale", stale == [], str(stale))
+        _, _, stale = parity.split_declared([], "readiness (beads.db)", "robot-next")
+        check("a declaration that no longer fires is reported stale",
+              stale == [".data_hash"], str(stale))
+        _, _, stale = parity.split_declared([], "demo", "robot-next")
+        check("a fixture with no declarations has nothing stale", stale == [], str(stale))
+    finally:
+        declared.clear()
+        declared.update(saved)
 
 
 def test_label_scoped_runs(parity) -> None:

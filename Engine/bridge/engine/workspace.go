@@ -60,7 +60,7 @@ func workspaceConfigFor(cfg OpenConfig) string {
 
 // discoverWorkspaceConfig is bv's precedence, applied to a path (ADR-026).
 //
-// A port of the unexported discoverWorkspaceConfig in bv v0.25.2's
+// A port of the unexported discoverWorkspaceConfig in bv v0.26.0's
 // cmd/bv/main.go, which works from the working directory; this one takes the
 // path the caller names instead, because the app opens a folder the user chose
 // and vbx-cli's --path names one too. The rule is bv's: a reachable `.beads`

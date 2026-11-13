@@ -147,20 +147,23 @@ func (s *Session) snapshotAt(req []byte) ([]byte, error) {
 }
 
 // diffSince compares the current bead set against an earlier revision, as
-// bv 0.25.2's --diff-since --robot-diff does (cmd/bv/main.go and the
+// bv 0.26.0's --diff-since --robot-diff does (cmd/bv/main.go and the
 // robot-diff handler in robot_registry.go):
 //
 //   - Both sides are the visible beads. bv's history loader drops tombstones
 //     from a historical read exactly as its live load does, so a bead deleted
 //     since the revision is removed rather than modified, and one deleted
 //     before it is on neither side.
-//   - The historical side is the whole revision; the current side is the
-//     scope's issues — under --label the label's subgraph, under --recipe its
-//     selection. A bead outside the scope therefore reads as removed.
+//   - Both sides are scoped the same way (bv 0.26; vbx-hj1). Under --recipe
+//     each side is the recipe's selection of its own beads; otherwise each is
+//     cut to its label candidates, the labelled beads alone. Before 0.26 the
+//     historical side was the whole revision, so every bead outside the scope
+//     read as removed.
 //   - The from-snapshot carries no timestamp (bv passes the zero time) and
 //     the to-snapshot is stamped with the pinned clock.
-//   - to_data_hash and the envelope's data_hash are the unscoped hash, and
-//     the envelope names the scope and hashes it.
+//   - from_data_hash hashes the scoped historical side. to_data_hash and the
+//     envelope's data_hash are the unscoped current hash, and the envelope
+//     names the scope and hashes it.
 //
 // requested_revision, short_revision and badges are vbx's own additions for
 // the time-travel view; bv has no counterpart.
@@ -194,8 +197,27 @@ func (s *Session) diffSince(req []byte) ([]byte, error) {
 	}
 	historical := withoutTombstones(records)
 
-	from := analysis.NewSnapshotAt(historical, time.Time{}, hash.String())
-	to := analysis.NewSnapshot(v.issues)
+	// Both sides are scoped alike: the revision's beads go through the same
+	// selection as the current ones, with readiness built from that revision
+	// as bv builds it from its history load. Without a recipe, both sides are
+	// then cut to the candidates — under --label, the labelled beads without
+	// their neighbours.
+	fromIssues, toIssues := historical, v.issues
+	if v.scoped() {
+		scoped, candidates, err := s.scopeSelection(
+			historical, model.NewReadinessIndex(historical), nil, r.scopeRequest)
+		if err != nil {
+			return nil, err
+		}
+		fromIssues = scoped
+		if r.Recipe == "" {
+			fromIssues = onlyCandidates(scoped, candidates)
+			toIssues = onlyCandidates(v.issues, v.candidates)
+		}
+	}
+
+	from := analysis.NewSnapshotAt(fromIssues, time.Time{}, hash.String())
+	to := analysis.NewSnapshot(toIssues)
 	diff := analysis.CompareSnapshots(from, to)
 	diff.ToTimestamp = robotNow()
 
@@ -203,7 +225,7 @@ func (s *Session) diffSince(req []byte) ([]byte, error) {
 		"requested_revision": r.Revision,
 		"resolved_revision":  hash.String(),
 		"short_revision":     shortHash(hash.String()),
-		"from_data_hash":     analysis.ComputeDataHash(historical),
+		"from_data_hash":     analysis.ComputeDataHash(fromIssues),
 		"to_data_hash":       v.dataHash,
 		"diff":               diff,
 		"badges":             diffBadges(diff),

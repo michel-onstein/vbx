@@ -12,13 +12,13 @@ import (
 
 // Sprints and burndown. Capacity is in capacity.go.
 //
-// Ported from bv v0.25.2. `loader.LoadSprints` reads the sprint file and
+// Ported from bv v0.26.0. `loader.LoadSprints` reads the sprint file and
 // `analysis.DetectAtRisk` flags at-risk sprint beads; both are bv's own,
 // called rather than copied. Everything else — the burndown maths
 // (`calculateBurndownAt`, `generateDailyBurndown`, `generateIdealLine`,
 // `generateIdealLineScoped`) and the scope-change walk
 // (`computeSprintScopeChanges`, see sprint_scope.go) — is still unexported in
-// v0.25.2's `cmd/bv` (main.go and robot_registry.go) and is reproduced here.
+// v0.26.0's `cmd/bv` (main.go and robot_registry.go) and is reproduced here.
 
 // workspaceRoot is the directory sprints are loaded relative to.
 func (s *Session) workspaceRoot() string {
