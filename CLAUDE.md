@@ -262,7 +262,10 @@ them.
   named) and re-reads that export afterwards, failing if the stamps did not land
   there — so from a worktree it no longer rewrites the main checkout. The check
   is in the verify block, which is what makes forgetting a build failure instead
-  of silent drift. The real fix is upstream in `beads_rust`. See ADR-018.
+  of silent drift. **Since br 0.7.5 the export no longer carries `source_repo_path`** — it
+  stays in the local database — so the check judges the path only where a record still shows
+  one, and a record br re-exports drops the field in the diff; that is br, not a clobber. The
+  real fix is upstream in `beads_rust`. See ADR-018.
 - **Never call bv's `workspace.LoadAllFromConfig` or `AggregateLoader`.** In
   v0.25.2 they run `br update --help` and `bd export` unconditionally, which the
   App Sandbox forbids. Workspaces load through `workspace_loader.go`, a port

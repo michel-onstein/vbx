@@ -1281,12 +1281,22 @@ def test_br_worktree_writes_land_in_the_main_checkout() -> None:
               jsonl_field(main_jsonl, issue, "description") == body.read_text())
 
         pinned = {"BEADS_DB": str(topic / ".beads" / "beads.db")}
-        result = run([br, "update", issue, "--source-repo", "pinned", "--json"], topic, pinned)
+        result = run([br, "update", issue, "--source-repo", "pinned",
+                      "--source-repo-path", "/pinned/path", "--json"], topic, pinned)
         check("BEADS_DB pins a worktree write to the worktree",
               result.returncode == 0
               and jsonl_field(topic_jsonl, issue, "source_repo") == "pinned"
               and jsonl_field(main_jsonl, issue, "source_repo") != "pinned",
               (result.stdout + result.stderr).strip()[-300:])
+        # br 0.7.5 keeps source_repo_path in the database and out of the
+        # export, which is why beads-check judges the path only where the
+        # export shows one. If a br release exports it again, this says so.
+        shown = run([br, "show", issue, "--json"], topic, pinned).stdout
+        check("source_repo_path is kept in the database",
+              "/pinned/path" in shown, shown.strip()[-300:])
+        check("...and left out of the export",
+              jsonl_field(topic_jsonl, issue, "source_repo_path") is None,
+              str(jsonl_field(topic_jsonl, issue, "source_repo_path")))
 
 
 def test_beads_fix_from_a_worktree() -> None:

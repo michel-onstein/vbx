@@ -20,8 +20,10 @@ awareness", and half of ours named a path that does not exist on this machine.
 **This check is what stops it recurring.** There is no configuration for it:
 `br create` has no `--source-repo` flag and `.beads/config.yaml` holds only
 `issue_prefix`, so the value cannot be set correctly at creation time. Only
-`br update` takes `--source-repo` and `--source-repo-path` (br 0.6.0 and 0.7.4
-alike), which is what `--fix` calls. The real fix is upstream in `beads_rust`.
+`br update` takes `--source-repo` and `--source-repo-path` (br 0.6.0 through
+0.7.6), which is what `--fix` calls. Since br 0.7.5 the export no longer
+carries `source_repo_path` — it stays in the local database — so the path is
+checked only on records whose export still shows one. The real fix is upstream in `beads_rust`.
 Until then a failing check in the verify block turns "remember to run
 `br update` after `br create`" — a rule of exactly the kind that produced this
 mess — into something the build says out loud, with `--fix` as the one-line
@@ -76,12 +78,18 @@ def records(path: Path) -> list[dict]:
 
 
 def offenders(rows: list[dict], name: str, path: str) -> list[tuple[str, str, str]]:
-    """Records whose stamp is not this repository's, as (id, repo, path)."""
+    """Records whose stamp is not this repository's, as (id, repo, path).
+
+    The path is judged only where the export carries one. `br` 0.7.5 stopped
+    exporting `source_repo_path` (it stays in the machine's own database), so
+    a record written since has none to check — and demanding one made every
+    such record an offender that `--fix` could never clear.
+    """
     out = []
     for row in rows:
         repo = row.get("source_repo") or ""
-        where = row.get("source_repo_path") or ""
-        if repo != name or where != path:
+        where = row.get("source_repo_path")
+        if repo != name or (where is not None and where != path):
             out.append((row.get("id", "<no id>"), repo, where))
     return out
 
