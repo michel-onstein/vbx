@@ -175,7 +175,7 @@ func diffIDs(items []struct {
 	return strings.Join(ids, ",")
 }
 
-func TestDiffComparesTheWholeRevisionWithTheScope(t *testing.T) {
+func TestDiffScopesBothSidesAlike(t *testing.T) {
 	setClock(t, readinessClock)
 	s, err := Open(OpenConfig{Path: scopedHistoryRepo(t), SkipPhase2: true})
 	if err != nil {
@@ -201,26 +201,43 @@ func TestDiffComparesTheWholeRevisionWithTheScope(t *testing.T) {
 		t.Errorf("unscoped diff envelope = %+v, to_data_hash %s", whole.scopeEnvelope, whole.ToDataHash)
 	}
 
-	// Under --label parser the current side is the parser subgraph — its
-	// beads and ui-1, which p-2 blocks — so ui-2 is not new, and the beads
-	// outside the scope read as removed.
+	// bv 0.26 scopes both sides alike (vbx-hj1). Under --label parser each
+	// side is cut to its parser beads, so the closed p-1 is the only change:
+	// the spike and the ui beads are outside the scope on both sides, where
+	// under bv 0.25 the whole revision made them read as removed.
 	parser := call[robotDiffShape](t, s, "diff", map[string]any{"revision": "HEAD~1", "label": "parser"})
-	if diffIDs(parser.Diff.NewIssues) != "" || diffIDs(parser.Diff.RemovedIssues) != "spike-1" ||
+	if diffIDs(parser.Diff.NewIssues) != "" || diffIDs(parser.Diff.RemovedIssues) != "" ||
 		diffIDs(parser.Diff.ClosedIssues) != "p-1" {
 		t.Errorf("diff --label parser: new %s, removed %s, closed %s",
 			diffIDs(parser.Diff.NewIssues), diffIDs(parser.Diff.RemovedIssues),
 			diffIDs(parser.Diff.ClosedIssues))
 	}
-	// The hashes stay the unscoped ones; the scope is named and hashed.
+	// from_data_hash hashes the scoped revision; to_data_hash and the
+	// envelope's hash stay the unscoped current one; the scope is named and
+	// hashed.
+	if parser.FromDataHash == whole.FromDataHash {
+		t.Errorf("diff --label parser hashed the whole revision: %s", parser.FromDataHash)
+	}
 	if parser.Scope == nil || parser.Scope.Label != "parser" || parser.ToDataHash != whole.ToDataHash ||
 		parser.DataHash != whole.DataHash || parser.ScopeHash == whole.ScopeHash {
 		t.Errorf("diff --label parser envelope = %+v", parser.scopeEnvelope)
 	}
 
-	// An unknown label is an empty current side: everything was removed.
+	// An unknown label is empty on both sides: nothing changed, where it
+	// used to read as everything removed.
 	unknown := call[robotDiffShape](t, s, "diff", map[string]any{"revision": "HEAD~1", "label": "no-such-label"})
-	if diffIDs(unknown.Diff.RemovedIssues) != "p-1,p-2,spike-1,ui-1" {
-		t.Errorf("diff --label no-such-label removed %s", diffIDs(unknown.Diff.RemovedIssues))
+	if diffIDs(unknown.Diff.RemovedIssues) != "" || diffIDs(unknown.Diff.NewIssues) != "" {
+		t.Errorf("diff --label no-such-label: removed %s, new %s",
+			diffIDs(unknown.Diff.RemovedIssues), diffIDs(unknown.Diff.NewIssues))
+	}
+
+	// Under a recipe each side is that recipe's selection of its own beads:
+	// ui-1, blocked by p-2 in both revisions, is selected by neither, so it is
+	// not removed.
+	actionable := call[robotDiffShape](t, s, "diff", map[string]any{"revision": "HEAD~1", "recipe": "actionable"})
+	if strings.Contains(","+diffIDs(actionable.Diff.RemovedIssues)+",", ",ui-1,") {
+		t.Errorf("diff --recipe actionable removed ui-1, which neither side selects: %s",
+			diffIDs(actionable.Diff.RemovedIssues))
 	}
 
 	// A recipe that does not resolve fails, as every scoped command does.
@@ -295,6 +312,44 @@ func TestDriftIsBvsCheckDrift(t *testing.T) {
 	}
 	if scoped.ExitCode != want {
 		t.Errorf("drift exit code %d for %+v, want %d", scoped.ExitCode, scoped.Summary, want)
+	}
+}
+
+// Regression (vbx-e9j): bv 0.26's --check-drift gives its fresh analyzer the
+// source's readiness and the scope's candidates, so under --label only the
+// labelled beads count as actionable. vbx's port kept bv 0.25's bare analyzer,
+// where the label's neighbours counted too. Here --label ui pulls in p-2,
+// which blocks ui-1: actionable is ui-2 alone, not ui-2 and p-2.
+func TestDriftCountsOnlyTheScopesCandidatesAsActionable(t *testing.T) {
+	setClock(t, readinessClock)
+	s, err := Open(OpenConfig{Path: scopedHistoryRepo(t), SkipPhase2: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	call[baselineShape](t, s, "baseline_save", map[string]any{"description": "whole"})
+
+	type driftAlerts struct {
+		Alerts []struct {
+			Type          string  `json:"type"`
+			BaselineValue float64 `json:"baseline_value"`
+			CurrentValue  float64 `json:"current_value"`
+		} `json:"alerts"`
+	}
+	scoped := call[driftAlerts](t, s, "drift", map[string]any{"label": "ui"})
+	found := false
+	for _, alert := range scoped.Alerts {
+		if alert.Type != "actionable_change" {
+			continue
+		}
+		found = true
+		if alert.BaselineValue != 2 || alert.CurrentValue != 1 {
+			t.Errorf("actionable_change %v -> %v, want 2 -> 1 (ui-2 alone)",
+				alert.BaselineValue, alert.CurrentValue)
+		}
+	}
+	if !found {
+		t.Errorf("drift --label ui raised no actionable_change: %+v", scoped.Alerts)
 	}
 }
 

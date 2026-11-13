@@ -1024,7 +1024,7 @@ func hasOpenIssues(issues []model.Issue) bool {
 // history at all, returning the status to report when it may not and "" when
 // it may.
 //
-// Both refusals are bv's (`handleRobotTriage` in v0.25.2), and both leave the
+// Both refusals are bv's (`handleRobotTriage` in v0.26.0), and both leave the
 // history nil — so staleness is *absent* — rather than handing the scorer an
 // empty report. That distinction is the whole point: given a report with no
 // events for a bead, `ComputeStaleness` falls back to `updated_at` and reports

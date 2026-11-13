@@ -11,7 +11,7 @@ import (
 
 // Capacity: how long the open work takes with N agents.
 //
-// Ported from bv v0.25.2's handleRobotCapacity and longestCapacityChain
+// Ported from bv v0.26.0's handleRobotCapacity and longestCapacityChain
 // (cmd/bv/robot_registry.go), which are unexported. The per-bead estimate is
 // bv's own analysis.EstimateETAForIssue and readiness is the analyzer's
 // ReadinessIndex, both called rather than copied.
@@ -219,7 +219,7 @@ func hasLabel(issue model.Issue, label string) bool {
 	return false
 }
 
-// longestCapacityChain is bv v0.25.2's longestCapacityChain
+// longestCapacityChain is bv v0.26.0's longestCapacityChain
 // (cmd/bv/robot_registry.go), unexported there. It measures the chain in
 // steps, not minutes, and keeps the first longest path in seed and
 // neighbour order. An acyclic reachable graph shares suffix lengths; a

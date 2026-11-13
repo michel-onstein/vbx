@@ -10,7 +10,7 @@ import (
 	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 )
 
-// Forecast: bv 0.25.2's --robot-forecast, whose handler (robot_registry.go)
+// Forecast: bv 0.26.0's --robot-forecast, whose handler (robot_registry.go)
 // is unexported in cmd/bv and is reproduced here. The estimate itself is bv's
 // analysis.EstimateETAForIssue, called rather than copied.
 //

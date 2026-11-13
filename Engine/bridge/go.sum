@@ -5,8 +5,8 @@ git.sr.ht/~sbinet/cmpimg v0.1.0/go.mod h1:FU12psLbF4TfNXkKH2ZZQ29crIqoiqTZmeQ7dk
 git.sr.ht/~sbinet/gg v0.8.0 h1:PjQ4AgUWRz7Dy6PVBKMLLg96eRCos1U+H6F3FJuKWHo=
 git.sr.ht/~sbinet/gg v0.8.0/go.mod h1:XhlGCvSXts+BaZ1XMZLxLSFUDvwsJ/2El5F6XzPep6o=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/Dicklesworthstone/beads_viewer v0.25.2 h1:Pm4xYUakUvJ1ary1bhx/t5KvAyz+Fu0l2CsuQkfNNtk=
-github.com/Dicklesworthstone/beads_viewer v0.25.2/go.mod h1:z2g+ikPWYGoQTA1CnKSI8eIwvVFUg/2iijZ0vS7+PO0=
+github.com/Dicklesworthstone/beads_viewer v0.26.0 h1:iurHjKt/k1GmUptCD2NvEVEyGEIX0MMdZu/cmTEHbr8=
+github.com/Dicklesworthstone/beads_viewer v0.26.0/go.mod h1:z2g+ikPWYGoQTA1CnKSI8eIwvVFUg/2iijZ0vS7+PO0=
 github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ4pzQ=
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
 github.com/Microsoft/go-winio v0.5.2/go.mod h1:WpS1mjBmmwHBEWmogvA2mj8546UReBk4v8QkMxJ6pZY=

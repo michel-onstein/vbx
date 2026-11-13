@@ -3,7 +3,8 @@ package engine
 // The nine history commands — history, causality, related, impact network,
 // orphans, file beads, file hotspots, file relations and file impact — are
 // bv 0.25.2's own handlers, ported from cmd/bv/robot_registry.go, over bv's
-// own correlator. The correlator is vbx's copy of bv's pkg/correlation
+// own correlator. bv 0.26.0 changed them — a beads.db-only workspace and
+// --as-of now reach the correlator — and porting that is vbx-tgb. The correlator is vbx's copy of bv's pkg/correlation
 // (Engine/bridge/correlation, ADR-027), identical but for how it reaches git:
 // every git command line it runs is answered in-process from the object store
 // (package objgit), because the App Sandbox cannot spawn git (ADR-006).

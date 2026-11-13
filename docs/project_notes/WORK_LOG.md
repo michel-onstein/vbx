@@ -5,6 +5,30 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-11-13 — The engine runs on bv v0.26.0 (vbx-xhh, vbx-rst, vbx-hj1, vbx-e9j)
+
+`go.mod` now pins beads_viewer v0.26.0. The vendored correlation package is
+regenerated (all seven substitutions apply) and the notices are rebuilt. Three
+ports followed bv:
+
+- **vbx-rst, the `beads.db` loader.** It orders `updated_at DESC, id`, orders
+  comments by `created_at, id`, and reads `due_date` where there is no
+  `due_at`. ADR-024's declared differences stopped firing because bv fixed its
+  lossy read, so they are deleted and `DECLARED_DIFFERENCES` is empty.
+- **vbx-hj1, `--robot-diff`.** Both sides are scoped alike. The revision's
+  beads go through the same `scopeSelection` as the current ones, with the
+  revision's readiness, and `from_data_hash` hashes the scoped side.
+- **vbx-e9j, `--robot-drift`.** The fresh analyzer carries the source's
+  readiness and the scope's candidates, so a label's neighbours no longer
+  count as actionable.
+
+`parity-check.py` against bv 0.26.0 covers 16 workspaces with 0 differing
+commands and nothing declared. Go regression tests were added for each port,
+and each one fails without its fix. The port comments are restamped where bv's
+code is byte-identical between the two versions. The correlation handlers
+(vbx-tgb), the Pages graph (vbx-q83) and the due-date/external-ref Inspector
+(vbx-5cy) are follow-ups. semver:minor.
+
 ## 2026-11-13 — Surveyed bv v0.26.0 and br v0.7.6; filed the adjustments
 
 bv v0.26.0 (2026-11-02) and br v0.7.6 (2026-10-15) are out. A trial bump of

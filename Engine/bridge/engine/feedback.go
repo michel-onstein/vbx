@@ -273,7 +273,7 @@ func (s *Session) triageFeedbackReset() ([]byte, error) {
 }
 
 // feedbackScoreClock is the instant a verdict's score is computed at: the
-// wall clock, never SOURCE_DATE_EPOCH. bv 0.25.2's --feedback-accept scores a
+// wall clock, never SOURCE_DATE_EPOCH. bv 0.26.0's --feedback-accept scores a
 // fresh analyzer it never pins (NewAnalyzer takes time.Now), so its score —
 // whose risk factor reads a bead's age — moves with the wall clock whatever
 // the environment says. Matching bv means matching where it does not pin, as
@@ -365,7 +365,7 @@ func (s *Session) triageFeedbackRecord(req []byte) ([]byte, error) {
 
 // ---- bv's feedback commands, before discovery (vbx-v1t) --------------------
 //
-// bv 0.25.2 answers its four feedback flags early in cmd/bv/main.go, before
+// bv 0.26.0 answers its four feedback flags early in cmd/bv/main.go, before
 // it discovers a `.bv/workspace.yaml` and before it reads --workspace at all.
 // So where no `.beads` is reachable — a workspace root, or a folder below one
 // — bv does not answer over the workspace, as every robot command there does:

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Dicklesworthstone/beads_viewer/pkg/model"
 	_ "modernc.org/sqlite"
 )
 
@@ -210,8 +211,10 @@ func TestLoadSQLiteHonoursTheTombstoneColumn(t *testing.T) {
 // TestLoadSQLiteOrdersAsBvDoes is the regression test for vbx-dj4: the
 // loader sorted by id, so on a beads.db every tie-break downstream (alerts,
 // a label's issue list and top issue) came out in a different order from
-// bv's. bv's reader orders by updated_at DESC, ties in SQLite's row order,
-// and by id only where the schema has no updated_at.
+// bv's. bv's reader orders by updated_at DESC and, since bv 0.26, breaks a
+// tie by id (vbx-rst: the 0.25 rule left ties in SQLite's row order, which
+// is what this loader then matched); by id alone where there is no
+// updated_at.
 func TestLoadSQLiteOrdersAsBvDoes(t *testing.T) {
 	open := func(t *testing.T, stmts ...string) string {
 		t.Helper()
@@ -241,9 +244,10 @@ func TestLoadSQLiteOrdersAsBvDoes(t *testing.T) {
 		return out
 	}
 
-	t.Run("newest update first, ties in row order", func(t *testing.T) {
-		// Inserted so that neither id order nor insertion order is the answer.
-		// o-9 and o-10 tie; id order would put o-10 first, bv puts o-9 first.
+	t.Run("newest update first, ties by id", func(t *testing.T) {
+		// Inserted so that neither insertion order nor numeric order is the
+		// answer. o-9 and o-10 tie: inserted o-9 first, numerically o-9
+		// first, but bv 0.26 breaks the tie by id as a string — o-10.
 		path := open(t,
 			`CREATE TABLE issues (id TEXT PRIMARY KEY, title TEXT, status TEXT, updated_at DATETIME)`,
 			`INSERT INTO issues VALUES ('o-2','Oldest','open','2026-01-01T00:00:00Z')`,
@@ -252,9 +256,9 @@ func TestLoadSQLiteOrdersAsBvDoes(t *testing.T) {
 			`INSERT INTO issues VALUES ('o-10','Tied B','open','2026-02-01T00:00:00Z')`,
 		)
 		got := ids(t, path)
-		want := []string{"o-11", "o-9", "o-10", "o-2"}
+		want := []string{"o-11", "o-10", "o-9", "o-2"}
 		if fmt.Sprint(got) != fmt.Sprint(want) {
-			t.Errorf("order = %v, want %v (bv's updated_at DESC)", got, want)
+			t.Errorf("order = %v, want %v (bv's updated_at DESC, id)", got, want)
 		}
 	})
 
@@ -267,6 +271,76 @@ func TestLoadSQLiteOrdersAsBvDoes(t *testing.T) {
 		want := []string{"o-11", "o-2"}
 		if fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("order = %v, want %v (bv's fallback orders by id)", got, want)
+		}
+	})
+}
+
+// TestLoadSQLiteReadsDueDateAndOrdersCommentsAsBv026 locks in two more rules
+// of bv 0.26's rewritten SQLite read (vbx-rst): an older store's `due_date`
+// is read where there is no `due_at` — while a present `due_at` wins even
+// when NULL — and an issue's comments come back by created_at, then id.
+func TestLoadSQLiteReadsDueDateAndOrdersCommentsAsBv026(t *testing.T) {
+	load := func(t *testing.T, stmts ...string) map[string]*model.Issue {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "beads.db")
+		db, err := sql.Open("sqlite", "file:"+path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range stmts {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("exec %q: %v", stmt, err)
+			}
+		}
+		db.Close()
+		issues, _, _, err := LoadSQLite(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]*model.Issue{}
+		for i := range issues {
+			byID[issues[i].ID] = &issues[i]
+		}
+		return byID
+	}
+
+	t.Run("due_date without due_at", func(t *testing.T) {
+		byID := load(t,
+			`CREATE TABLE issues (id TEXT PRIMARY KEY, title TEXT, status TEXT, due_date DATETIME)`,
+			`INSERT INTO issues VALUES ('d-1','Due','open','2026-05-01T00:00:00Z')`,
+		)
+		due := byID["d-1"].DueDate
+		if due == nil || due.Month() != 5 {
+			t.Errorf("due_date not read: %v", due)
+		}
+	})
+
+	t.Run("a present due_at wins, even NULL", func(t *testing.T) {
+		byID := load(t,
+			`CREATE TABLE issues (id TEXT PRIMARY KEY, title TEXT, status TEXT, due_at DATETIME, due_date DATETIME)`,
+			`INSERT INTO issues VALUES ('d-1','Due','open',NULL,'2026-05-01T00:00:00Z')`,
+		)
+		if due := byID["d-1"].DueDate; due != nil {
+			t.Errorf("due_date read past a present due_at: %v", due)
+		}
+	})
+
+	t.Run("comments by created_at, then id", func(t *testing.T) {
+		byID := load(t,
+			`CREATE TABLE issues (id TEXT PRIMARY KEY, title TEXT, status TEXT)`,
+			`INSERT INTO issues VALUES ('c-1','Commented','open')`,
+			`CREATE TABLE comments (id TEXT, issue_id TEXT, author TEXT, text TEXT, created_at DATETIME)`,
+			// Inserted out of order: newest first, then a tie broken by id.
+			`INSERT INTO comments VALUES ('k3','c-1','a','third','2026-01-03T00:00:00Z')`,
+			`INSERT INTO comments VALUES ('k2','c-1','a','second (tie)','2026-01-01T00:00:00Z')`,
+			`INSERT INTO comments VALUES ('k1','c-1','a','first (tie)','2026-01-01T00:00:00Z')`,
+		)
+		var got []string
+		for _, c := range byID["c-1"].Comments {
+			got = append(got, c.ID)
+		}
+		if want := []string{"k1", "k2", "k3"}; fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("comment order = %v, want %v", got, want)
 		}
 	})
 }

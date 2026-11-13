@@ -180,11 +180,14 @@ func TestLoadSQLiteDropsAndCountsWhatBvDrops(t *testing.T) {
 	if stats != (loader.ParseStats{Valid: 1, Errors: 3}) {
 		t.Errorf("stats = %+v, want 1 valid and 3 errors", stats)
 	}
+	// Warnings come in row order, bv's loop as well as this one. The three
+	// rejected rows tie on updated_at, and bv 0.26 breaks the tie by id, so
+	// the repeated k-1 reads first (vbx-rst).
 	want := []string{
+		`duplicate issue ID "k-1"`,
 		`invalid issue "k-2": updated_at (2026-08-01 09:00:00 +0000 UTC) cannot be before` +
 			` created_at (2026-08-05 09:00:00 +0000 UTC)`,
 		`invalid issue "k-3": issue title cannot be empty`,
-		`duplicate issue ID "k-1"`,
 	}
 	if !reflect.DeepEqual(dropped, want) {
 		t.Errorf("warnings = %q, want %q", dropped, want)
