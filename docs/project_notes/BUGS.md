@@ -4,6 +4,31 @@ Found-and-fixed issues, with the regression test that locks each fix in.
 
 ---
 
+## 2026-11-13 — beads-check could never pass on a bead written by br 0.7.5+
+
+**Symptom:** under br 0.7.6, `scripts/test-packaging.py` failed three checks
+in "beads-check --fix from a worktree": `--fix` reported "br reported success
+but 1 of 1 records … still carry another stamp". The repository's own check
+still passed, but only because no bead had been written since the upgrade. The
+first `br create` would have turned the verify block red with no way to clear
+it.
+
+**Cause:** br 0.7.5 (#528) stopped exporting `source_repo_path`. It stays in
+the machine's own database, and `br show` still returns it. `offenders()`
+required the export's path to equal the checkout's, so every record br
+re-exported counted as an offender, and the post-fix re-read found the same
+record still "wrong".
+
+**Fix:** the path is judged only where the export carries one. The name is
+still required everywhere, and `--fix` still writes both, because br keeps the
+path in the database.
+
+**Regression tests:** the existing `test_beads_fix_from_a_worktree` checks now
+pass on br 0.7.6. `test_br_worktree_writes_land_in_the_main_checkout` gains
+two measured checks: `source_repo_path` is kept in the database, and it is left
+out of the export. If a br release exports it again, the second check fails and
+the rule gets revisited.
+
 ## 2026-10-03 — Time travel in a workspace showed the root repository's view
 
 **Symptom:** In a multi-repository workspace session, the Compare menu offered

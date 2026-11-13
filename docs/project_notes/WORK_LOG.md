@@ -5,6 +5,30 @@ store was empty until 2026-08-21, so earlier entries carry no id.
 
 ---
 
+## 2026-11-13 — Surveyed bv v0.26.0 and br v0.7.6; filed the adjustments
+
+bv v0.26.0 (2026-11-02) and br v0.7.6 (2026-10-15) are out. A trial bump of
+the engine to bv v0.26.0 builds and passes `go test`, and the vendored
+correlation package regenerates with every substitution applied. Run against
+the real bv 0.26.0 binary, `parity-check.py` then reports 41 differing
+commands. Filed:
+
+- the bump itself (vbx-xhh), with three children that must land with it:
+  - beads.db row order and ADR-024's now-stale declarations (vbx-rst);
+  - scoped `--robot-diff` (vbx-hj1);
+  - scoped `--robot-drift` (vbx-e9j);
+- three follow-ups:
+  - correlation on beads.db-only workspaces and `--as-of` (vbx-tgb);
+  - history in the Pages graph (vbx-q83);
+  - due date and external ref in the Inspector (vbx-5cy);
+- br 0.7.5+ failure handling in `BeadWriter` (vbx-be9);
+- the `immutable=1` reader missing WAL commits (vbx-i76).
+
+vbx-vsv's notes now record that bv 0.26 fixed the SQLite fallback and that
+two of its upstream issues remain. Also fixed `beads-check.py` for br 0.7.5's
+export, which no longer carries `source_repo_path` (BUGS.md, 2026-11-13).
+semver:patch.
+
 ## 2026-10-03 — A workspace offers no time travel, and says why (vbx-bcq)
 
 Decided in ADR-028. A multi-repository workspace has no single history, so the
