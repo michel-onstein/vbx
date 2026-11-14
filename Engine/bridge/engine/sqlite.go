@@ -59,6 +59,11 @@ func LoadSQLite(path string) (issues []model.Issue, stats loader.ParseStats, dro
 		"external_ref", "source_repo", "compaction_level", "original_size",
 		"tombstone",
 	}
+	// br's deadline column is due_at; older stores call it due_date. Like bv
+	// 0.26, a present due_at is authoritative even where a row leaves it NULL.
+	if !cols["due_at"] && cols["due_date"] {
+		want = append(want, "due_date")
+	}
 	var selected []string
 	for _, c := range want {
 		if cols[c] {
@@ -73,12 +78,12 @@ func LoadSQLite(path string) (issues []model.Issue, stats loader.ParseStats, dro
 	// updated_at. Every tie-break downstream — the order of equal-scored
 	// alerts, a label's issue list and its top issue — follows the order the
 	// loader returns, so sorting by id here reordered them all (vbx-dj4).
-	// Rows that tie on updated_at come back in whatever order SQLite yields
-	// for this clause, which is bv's too: the clause is spelled exactly as
-	// bv spells it, deliberately without a tie-break of our own.
+	// The clause is bv's, spelled as bv spells it: since bv 0.26 rows that tie
+	// on updated_at break by id. Before that bv had no tie-break, and neither
+	// did this, so a tie came back in whatever order SQLite yielded (vbx-rst).
 	orderBy := "ORDER BY id"
 	if cols["updated_at"] {
-		orderBy = "ORDER BY updated_at DESC"
+		orderBy = "ORDER BY updated_at DESC, id"
 	}
 	q := fmt.Sprintf("SELECT %s FROM issues %s", strings.Join(selected, ", "), orderBy)
 
@@ -216,7 +221,7 @@ func assignIssueField(it *model.Issue, col, v string) {
 		if t, ok := parseTime(v); ok {
 			it.ClosedAt = &t
 		}
-	case "due_at":
+	case "due_at", "due_date":
 		if t, ok := parseTime(v); ok {
 			it.DueDate = &t
 		}
@@ -321,7 +326,8 @@ func loadDependencies(db *sql.DB) map[string][]*model.Dependency {
 
 func loadComments(db *sql.DB) map[string][]*model.Comment {
 	out := map[string][]*model.Comment{}
-	rows, err := db.Query("SELECT id, issue_id, author, text, created_at FROM comments")
+	// bv 0.26's order, so an issue's comments list as bv lists them.
+	rows, err := db.Query("SELECT id, issue_id, author, text, created_at FROM comments ORDER BY issue_id, created_at, id")
 	if err != nil {
 		return out
 	}

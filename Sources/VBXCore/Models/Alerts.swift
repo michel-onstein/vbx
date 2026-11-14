@@ -137,7 +137,7 @@ public struct HealthAlert: Codable, Sendable, Hashable, Identifiable {
     /// The SF Symbol for the alert type.
     public var typeSymbolName: String { Self.symbolName(forType: type) }
 
-    /// Every alert type bv 0.25.2 emits, with its name and symbol. The type
+    /// Every alert type bv 0.26.0 emits, with its name and symbol. The type
     /// set is open: one missing here still decodes and still shows, under
     /// ``fallbackSymbolName`` and a name made from its raw value.
     public static let knownTypes: [String: (name: String, symbol: String)] = [

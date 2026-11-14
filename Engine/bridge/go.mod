@@ -3,7 +3,7 @@ module github.com/qjam/vbx/engine
 go 1.26.0
 
 require (
-	github.com/Dicklesworthstone/beads_viewer v0.25.2
+	github.com/Dicklesworthstone/beads_viewer v0.26.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/goccy/go-json v0.10.6
 	golang.org/x/sync v0.23.0

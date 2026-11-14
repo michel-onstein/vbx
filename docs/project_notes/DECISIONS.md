@@ -1323,7 +1323,9 @@ faking bv's.
 
 ## ADR-024 — vbx keeps its own read of a beads.db rather than bv 0.25's lossy one
 
-**Date:** 2026-10-01 · **Status:** Accepted, implemented
+**Date:** 2026-10-01 · **Status:** Accepted, implemented; its declared
+differences retired 2026-11-13, when bv 0.26 fixed the lossy read (vbx-rst) —
+the source choice stands
 
 **Context.** bv 0.25 chooses its source through `internal/datasource`: the
 freshest candidate wins, and in practically every live `br` 0.7 workspace that
@@ -1383,6 +1385,16 @@ fails; a declaration that stops firing fails the run; and each is printed as
   (`due_date` vs `due_at`) — the declarations then stop firing and the run
   fails, which is the prompt — or when bv exports its source selection, so vbx
   could adopt it without copying `cmd/bv` or `internal/`.
+
+**Revisited 2026-11-13 (bv 0.26.0, vbx-rst).** The first trigger fired. bv
+0.26 deleted `loadIssuesSimple` and selects each column on its own, `due_at`
+preferred over `due_date`, so every declaration stopped firing. They are gone,
+and `DECLARED_DIFFERENCES` is empty. What remained was load order: bv now sorts
+`updated_at DESC, id` and comments by `issue_id, created_at, id`. vbx's loader
+does the same, and reads `due_date` where a store has no `due_at`, so both
+`beads.db` fixtures match bv outright. The source choice in the decision above
+stands: vbx still prefers the JSONL and ranks no sources. The immutable read
+noted under (b) is now vbx-i76, because bv 0.26's own DSN rejects `immutable=1`.
 
 ---
 

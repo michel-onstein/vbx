@@ -247,7 +247,7 @@ func filterAlerts(alerts []drift.Alert, r alertsRequest) []drift.Alert {
 	return out
 }
 
-// alertMatchesLabel is bv 0.25.2's --alert-label rule, from the robot-alerts
+// alertMatchesLabel is bv 0.26.0's --alert-label rule, from the robot-alerts
 // handler in cmd/bv/robot_registry.go, which exports no function for it.
 //
 // A blank label keeps everything. Otherwise, case-insensitively and after
@@ -295,17 +295,18 @@ func countSeverities(alerts []drift.Alert) (critical, warning, info int) {
 const noBaselineError = "Error: No baseline found.\n" +
 	"Create one with: bv --save-baseline \"description\""
 
-// driftPayload is bv 0.25.2's --check-drift --robot-drift (cmd/bv/main.go),
+// driftPayload is bv 0.26.0's --check-drift --robot-drift (cmd/bv/main.go),
 // over the request's scope.
 //
 // It is not the alerts computation, and differs from it in three ways that
 // are bv's, not vbx's:
 //
-//   - The analysis is a fresh analyzer over the scope's issues, with no
-//     candidate set and no source-wide readiness: bv builds one with
-//     analysis.NewAnalyzer(issues) rather than borrowing its dispatch
-//     analyzer, so under --label the label's neighbours count as actionable
-//     too.
+//   - The analysis is a fresh analyzer over the scope's issues rather than
+//     the dispatch analyzer. Since bv 0.26 it carries the source-wide
+//     readiness and the scope's candidates (SetReadinessScope), so under
+//     --label only the labelled beads count as actionable — not their
+//     neighbours — and a recipe's selection is judged against the whole
+//     source's blockers (vbx-e9j).
 //   - No issues are attached to the calculator, so only the baseline
 //     comparisons run — cycles, density, size, blocked, actionable and
 //     PageRank — and none of the issue-derived checks (staleness, cascades,
@@ -339,6 +340,7 @@ func (s *Session) driftPayload(req []byte) ([]byte, error) {
 	now := robotNow()
 	analyzer := analysis.NewAnalyzer(v.issues)
 	analyzer.SetNow(now)
+	analyzer.SetReadinessScope(s.readinessIndex(), v.candidates)
 	stats := analyzer.Analyze()
 
 	var open, closed, blocked int

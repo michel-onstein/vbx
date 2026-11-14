@@ -9,7 +9,7 @@ import (
 	"github.com/Dicklesworthstone/beads_viewer/pkg/recipe"
 )
 
-// bv 0.25.2's --label and --recipe are global scopes, not per-command
+// bv 0.26.0's --label and --recipe are global scopes, not per-command
 // filters. Its scopeLoadedIssues (cmd/bv/main.go) runs once, before any robot
 // handler:
 //
@@ -86,37 +86,9 @@ func (s *Session) view(sc scopeRequest) (robotView, error) {
 		return v, nil
 	}
 
-	scoped := issues
-	var candidates map[string]bool
-	if sc.Label != "" {
-		subgraph := analysis.ComputeLabelSubgraph(issues, sc.Label)
-		scoped = make([]model.Issue, 0, len(subgraph.AllIssues))
-		for _, id := range subgraph.AllIssues {
-			if issue, ok := subgraph.IssueMap[id]; ok {
-				scoped = append(scoped, issue)
-			}
-		}
-		candidates = make(map[string]bool, len(subgraph.CoreIssues))
-		for _, id := range subgraph.CoreIssues {
-			candidates[id] = true
-		}
-	}
-
-	if sc.Recipe != "" {
-		active, err := s.resolveRecipe(sc.Recipe)
-		if err != nil {
-			return robotView{}, err
-		}
-		selection := scoped
-		if candidates != nil {
-			selection = onlyCandidates(scoped, candidates)
-		}
-		// Capped, unlike recipe_apply: bv hands the recipe to Apply as it is.
-		applied, err := recipe.Apply(selection, s.recipeMetrics(issues, active, stats), active, robotNow())
-		if err != nil {
-			return robotView{}, fmt.Errorf("recipe %s: %w", active.Name, err)
-		}
-		scoped = applied
+	scoped, candidates, err := s.scopeSelection(issues, s.readinessIndex(), stats, sc)
+	if err != nil {
+		return robotView{}, err
 	}
 
 	// The scoped analyzer is this call's alone; the methods that read its
@@ -135,6 +107,54 @@ func (s *Session) view(sc scopeRequest) (robotView, error) {
 	}
 	v.scope = provenanceScope{label: sc.Label, recipe: sc.Recipe, candidates: selected}
 	return v, nil
+}
+
+// scopeSelection is the selection half of bv's scopeLoadedIssues, over any
+// issue set: the label subgraph and its core candidates, then the recipe over
+// those candidates. It is separate from view because bv 0.26 runs the same
+// selection over a --diff-since revision's beads, with that revision's own
+// readiness (vbx-hj1). stats may be nil, in which case a recipe that sorts on
+// graph metrics analyses source afresh. The recipe is resolved once per call;
+// an unknown recipe is bv's error.
+func (s *Session) scopeSelection(
+	source []model.Issue, readiness *model.ReadinessIndex, stats *analysis.GraphStats,
+	sc scopeRequest,
+) ([]model.Issue, map[string]bool, error) {
+	scoped := source
+	var candidates map[string]bool
+	if sc.Label != "" {
+		subgraph := analysis.ComputeLabelSubgraph(source, sc.Label)
+		scoped = make([]model.Issue, 0, len(subgraph.AllIssues))
+		for _, id := range subgraph.AllIssues {
+			if issue, ok := subgraph.IssueMap[id]; ok {
+				scoped = append(scoped, issue)
+			}
+		}
+		candidates = make(map[string]bool, len(subgraph.CoreIssues))
+		for _, id := range subgraph.CoreIssues {
+			candidates[id] = true
+		}
+	}
+
+	if sc.Recipe != "" {
+		active, err := s.resolveRecipe(sc.Recipe)
+		if err != nil {
+			return nil, nil, err
+		}
+		selection := scoped
+		if candidates != nil {
+			selection = onlyCandidates(scoped, candidates)
+		}
+		metrics := s.recipeMetrics(source, active, stats)
+		metrics.Readiness = readiness
+		// Capped, unlike recipe_apply: bv hands the recipe to Apply as it is.
+		applied, err := recipe.Apply(selection, metrics, active, robotNow())
+		if err != nil {
+			return nil, nil, fmt.Errorf("recipe %s: %w", active.Name, err)
+		}
+		scoped = applied
+	}
+	return scoped, candidates, nil
 }
 
 // seedHash is the data hash a triage may seed its analyzer with: only the

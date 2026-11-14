@@ -11,7 +11,7 @@ import (
 // keeps stderr clean and reports the same accounting in the envelope's
 // load_stats instead. vbx-1l6.
 //
-// What bv 0.25.2 prints, each line as `Warning: <message>`:
+// What bv 0.26.0 prints, each line as `Warning: <message>`:
 //
 //   - a single repository: the discovery warnings for the `.beads` directory
 //     (`loadSmart`'s handler for `FindJSONLPathWithWarnings` — leftover merge

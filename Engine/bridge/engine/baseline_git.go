@@ -10,7 +10,7 @@ import (
 
 // The commit a baseline records (vbx-6s8).
 //
-// bv 0.25.2's baseline.New stamps the baseline with baseline.GetGitInfo("."):
+// bv 0.26.0's baseline.New stamps the baseline with baseline.GetGitInfo("."):
 // three `git` subprocesses — `rev-parse HEAD`, `log -1 --format=%s` and
 // `rev-parse --abbrev-ref HEAD` — run in the *process's* working directory.
 // For bv that is the project, because bv is run from it. For the engine it is
@@ -23,7 +23,7 @@ import (
 // object store with go-git. Everything else is bv's: the types, Save, Load
 // and Summary.
 
-// newWorkspaceBaseline is baseline.New (bv v0.25.2) with the git metadata read
+// newWorkspaceBaseline is baseline.New (bv v0.26.0) with the git metadata read
 // from the repository containing dir rather than from the process's working
 // directory, and without spawning git.
 func newWorkspaceBaseline(
@@ -44,7 +44,7 @@ func newWorkspaceBaseline(
 	}
 }
 
-// workspaceGitInfo is bv v0.25.2's baseline.GetGitInfo(dir), read from the
+// workspaceGitInfo is bv v0.26.0's baseline.GetGitInfo(dir), read from the
 // object store. Like GetGitInfo it never fails: what cannot be read is empty.
 //
 //   - sha is `git rev-parse HEAD`: HEAD's commit, empty when the directory is

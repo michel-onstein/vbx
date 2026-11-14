@@ -227,7 +227,7 @@ pre.mermaid svg { max-width: 100%; height: auto; }
 </tr>
 <tr>
 <td><strong>Date</strong></td>
-<td>2026-08-20; bv 0.21–0.25 capabilities mapped 2026-10-01 (vbx-htg)</td>
+<td>2026-08-20; bv 0.21–0.25 capabilities mapped 2026-10-01 (vbx-htg); engine on bv 0.26.0 2026-11-13 (vbx-xhh)</td>
 </tr>
 <tr>
 <td><strong>Build state</strong></td>
@@ -250,7 +250,7 @@ History view, time travel with diff badges, recipes, alerts and drift with
 baselines, the sprint dashboard, multi-repository workspaces, App Intents, the
 <code>vbx://</code> URL scheme, Spotlight indexing, the tutorial, and <code>vbx-cli</code> speaking
 the robot protocol with TOON output.</p>
-<p><strong>Except the bv 0.21–0.25 additions.</strong> The engine runs on bv v0.25.2, and the
+<p><strong>Except the bv 0.21–0.25 additions.</strong> The engine runs on bv v0.26.0, and the
 capabilities bv gained between 0.21 and 0.25 are mapped below with their real
 state. Built: the six new alert types with <code>suggested_action</code> and <code>labels</code>
 (engine, <code>vbx-cli</code> and the Alerts panel, vbx-fc7), <code>defer_until</code> in readiness
@@ -289,16 +289,15 @@ and <code>source_authority_incomplete</code> when any member dropped a record.</
 <code>--robot-insights</code>, because bv inlines <code>analysis.Insights</code>' untagged PascalCase
 fields at the top level, and <code>--robot-label-attention</code>, because bv projects a
 ranked subset where vbx returns the full result.</p>
-<p>Three known differences are declared too, on the <code>beads.db</code> form of the
-readiness fixture only (ADR-024): <code>data_hash</code> (and <code>scope_hash</code>, which hashes
-it) on <code>--robot-next</code>, <code>--robot-suggest</code>, <code>--robot-graph</code>, <code>--robot-capacity</code>
-and the three label commands, and the
-closed-time velocity in <code>--robot-label-health</code> and <code>--robot-triage</code>. bv 0.25.2
-reads a <code>br</code> database through a lossy fallback that drops <code>closed_at</code>, notes
-and design, and vbx deliberately does not copy it. Each is scoped to that
-fixture, that command and that exact path, printed as <code>declared</code> rather than
-as a match, compared normally on every JSONL fixture — and a declaration that
-stops firing fails the run.</p>
+<p>No difference is declared. Until bv 0.26 there were ADR-024's, on the
+<code>beads.db</code> fixtures: bv 0.25.2 read a <code>br</code> database through a lossy fallback
+that dropped <code>closed_at</code>, notes and design, so <code>data_hash</code> and the closed-time
+velocity differed by design. bv 0.26.0 reads every column, orders rows
+<code>updated_at DESC, id</code> and comments by <code>created_at, id</code>, and vbx's loader does
+the same, so both <code>beads.db</code> fixtures now match outright (vbx-rst). The
+mechanism stays: a declaration is scoped to one fixture, one command and one
+exact path, printed as <code>declared</code> rather than as a match — and one that stops
+firing fails the run.</p>
 <p>bv's <code>--label</code> is a global scope — the label's subgraph, its beads plus their
 direct dependency neighbours — so the harness also runs label-scoped commands
 over the demo. The engine applies that scope in one place (<code>Session.view</code>,
@@ -331,11 +330,14 @@ pairs; an unknown name and a missing path must be refused as bv refuses them
 (vbx-7d5) — <code>--robot-correlation-stats</code> too, whose output reads neither flag
 but whose recipe bv still resolves.</p>
 <p><code>--robot-diff</code>, <code>--robot-drift</code> and <code>--robot-forecast</code> are scoped too, in
-bv's shapes (vbx-9gl). The diff compares the whole revision with the scope's
-beads, tombstones dropped on both sides; drift is bv's <code>--check-drift
---robot-drift</code> — a fresh analysis of the scope against the saved baseline, no
-envelope, and the verdict as the exit code; the forecast estimates the scope's
-candidates, filtered by <code>--forecast-label</code> and <code>--forecast-sprint</code>. The harness
+bv's shapes (vbx-9gl). The diff scopes both sides alike, as bv 0.26 does —
+the revision's beads through the same selection as the current ones, cut to
+the candidates without a recipe (vbx-hj1) — tombstones dropped on both sides;
+drift is bv's <code>--check-drift --robot-drift</code> — a fresh analysis of the scope,
+with the source's readiness and the scope's candidates (vbx-e9j), against the
+saved baseline, no envelope, and the verdict as the exit code; the forecast
+estimates the scope's candidates, filtered by <code>--forecast-label</code> and
+<code>--forecast-sprint</code>. The harness
 builds a <code>history</code> workspace for the first two — a git repository with
 deterministic commits, and a baseline bv saves into it — and compares all three
 unscoped and under a label, an unknown label, recipes, and both. A second copy,
@@ -823,7 +825,7 @@ not been re-sequenced; treat them as intent, not as a claim about what exists.</
 <tbody>
 <tr>
 <td>Bead ↔ commit correlation (co-commit, explicit id, temporal author)</td>
-<td>History view — bv 0.25.2's own correlator, its git calls answered from the object store (ADR-027)</td>
+<td>History view — bv's own correlator, vendored at the engine's bv version, its git calls answered from the object store (ADR-027)</td>
 <td>Engine + Native</td>
 <td>5</td>
 </tr>

@@ -18,7 +18,7 @@ import (
 // bv's loader spawns trackers as part of reading: `loadSingleRepo` binds each
 // repository's beads to their origin (`loader.AttachIssueOrigins`, which runs
 // `br update --help`), and for a Dolt-backed repository it first refreshes the
-// export with `bd export`. Neither is optional in v0.25.2, and the App Sandbox
+// export with `bd export`. Neither is optional in v0.25.2 or v0.26.0, and the App Sandbox
 // forbids both — so the app cannot call it. See ADR-020 and BUGS.md,
 // 2026-10-01.
 //

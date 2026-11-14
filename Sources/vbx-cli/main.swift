@@ -21,7 +21,7 @@ import Foundation
 
 // MARK: - Robot command table
 
-/// What `--label` and `--recipe` do to a command. bv 0.25.2 applies both as
+/// What `--label` and `--recipe` do to a command. bv 0.26.0 applies both as
 /// one global scope (`scopeLoadedIssues`) after it loads issues and before
 /// any post-load handler runs, so the rule follows from where bv answers the
 /// command — read from `cmd/bv`, never assumed.
